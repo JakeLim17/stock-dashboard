@@ -60,49 +60,52 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [storageReady, setStorageReady] = useState(false);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bootedRef = useRef(false);
+  const watchCodesRef = useRef(watchCodes);
+  useEffect(() => {
+    watchCodesRef.current = watchCodes;
+  }, [watchCodes]);
   const refreshMs = resolveRefreshMs(snap);
 
-  const refresh = useCallback(
-    async (codes: string[] = watchCodes) => {
-      const query = encodeURIComponent(codes.join(","));
-      lastQueryRef.current = query;
+  // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
+  const refresh = useCallback(async (codes?: string[]) => {
+    const target = codes ?? watchCodesRef.current;
+    const query = encodeURIComponent(target.join(","));
+    lastQueryRef.current = query;
 
-      // 진행 중인 요청이 있으면 취소하고 새 요청만 살림
-      if (abortRef.current) abortRef.current.abort();
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
+    // 진행 중인 요청이 있으면 취소하고 새 요청만 살림
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
-      setRefreshing(true);
-      setError(null);
-      try {
-        const r = await fetch(`/api/snapshot?symbols=${query}`, {
-          cache: "no-store",
-          signal: ctrl.signal,
-        });
-        if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
-        const j = (await r.json()) as DashboardSnapshot;
-        if (lastQueryRef.current === query) {
-          setSnap(j);
-        }
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (abortRef.current === ctrl) {
-          abortRef.current = null;
-          setRefreshing(false);
-        }
+    setRefreshing(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/snapshot?symbols=${query}`, {
+        cache: "no-store",
+        signal: ctrl.signal,
+      });
+      if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
+      const j = (await r.json()) as DashboardSnapshot;
+      if (lastQueryRef.current === query) {
+        setSnap(j);
       }
-    },
-    [watchCodes]
-  );
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (abortRef.current === ctrl) {
+        abortRef.current = null;
+        setRefreshing(false);
+      }
+    }
+  }, []);
 
   // 관심종목 변경을 한 번에 모아서 처리: 칩은 즉시 업데이트, fetch는 debounce
   const commitWatch = useCallback(
@@ -129,19 +132,15 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     };
   }, []);
 
-  // 저장된 관심종목 불러오기
+  // 저장된 관심종목 불러오기 (마운트 1회만)
   useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        setStorageReady(true);
-        return;
-      }
+      if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        setStorageReady(true);
-        return;
-      }
+      if (!Array.isArray(parsed)) return;
       const normalized = normalizeWatchCodes(parsed as string[]);
       const current = normalizeWatchCodes(
         initial.primaries.map((p) => p.meta.code)
@@ -153,16 +152,15 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       }
     } catch {
       // ignore storage parse errors
-    } finally {
-      setStorageReady(true);
     }
-  }, [initial.primaries, refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // 관심종목 저장
+  // 관심종목 저장 (마운트 직후부터 watchCodes 변경 시마다)
   useEffect(() => {
-    if (!storageReady) return;
+    if (!bootedRef.current) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(watchCodes));
-  }, [watchCodes, storageReady]);
+  }, [watchCodes]);
 
   // 자동 새로고침
   useEffect(() => {
