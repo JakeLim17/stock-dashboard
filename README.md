@@ -1,36 +1,159 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 실시간 주식 대시보드
 
-## Getting Started
+개인용 실시간 투자 관제 대시보드.
+한국 반도체 3대장 (**삼성전자 / SK하이닉스 / 삼성전기**) 을 메인으로,
+**나스닥 선물 · SOX · 엔비디아 · 달러원 · VIX** 시장 지표와 뉴스를 한 화면에서 본다.
 
-First, run the development server:
+> 투자 판단 **보조**용 — 자동매매 X. 모든 결과는 사용자 책임.
+
+## 핵심 특징
+
+- **로컬 우선**: SQLite (`better-sqlite3`) 로 모든 데이터 저장. 외부 DB 없음
+- **풍부한 데이터, 심플한 화면**: 카드/패널 단위로 정보 분리
+- **룰 기반 신호**: `BUY / ADD / HOLD / WATCH / SELL` 5단계 + 과열도·매수우위 점수
+- **Provider 패턴**: Yahoo / KIS / 뉴스 RSS 각각 모듈화 — 나중에 교체 쉬움
+- **다크/라이트 토글**, 자동 새로고침 (60초), 빈상태/에러 처리
+
+## 빠른 시작
 
 ```bash
+npm install
+cp .env.example .env.local   # KIS 안 쓰면 그대로 비워둬도 됨
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# → http://localhost:9700
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+빌드 / 프로덕션:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build
+npm run start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 환경변수
 
-## Learn More
+| 키 | 필수 | 설명 |
+|---|---|---|
+| `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
+| `KIS_APP_SECRET` | 선택 | 동 시크릿 |
+| `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |
 
-To learn more about Next.js, take a look at the following resources:
+**비워두면 외인/기관 수급은 mock data로 표시** (UI 깨짐 방지). 시세·뉴스는 무료 소스만으로 정상 동작.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 디렉토리 구조
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+stock-dashboard/
+├── app/
+│   ├── page.tsx              # 서버 컴포넌트, 초기 스냅샷 SSR
+│   ├── layout.tsx            # 테마 FOUC 방지 스크립트
+│   ├── globals.css           # Tailwind v4 + 토큰
+│   └── api/
+│       ├── snapshot/         # GET  /api/snapshot  - 전체 스냅샷
+│       ├── news/             # GET  /api/news?refresh=1
+│       ├── history/          # GET  /api/history?code=...&range=1w|1m|3m
+│       └── refresh/          # POST /api/refresh    - 수동 새로고침
+├── components/
+│   ├── ui/{Card,Badge}.tsx   # 가벼운 자체 UI 키트
+│   ├── DashboardClient.tsx   # 전체 조립 + 60s polling
+│   ├── SummaryBar.tsx        # 상단 요약 바
+│   ├── StockCard.tsx         # 관심종목 카드
+│   ├── MarketPanel.tsx       # 시장 신호 패널
+│   ├── NewsPanel.tsx         # 호재/악재 필터 + 리스트
+│   ├── AnalysisBox.tsx       # 가장 큰 분석 결과 박스
+│   ├── PriceChart.tsx        # lightweight-charts
+│   └── ThemeToggle.tsx       # 다크/라이트 토글
+├── lib/
+│   ├── types.ts              # 도메인 타입 (SSOT)
+│   ├── symbols.ts            # 종목 메타
+│   ├── utils.ts              # 포맷/색상/cn
+│   ├── db.ts                 # SQLite 초기화 + 저장/조회
+│   ├── snapshot.ts           # 한 번에 전체 스냅샷 만들기
+│   ├── providers/
+│   │   ├── yahoo.ts          # 시세, historical, SMA/RSI
+│   │   ├── kis.ts            # 외인/기관 (stub)
+│   │   ├── news.ts           # Google News RSS (한국어+영어)
+│   │   ├── mock.ts           # KIS 없을 때 fallback
+│   │   └── index.ts          # 통합 export
+│   └── analyzer/
+│       └── rules.ts          # 룰 기반 점수화 → 신호 결정
+└── data/
+    └── stock.db              # 자동 생성 (gitignore)
+```
 
-## Deploy on Vercel
+## 데이터 흐름
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+[ /api/snapshot ]
+       │
+       ▼
+buildSnapshot()
+ ├─ fetchQuotesBatch(MARKET_INDICATORS)   ── 시장 지표 5개
+ ├─ Promise.all(PRIMARY_SYMBOLS.map → {
+ │    fetchQuote / fetchHistorical / fetchFlowOrMock
+ │    computeTech (SMA, RSI, 과열도)
+ │    analyze(rules)  → BUY / ADD / HOLD / WATCH / SELL
+ │ })
+ ├─ fetchAllNews()  → Google News RSS, sentiment 분류
+ └─ saveQuote / saveFlow / saveTech / saveAnalysis / saveNews
+       │
+       ▼
+DashboardClient (60s polling)
+ ├─ SummaryBar      ── 시간 · 분위기 · 반도체 과열 · 환율 · 뉴스 수
+ ├─ AnalysisBox     ── "지금 추격매수 위험" 같은 한 줄 결론
+ ├─ PriceChart      ── 1주/1개월/3개월 토글
+ ├─ MarketPanel     ── 지표 5종 상승/하락/주의
+ ├─ StockCard ×3    ── 가격·등락·수급·기술적·시그널
+ └─ NewsPanel       ── 호재/악재 필터
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 룰 기반 분석 (요약)
+
+`lib/analyzer/rules.ts` — 베이스 50점에서 룰 적중마다 `heat`(과열·위험) / `buy`(매수우위) 가감산.
+
+대표 룰:
+- 오늘 +4% 이상 급등 → heat +25, buy -10
+- RSI 75+ → heat +20
+- 외인 +500억 순매수 → buy +20
+- 미국 반도체(SOX+NVDA) 과열 → heat +10, buy -10
+- 환율 급등 → heat +10
+- VIX 25+ → heat +15
+
+**결정 매트릭스**:
+- `heat≥70 && buy≤35` → **SELL**
+- `heat≥65` → **WATCH**
+- `buy≥70 && heat≤50` → **BUY**
+- `buy≥55 && heat≤55` → **ADD**
+- 나머지 → **HOLD**
+
+## 확장 가이드
+
+- **새 종목 추가**: `lib/symbols.ts` 의 `PRIMARY_SYMBOLS` / `MARKET_INDICATORS` 에 한 줄
+- **새 데이터 소스**: `lib/providers/<name>.ts` 추가 후 `index.ts` 에 export. UI는 그대로
+- **AI 분석 모듈**: `lib/analyzer/` 아래에 `ai.ts` 추가 → `rules.ts` 결과와 합쳐 더 정교한 시그널
+- **알림(브라우저/슬랙)**: `DashboardClient` 의 polling 결과를 비교해 변동 시 알림
+
+## Vercel 배포
+
+```bash
+# 1) Vercel 대시보드에서 "New Project" → GitHub repo "stock-dashboard" import
+# 2) Framework Preset: Next.js (자동 감지)
+# 3) Build / Output / Install 기본값 그대로
+# 4) Environment Variables (선택)에 KIS 키 입력 (없어도 동작)
+#    - KIS_APP_KEY
+#    - KIS_APP_SECRET
+#    - KIS_BASE_URL  (예: https://openapivts.koreainvestment.com:29443 — 모의)
+# 5) Deploy
+```
+
+**Vercel 환경에선 SQLite가 자동으로 `:memory:` 로 전환**됩니다.
+- 화면 동작은 동일 (매 요청마다 Yahoo / RSS에서 새로 받아옴)
+- DB는 lambda 인스턴스 동안만 유효 (과거 기록 누적은 안 됨)
+- 영구 보관이 필요해지면 Vercel KV / Supabase / Turso 등으로 갈아끼우면 됨 (`lib/db.ts` 한 곳만)
+
+## 트러블슈팅
+
+- **better-sqlite3 빌드 실패** → `npm rebuild better-sqlite3`. macOS는 Xcode CLT 필요
+- **Yahoo가 일부 종목 null 반환** → 잠시 후 재시도. `errors` 영역에 표시됨
+- **뉴스가 비어 있음** → RSS 일시 차단. 네트워크/User-Agent 점검
+- **Vercel에서 함수 timeout** → `vercel.json` 의 `maxDuration` 조정 (기본 30초)

@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 로컬 SQLite 데이터
+/data/*.db
+/data/*.db-*
+
