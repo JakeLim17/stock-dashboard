@@ -62,6 +62,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [error, setError] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>("");
@@ -249,30 +250,14 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       {/* 요약 바 */}
       <SummaryBar snapshot={snap} lastUpdatedLabel={lastUpdated} />
 
-      {/* 관심종목 선택 + 카드 */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-medium tracking-wide uppercase text-muted-foreground">
-              관심 종목
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              최대 {MAX_WATCH}개 · 변경 후 잠시 뒤 자동 갱신
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => commitWatch(PRIMARY_SYMBOLS.map((s) => s.code))}
-            className="text-xs px-2.5 py-1 rounded-md border border-border bg-card hover:bg-muted transition-colors"
-          >
-            기본 3종목 복구
-          </button>
-        </div>
-
-        {/* 선택된 종목 칩 (X 버튼) */}
-        <div className="flex flex-wrap items-center gap-2">
+      {/* 관심종목 한 줄 도구바 + 확장형 검색 + 카드 */}
+      <section className="space-y-3">
+        <div className="flex items-center flex-wrap gap-2">
+          <span className="text-xs uppercase tracking-wider text-muted-foreground mr-1">
+            관심 종목
+          </span>
           {selectedSymbols.length === 0 ? (
-            <span className="text-xs text-muted-foreground">선택된 종목 없음</span>
+            <span className="text-xs text-muted-foreground">없음</span>
           ) : (
             selectedSymbols.map((s) => (
               <button
@@ -281,59 +266,94 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
                 onClick={() =>
                   commitWatch(watchCodes.filter((c) => c !== s.code))
                 }
-                className="group inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-full border bg-foreground text-background border-foreground hover:opacity-90 transition-opacity"
+                className="group inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border bg-foreground text-background border-foreground hover:opacity-90 transition-opacity"
               >
                 {s.name}
                 <X className="h-3 w-3 opacity-70 group-hover:opacity-100" />
               </button>
             ))
           )}
-          <span className="ml-auto text-xs text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => setSearchOpen((o) => !o)}
+            className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              searchOpen
+                ? "bg-accent/15 border-accent/40 text-accent"
+                : "bg-card border-border text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            <Plus className="h-3 w-3" />
+            종목 추가
+          </button>
+          <button
+            type="button"
+            onClick={() => commitWatch(PRIMARY_SYMBOLS.map((s) => s.code))}
+            className="text-xs px-2.5 py-1 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted transition-colors"
+          >
+            기본 복구
+          </button>
+          <span className="ml-auto text-xs text-muted-foreground tabular">
             {watchCodes.length}/{MAX_WATCH}
           </span>
         </div>
 
-        {/* 검색 + 후보 칩 */}
-        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
-          <div className="relative">
-            <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="종목명 또는 코드 검색 (예: 카카오, 005930)"
-              className="w-full h-9 pl-8 pr-3 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-accent/30"
-            />
+        {/* 확장형 검색 패널 */}
+        {searchOpen && (
+          <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="종목명 또는 코드 검색 (예: 카카오, 005930)"
+                className="w-full h-9 pl-8 pr-3 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+              {filteredCandidates.length === 0 ? (
+                <span className="text-xs text-muted-foreground py-2">
+                  {search.trim() ? "검색 결과 없음" : "추가할 후보 종목 없음"}
+                </span>
+              ) : (
+                filteredCandidates.map((s) => (
+                  <button
+                    key={s.code}
+                    type="button"
+                    disabled={reachedMax}
+                    onClick={() => commitWatch([...watchCodes, s.code])}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {s.name}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              {reachedMax ? (
+                <p className="text-[11px] text-warn">
+                  최대 {MAX_WATCH}개입니다. 위에서 하나 제거 후 추가하세요.
+                </p>
+              ) : (
+                <span className="text-[11px] text-muted-foreground">
+                  추가 가능 {MAX_WATCH - watchCodes.length}개
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setSearchOpen(false);
+                }}
+                className="text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                닫기
+              </button>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 max-h-44 overflow-y-auto pr-1">
-            {filteredCandidates.length === 0 ? (
-              <span className="text-xs text-muted-foreground py-2">
-                {search.trim()
-                  ? "검색 결과 없음"
-                  : "추가할 후보 종목 없음"}
-              </span>
-            ) : (
-              filteredCandidates.map((s) => (
-                <button
-                  key={s.code}
-                  type="button"
-                  disabled={reachedMax}
-                  onClick={() => commitWatch([...watchCodes, s.code])}
-                  className="inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-full border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <Plus className="h-3 w-3" />
-                  {s.name}
-                </button>
-              ))
-            )}
-          </div>
-          {reachedMax && (
-            <p className="text-[11px] text-warn">
-              관심종목이 {MAX_WATCH}개 가득 찼습니다. 추가하려면 위쪽에서 하나
-              제거하세요.
-            </p>
-          )}
-        </div>
+        )}
 
         {/* 종목 카드 grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
