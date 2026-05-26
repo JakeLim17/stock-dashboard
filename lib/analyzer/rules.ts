@@ -29,9 +29,15 @@ interface RuleHit {
   good: boolean; // 화면 노출용 (긍정/부정)
 }
 
+function isRegularMarket(marketState?: string): boolean {
+  return (marketState ?? "").toUpperCase() === "REGULAR";
+}
+
 function evaluateRules(input: AnalyzeInput): RuleHit[] {
   const { quote, tech, flow, context } = input;
   const hits: RuleHit[] = [];
+  const flowWeight = flow.source === "mock" ? 0.35 : 1;
+  const flowSuffix = flow.source === "mock" ? " (mock 가중치 축소)" : "";
 
   // 1) 단기 등락률
   const r = quote.changeRate;
@@ -55,16 +61,16 @@ function evaluateRules(input: AnalyzeInput): RuleHit[] {
 
   // 4) 외인 수급
   if (flow.foreignNet != null) {
-    if (flow.foreignNet > 5e10) hits.push({ label: "외인 +500억 이상 순매수", heat: -5, buy: 20, good: true });
-    else if (flow.foreignNet > 1e10) hits.push({ label: "외인 순매수", heat: 0, buy: 10, good: true });
-    else if (flow.foreignNet < -5e10) hits.push({ label: "외인 -500억 이상 순매도", heat: 5, buy: -20, good: false });
-    else if (flow.foreignNet < -1e10) hits.push({ label: "외인 순매도", heat: 5, buy: -10, good: false });
+    if (flow.foreignNet > 5e10) hits.push({ label: `외인 +500억 이상 순매수${flowSuffix}`, heat: Math.round(-5 * flowWeight), buy: Math.round(20 * flowWeight), good: true });
+    else if (flow.foreignNet > 1e10) hits.push({ label: `외인 순매수${flowSuffix}`, heat: 0, buy: Math.round(10 * flowWeight), good: true });
+    else if (flow.foreignNet < -5e10) hits.push({ label: `외인 -500억 이상 순매도${flowSuffix}`, heat: Math.round(5 * flowWeight), buy: Math.round(-20 * flowWeight), good: false });
+    else if (flow.foreignNet < -1e10) hits.push({ label: `외인 순매도${flowSuffix}`, heat: Math.round(5 * flowWeight), buy: Math.round(-10 * flowWeight), good: false });
   }
 
   // 5) 기관 수급
   if (flow.institutionNet != null) {
-    if (flow.institutionNet > 3e10) hits.push({ label: "기관 순매수", heat: 0, buy: 10, good: true });
-    else if (flow.institutionNet < -3e10) hits.push({ label: "기관 순매도", heat: 0, buy: -10, good: false });
+    if (flow.institutionNet > 3e10) hits.push({ label: `기관 순매수${flowSuffix}`, heat: 0, buy: Math.round(10 * flowWeight), good: true });
+    else if (flow.institutionNet < -3e10) hits.push({ label: `기관 순매도${flowSuffix}`, heat: 0, buy: Math.round(-10 * flowWeight), good: false });
   }
 
   // 6) 시장 컨텍스트 — 반도체 종목은 SOX/NVDA에 민감
@@ -90,12 +96,22 @@ function clamp(n: number, lo = 0, hi = 100) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function decideSignal(heat: number, buy: number): SignalStatus {
-  // 매트릭스 기반 결정
-  if (heat >= 70 && buy <= 35) return "SELL";
-  if (heat >= 65) return "WATCH";
-  if (buy >= 70 && heat <= 50) return "BUY";
-  if (buy >= 55 && heat <= 55) return "ADD";
+function decideSignal(heat: number, buy: number, marketState?: string): SignalStatus {
+  // 장중/비장중 임계값을 분리해 과한 신호를 줄인다.
+  if (isRegularMarket(marketState)) {
+    if (heat >= 70 && buy <= 35) return "SELL";
+    if (heat >= 65) return "WATCH";
+    if (buy >= 70 && heat <= 50) return "BUY";
+    if (buy >= 55 && heat <= 55) return "ADD";
+    if (buy <= 35 && heat <= 45) return "WATCH";
+    return "HOLD";
+  }
+
+  // 비장중(종가/시간외 기준)은 신호를 더 보수적으로 판정.
+  if (heat >= 72 && buy <= 32) return "SELL";
+  if (heat >= 62) return "WATCH";
+  if (buy >= 78 && heat <= 45) return "BUY";
+  if (buy >= 62 && heat <= 52) return "ADD";
   if (buy <= 35 && heat <= 45) return "WATCH";
   return "HOLD";
 }
@@ -128,8 +144,11 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   heat = clamp(heat);
   buy = clamp(buy);
 
-  const signal = decideSignal(heat, buy);
-  const headline = headlineFor(signal, heat, buy);
+  const signal = decideSignal(heat, buy, input.quote.marketState);
+  const headlineBase = headlineFor(signal, heat, buy);
+  const headline = isRegularMarket(input.quote.marketState)
+    ? headlineBase
+    : `${headlineBase} (비장중 기준)`;
 
   // 사용자에게 보일 근거 3줄: 영향이 큰 순서로
   const reasons = hits
@@ -138,9 +157,13 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     .slice(0, 3)
     .map((h) => `${h.good ? "+ " : "− "}${h.label}`);
 
+  if (!isRegularMarket(input.quote.marketState)) {
+    reasons.unshift("− 비장중 데이터라 신호를 보수적으로 판정");
+  }
+
   if (reasons.length === 0) reasons.push("특이 신호 없음");
 
-  return { signal, heatScore: heat, buyScore: buy, headline, reasons };
+  return { signal, heatScore: heat, buyScore: buy, headline, reasons: reasons.slice(0, 3) };
 }
 
 // 시장 분위기 라벨링 (강세/중립/약세)

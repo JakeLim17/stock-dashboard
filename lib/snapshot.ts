@@ -9,17 +9,21 @@ import {
 } from "./providers";
 import { analyze, marketMoodLabel } from "./analyzer";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
-import { PRIMARY_SYMBOLS, MARKET_INDICATORS } from "./symbols";
+import { PRIMARY_SYMBOLS, MARKET_INDICATORS, resolveWatchSymbols } from "./symbols";
 import type {
   DashboardSnapshot,
   MarketIndicator,
   NewsItem,
+  SymbolMeta,
   StockSnapshot,
 } from "./types";
 
 // 메인 대시보드 1회 분의 스냅샷을 만든다. 실패한 부분은 errors 맵에 기록하고 가능한 부분은 채워서 반환.
-export async function buildSnapshot(): Promise<DashboardSnapshot> {
+export async function buildSnapshot(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code)
+): Promise<DashboardSnapshot> {
   const errors: Record<string, string> = {};
+  const watchSymbols: SymbolMeta[] = resolveWatchSymbols(requestedSymbols);
 
   // 1) 시장 지표 먼저 (분석 컨텍스트로 필요)
   const indicatorResults = await fetchQuotesBatch(MARKET_INDICATORS);
@@ -65,7 +69,7 @@ export async function buildSnapshot(): Promise<DashboardSnapshot> {
   // 2) 관심 종목 — quote, historical, flow 병렬
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
-    PRIMARY_SYMBOLS.map(async (meta) => {
+    watchSymbols.map(async (meta) => {
       const [quoteRes, hist, flowRes] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
@@ -93,7 +97,7 @@ export async function buildSnapshot(): Promise<DashboardSnapshot> {
     if (r.status === "fulfilled") {
       primaries.push(r.value);
     } else {
-      errors[PRIMARY_SYMBOLS[i].code] =
+      errors[watchSymbols[i].code] =
         r.reason instanceof Error ? r.reason.message : String(r.reason);
     }
   }

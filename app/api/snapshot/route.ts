@@ -4,9 +4,17 @@ import { buildSnapshot } from "@/lib/snapshot";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const snap = await buildSnapshot();
+    const url = new URL(req.url);
+    const symbolsParam = url.searchParams.get("symbols") ?? "";
+    const symbols = symbolsParam
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    const snap = await buildSnapshot(symbols);
     return NextResponse.json(snap, {
       headers: { "Cache-Control": "no-store" },
     });

@@ -7,6 +7,17 @@ export const PRIMARY_SYMBOLS: SymbolMeta[] = [
   { code: "009150.KS", name: "삼성전기", kind: "kr-stock", primary: true },
 ];
 
+// 관심종목 선택 UI에서 고를 수 있는 후보군 (최대 8개 권장)
+export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
+  ...PRIMARY_SYMBOLS,
+  { code: "373220.KS", name: "LG에너지솔루션", kind: "kr-stock" },
+  { code: "005380.KS", name: "현대차", kind: "kr-stock" },
+  { code: "035420.KS", name: "NAVER", kind: "kr-stock" },
+  { code: "251270.KS", name: "넷마블", kind: "kr-stock" },
+  { code: "042700.KS", name: "한미반도체", kind: "kr-stock" },
+  { code: "012450.KS", name: "한화에어로스페이스", kind: "kr-stock" },
+];
+
 // 시장 지표 패널
 export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "NQ=F", name: "나스닥 선물", kind: "future" },
@@ -25,4 +36,13 @@ export function toKisCode(code: string): string | null {
 // 화면용 키 (URL safe)
 export function toSlug(code: string): string {
   return code.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+export function resolveWatchSymbols(codes: string[]): SymbolMeta[] {
+  const map = new Map(WATCHLIST_CANDIDATES.map((s) => [s.code, s]));
+  const uniq = Array.from(new Set(codes))
+    .map((c) => map.get(c))
+    .filter((v): v is SymbolMeta => !!v)
+    .slice(0, 8);
+  return uniq.length > 0 ? uniq : PRIMARY_SYMBOLS;
 }
