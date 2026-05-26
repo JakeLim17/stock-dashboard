@@ -21,7 +21,7 @@ const REGULAR_REFRESH_MS = 10_000; // Yahoo 기반 장중 10초
 const OFF_HOURS_REFRESH_MS = 120_000; // Yahoo 기반 비장중 120초
 const KIS_REGULAR_REFRESH_MS = 2_000; // KIS 실데이터 장중 2초
 const KIS_OFF_HOURS_REFRESH_MS = 30_000; // KIS 실데이터 비장중 30초
-const COMMIT_DEBOUNCE_MS = 400; // 연속 칩 토글 시 마지막 변경만 fetch
+const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
 
 const CANDIDATE_CODES = new Set(WATCHLIST_CANDIDATES.map((s) => s.code));
@@ -63,30 +63,41 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [storageReady, setStorageReady] = useState(false);
   const [search, setSearch] = useState("");
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
-  const inFlightRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const lastQueryRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshMs = resolveRefreshMs(snap);
 
   const refresh = useCallback(
     async (codes: string[] = watchCodes) => {
-      // 짧은 주기에서도 중복 요청이 쌓이지 않게 보호
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
+      const query = encodeURIComponent(codes.join(","));
+      lastQueryRef.current = query;
+
+      // 진행 중인 요청이 있으면 취소하고 새 요청만 살림
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       setRefreshing(true);
       setError(null);
       try {
-        const query = encodeURIComponent(codes.join(","));
         const r = await fetch(`/api/snapshot?symbols=${query}`, {
           cache: "no-store",
+          signal: ctrl.signal,
         });
         if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
         const j = (await r.json()) as DashboardSnapshot;
-        setSnap(j);
+        if (lastQueryRef.current === query) {
+          setSnap(j);
+        }
       } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setRefreshing(false);
-        inFlightRef.current = false;
+        if (abortRef.current === ctrl) {
+          abortRef.current = null;
+          setRefreshing(false);
+        }
       }
     },
     [watchCodes]
@@ -109,10 +120,11 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     [refresh]
   );
 
-  // 언마운트 시 debounce 정리
+  // 언마운트 시 debounce / 진행중 fetch 정리
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) abortRef.current.abort();
     };
   }, []);
 
