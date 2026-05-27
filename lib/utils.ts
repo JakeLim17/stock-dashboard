@@ -57,7 +57,7 @@ export function marketStateLabel(state?: string): {
 } {
   switch ((state ?? "").toUpperCase()) {
     case "REGULAR":
-      return { label: "장중", variant: "good", hint: "실시간 (15분 지연)" };
+      return { label: "장중", variant: "good", hint: "실시간" };
     case "PRE":
       return {
         label: "장전 단일가",
