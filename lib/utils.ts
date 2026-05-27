@@ -117,6 +117,29 @@ export function extendedSessionLabel(session: string): string {
   }
 }
 
+// 카드 헤더용 통합 시장 상태 라벨.
+// 시간외 거래가 활성이면 marketState가 CLOSED여도 "장외 거래중"으로 덮어쓴다.
+// 카드의 메인 가격은 항상 정규장 종가이므로, 사용자가 헤더만 보고
+// "지금은 장이 닫혀 시간외만 돈다"는 사실을 즉시 알 수 있게 한다.
+export function marketDisplayLabel(quote: {
+  marketState?: string;
+  extendedHours?: { active?: boolean; session: string } | null;
+}): {
+  label: string;
+  variant: "good" | "neutral" | "warn";
+  hint?: string;
+} {
+  const ext = quote.extendedHours;
+  if (ext?.active) {
+    return {
+      label: "장외 거래중",
+      variant: "good",
+      hint: extendedSessionLabel(ext.session),
+    };
+  }
+  return marketStateLabel(quote.marketState);
+}
+
 // 안전한 fetch with timeout
 export async function safeFetch(
   url: string,

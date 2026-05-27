@@ -10,7 +10,7 @@ import {
   fmtPercent,
   fmtSigned,
   fmtTime,
-  marketStateLabel,
+  marketDisplayLabel,
   priceTimeLabel,
 } from "@/lib/utils";
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
@@ -42,7 +42,7 @@ export function StockCard({ snap, onSelect, selected }: {
     quote.changeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
     <Minus className="h-4 w-4" />;
 
-  const market = marketStateLabel(quote.marketState);
+  const market = marketDisplayLabel(quote);
   const ext = quote.extendedHours ?? null;
 
   return (
@@ -76,7 +76,8 @@ export function StockCard({ snap, onSelect, selected }: {
             </div>
             {quote.priceTime && (
               <div className="text-[11px] text-muted-foreground mt-1 tabular">
-                기준 {priceTimeLabel(quote.priceTime)}
+                {ext ? "정규장 종가 · " : "기준 "}
+                {priceTimeLabel(quote.priceTime)}
               </div>
             )}
           </div>

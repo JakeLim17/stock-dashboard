@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
-import { changeColor, fmtNumber, fmtPercent, marketStateLabel } from "@/lib/utils";
+import { changeColor, fmtNumber, fmtPercent, marketDisplayLabel } from "@/lib/utils";
 import { Activity, AlertTriangle, Newspaper } from "lucide-react";
 
 interface Props {
@@ -16,9 +16,11 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
   const nq = snapshot.indicators.find((i) => i.code === "NQ=F");
   const newsCount = snapshot.news.length;
   const mood = snapshot.marketMood;
-  // 한국장 상태는 첫번째 관심종목의 marketState 기준
-  const krState = snapshot.primaries[0]?.quote.marketState;
-  const krMarket = marketStateLabel(krState);
+  // 한국장 상태는 한국 종목 중 첫 번째 quote 기준 (시간외 활성도 함께 반영)
+  const krQuote =
+    snapshot.primaries.find((p) => p.meta.kind === "kr-stock")?.quote ??
+    snapshot.primaries[0]?.quote;
+  const krMarket = marketDisplayLabel(krQuote ?? {});
 
   return (
     <div className="bg-card border border-border rounded-2xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3 shadow-sm">
