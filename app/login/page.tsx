@@ -106,10 +106,6 @@ function LoginInner() {
           )}
           들어가기
         </button>
-
-        <p className="text-[11px] text-muted-foreground text-center">
-          공개 사이트 보호용 · 비밀번호는 환경변수 DASHBOARD_PASS로 관리
-        </p>
       </form>
     </div>
   );
