@@ -5,9 +5,11 @@ import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import {
   changeColor,
+  extendedSessionLabel,
   fmtNumber,
   fmtPercent,
   fmtSigned,
+  fmtTime,
   marketStateLabel,
   priceTimeLabel,
 } from "@/lib/utils";
@@ -41,6 +43,7 @@ export function StockCard({ snap, onSelect, selected }: {
     <Minus className="h-4 w-4" />;
 
   const market = marketStateLabel(quote.marketState);
+  const ext = quote.extendedHours ?? null;
 
   return (
     <Card
@@ -82,6 +85,31 @@ export function StockCard({ snap, onSelect, selected }: {
             <div>저가 <span className="tabular text-foreground">{fmtNumber(quote.low, 0)}</span></div>
           </div>
         </div>
+
+        {/* 시간외(프리/애프터/한국 시간외 단일가) 가격 */}
+        {ext && (
+          <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs">
+              <Badge variant={ext.active ? "good" : "neutral"} size="sm">
+                {extendedSessionLabel(ext.session)}
+                {ext.active ? " · 거래중" : ""}
+              </Badge>
+              {ext.time && (
+                <span className="text-muted-foreground tabular">
+                  {fmtTime(ext.time)}
+                </span>
+              )}
+            </div>
+            <div className="text-right">
+              <div className={`tabular text-base font-semibold ${changeColor(ext.changeRate)}`}>
+                {fmtNumber(ext.price, 0)}
+              </div>
+              <div className={`tabular text-[11px] ${changeColor(ext.changeRate)}`}>
+                {fmtSigned(ext.changeAbs)} ({fmtPercent(ext.changeRate)})
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 핵심 지표 그리드 */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-border pt-3">

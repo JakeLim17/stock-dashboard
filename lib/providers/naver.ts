@@ -1,5 +1,5 @@
 import "server-only";
-import type { Quote } from "../types";
+import type { ExtendedHoursQuote, Quote } from "../types";
 
 /**
  * 네이버 금융 모바일 API를 이용한 실시간 한국 주식 시세 조회.
@@ -8,6 +8,10 @@ import type { Quote } from "../types";
  */
 
 const NAVER_API_BASE = "https://m.stock.naver.com/api/stock";
+// PC 네이버 금융의 실시간 polling 엔드포인트.
+// basic 응답에는 없는 overMarketPriceInfo(시간외 단일가)가 들어 있어 보조로 사용.
+const NAVER_POLLING_BASE =
+  "https://polling.finance.naver.com/api/realtime/domestic/stock";
 const USER_AGENT =
   "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
@@ -20,6 +24,32 @@ interface NaverBasicResponse {
   marketStatus?: string;
   localTradedAt?: string;
   stockExchangeType?: { code?: string };
+}
+
+// polling.finance.naver.com 응답 일부 (시간외 정보)
+interface NaverOverMarketPriceInfo {
+  // "BEFORE_MARKET" | "AFTER_MARKET" | ...
+  tradingSessionType?: string;
+  // "OPEN" | "CLOSE"
+  overMarketStatus?: string;
+  // 시간외 체결가 (원, 천단위 콤마)
+  overPrice?: string;
+  // 전일 종가 대비 변화 (정규장 종가가 아님에 주의: 네이버는 전일 종가 기준으로 줌)
+  compareToPreviousClosePrice?: string;
+  compareToPreviousPrice?: { name?: string };
+  fluctuationsRatio?: string;
+  localTradedAt?: string;
+}
+
+interface NaverPollingData {
+  closePrice?: string;
+  marketStatus?: string;
+  localTradedAt?: string;
+  overMarketPriceInfo?: NaverOverMarketPriceInfo | null;
+}
+
+interface NaverPollingResponse {
+  datas?: NaverPollingData[];
 }
 
 interface NaverTotalInfo {
@@ -74,13 +104,20 @@ export async function fetchNaverQuote(
   if (!naverCode) return null;
 
   try {
-    const [basicRes, integrationRes] = await Promise.all([
+    const [basicRes, integrationRes, pollingRes] = await Promise.all([
       fetch(`${NAVER_API_BASE}/${naverCode}/basic`, {
         headers: { "User-Agent": USER_AGENT },
         next: { revalidate: 0 },
       }),
       fetch(`${NAVER_API_BASE}/${naverCode}/integration`, {
         headers: { "User-Agent": USER_AGENT },
+        next: { revalidate: 0 },
+      }),
+      fetch(`${NAVER_POLLING_BASE}/${naverCode}`, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Referer: "https://finance.naver.com/",
+        },
         next: { revalidate: 0 },
       }),
     ]);
@@ -91,6 +128,9 @@ export async function fetchNaverQuote(
     const integration: NaverIntegrationResponse = integrationRes.ok
       ? await integrationRes.json()
       : { totalInfos: [] };
+    const polling: NaverPollingResponse = pollingRes.ok
+      ? await pollingRes.json()
+      : {};
 
     const price = parseNaverNumber(basic.closePrice);
     if (price == null) return null;
@@ -126,6 +166,11 @@ export async function fetchNaverQuote(
     else if (marketStatus === "CLOSE") marketState = "CLOSED";
     else marketState = marketStatus;
 
+    const extendedHours = extractKoreanExtended(
+      polling.datas?.[0]?.overMarketPriceInfo,
+      prevClose
+    );
+
     return {
       code,
       name,
@@ -141,10 +186,47 @@ export async function fetchNaverQuote(
       fetchedAt: Date.now(),
       marketState,
       priceTime,
+      extendedHours,
     };
   } catch {
     return null;
   }
+}
+
+// 네이버의 overMarketPriceInfo → ExtendedHoursQuote 변환
+//  - tradingSessionType: BEFORE_MARKET(장전 시간외) / AFTER_MARKET(장후 시간외·앱장)
+//  - 변동률은 정규장 종가 기준이 아니라 네이버가 주는 fluctuationsRatio(전일 종가 기준)을 그대로 사용
+function extractKoreanExtended(
+  info: NaverOverMarketPriceInfo | null | undefined,
+  prevClose: number
+): ExtendedHoursQuote | null {
+  if (!info) return null;
+  const price = parseNaverNumber(info.overPrice);
+  if (price == null) return null;
+
+  const isDown = info.compareToPreviousPrice?.name === "FALLING";
+  const rawAbs = parseNaverNumber(info.compareToPreviousClosePrice);
+  const abs = rawAbs != null ? (isDown ? -Math.abs(rawAbs) : Math.abs(rawAbs)) : 0;
+
+  const rawRate = parseNaverNumber(info.fluctuationsRatio);
+  const rate =
+    rawRate != null
+      ? (isDown ? -Math.abs(rawRate) : Math.abs(rawRate)) / 100
+      : prevClose
+        ? abs / prevClose
+        : 0;
+
+  const session: ExtendedHoursQuote["session"] =
+    info.tradingSessionType === "BEFORE_MARKET" ? "kr-before" : "kr-after";
+
+  return {
+    session,
+    price,
+    changeAbs: abs,
+    changeRate: rate,
+    time: info.localTradedAt ? new Date(info.localTradedAt).getTime() : null,
+    active: info.overMarketStatus === "OPEN",
+  };
 }
 
 export function isKrStock(code: string): boolean {

@@ -14,6 +14,26 @@ export interface SymbolMeta {
   primary?: boolean;
 }
 
+// 시간외 거래 세션
+//  - pre        : 미국 프리마켓 (Yahoo)
+//  - post       : 미국 애프터마켓 (Yahoo)
+//  - kr-after   : 한국 정규장 종료 후 시간외 단일가 / 앱장 (네이버)
+//  - kr-before  : 한국 장전 시간외 단일가 (네이버)
+export type ExtendedSession = "pre" | "post" | "kr-after" | "kr-before";
+
+export interface ExtendedHoursQuote {
+  session: ExtendedSession;
+  // 시간외 체결가
+  price: number;
+  // 비교 기준값(정규장 종가) 대비 변화
+  changeAbs: number;
+  changeRate: number; // 0.0123 = +1.23%
+  // 마지막 체결 시각 (epoch ms)
+  time?: number | null;
+  // 현재 세션이 거래중인지(OPEN), 마감(CLOSE) 여부
+  active?: boolean;
+}
+
 export interface Quote {
   code: string;
   name: string;
@@ -31,6 +51,8 @@ export interface Quote {
   marketState?: string;
   // 가격이 마지막으로 갱신된 시각 (epoch sec → ms 변환). null이면 모름.
   priceTime?: number | null;
+  // 정규장 외 거래 정보 (있을 때만 채움)
+  extendedHours?: ExtendedHoursQuote | null;
 }
 
 export interface FlowData {

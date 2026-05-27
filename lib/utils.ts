@@ -101,6 +101,22 @@ export function priceTimeLabel(priceTime?: number | null): string {
   return `${d.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} ${d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+// 시간외/프리/애프터마켓 세션 라벨
+export function extendedSessionLabel(session: string): string {
+  switch (session) {
+    case "pre":
+      return "프리마켓";
+    case "post":
+      return "애프터마켓";
+    case "kr-before":
+      return "장전 시간외";
+    case "kr-after":
+      return "시간외 단일가";
+    default:
+      return "시간외";
+  }
+}
+
 // 안전한 fetch with timeout
 export async function safeFetch(
   url: string,

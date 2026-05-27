@@ -1,6 +1,6 @@
 import "server-only";
 import YahooFinance from "yahoo-finance2";
-import type { Quote, TechIndicators } from "../types";
+import type { ExtendedHoursQuote, Quote, TechIndicators } from "../types";
 
 // yahoo-finance2 v3는 인스턴스 기반. survey/historical 안내 로그 끄기.
 const yahooFinance = new YahooFinance({
@@ -31,8 +31,11 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
   // Yahoo는 changePercent를 % 단위 (1.23 = 1.23%)로 줌. 우리는 0.0123 형식 사용.
   const changeRate = rate != null ? rate / 100 : prev ? abs / prev : 0;
 
-  // Yahoo가 시간외 가격을 따로 줄 때는 그것도 함께 노출 (미국 종목 위주).
-  const priceTimeSec = num(q.regularMarketTime);
+  // regularMarketTime은 라이브러리가 보통 Date 객체로 변환해서 줌. 안전하게 둘 다 처리.
+  const priceTime = toEpochMs(q.regularMarketTime);
+
+  const marketState = str(q.marketState);
+  const extendedHours = extractExtended(q, marketState, price);
 
   return {
     code,
@@ -47,9 +50,69 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
     marketCap: num(q.marketCap),
     currency: str(q.currency),
     fetchedAt: Date.now(),
-    marketState: str(q.marketState),
-    priceTime: priceTimeSec != null ? priceTimeSec * 1000 : null,
+    marketState,
+    priceTime,
+    extendedHours,
   };
+}
+
+// Yahoo 응답에서 프리/애프터마켓 가격을 ExtendedHoursQuote로 정규화.
+// 기준값은 항상 정규장 종가(regularMarketPrice). Yahoo가 주는 changePercent는 % 단위.
+function extractExtended(
+  q: RawRecord,
+  marketState: string | undefined,
+  regularPrice: number
+): ExtendedHoursQuote | null {
+  const state = (marketState ?? "").toUpperCase();
+
+  // 프리마켓: PRE 또는 PREPRE에서 preMarketPrice가 있으면 채움
+  if ((state === "PRE" || state === "PREPRE") && num(q.preMarketPrice) != null) {
+    const price = num(q.preMarketPrice) as number;
+    const abs = num(q.preMarketChange) ?? price - regularPrice;
+    const ratePct = num(q.preMarketChangePercent);
+    const rate = ratePct != null ? ratePct / 100 : regularPrice ? abs / regularPrice : 0;
+    return {
+      session: "pre",
+      price,
+      changeAbs: abs,
+      changeRate: rate,
+      time: toEpochMs(q.preMarketTime),
+      active: state === "PRE",
+    };
+  }
+
+  // 애프터마켓: POST 또는 POSTPOST에서 postMarketPrice가 있으면 채움
+  if ((state === "POST" || state === "POSTPOST") && num(q.postMarketPrice) != null) {
+    const price = num(q.postMarketPrice) as number;
+    const abs = num(q.postMarketChange) ?? price - regularPrice;
+    const ratePct = num(q.postMarketChangePercent);
+    const rate = ratePct != null ? ratePct / 100 : regularPrice ? abs / regularPrice : 0;
+    return {
+      session: "post",
+      price,
+      changeAbs: abs,
+      changeRate: rate,
+      time: toEpochMs(q.postMarketTime),
+      active: state === "POST",
+    };
+  }
+
+  return null;
+}
+
+// Date | number(sec or ms) | string → epoch ms
+function toEpochMs(v: unknown): number | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "number" && Number.isFinite(v)) {
+    // Yahoo는 보통 초 단위. 10자리면 sec, 13자리면 ms로 추정.
+    return v > 1e12 ? v : v * 1000;
+  }
+  if (typeof v === "string") {
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
 }
 
 export async function fetchQuotesBatch(
