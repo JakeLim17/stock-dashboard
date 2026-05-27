@@ -40,8 +40,8 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   const isRegular = snapshot.primaries.some(
     (p) => (p.quote.marketState ?? "").toUpperCase() === "REGULAR"
   );
-  const hasKis = snapshot.primaries.some((p) => p.flow.source === "kis");
-  if (hasKis) {
+  const hasRealFlow = snapshot.primaries.some((p) => p.flow.source === "kis");
+  if (hasRealFlow) {
     return isRegular ? KIS_REGULAR_REFRESH_MS : KIS_OFF_HOURS_REFRESH_MS;
   }
   return isRegular ? REGULAR_REFRESH_MS : OFF_HOURS_REFRESH_MS;
@@ -186,12 +186,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const selectedSnap =
     snap.primaries.find((p) => p.meta.code === selected) ?? snap.primaries[0];
 
-  const feedMode = snap.primaries.some((p) => p.flow.source === "kis")
-    ? "KIS"
-    : "Yahoo";
   const lastUpdated = `${fmtRelative(snap.generatedAt)} 업데이트 · 자동 ${
     refreshMs / 1000
-  }초 (${feedMode})`;
+  }초`;
 
   // 검색 결과 후보 (선택되지 않은 항목만)
   const filteredCandidates = useMemo(() => {
@@ -410,7 +407,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       )}
 
       <footer className="text-center text-xs text-muted-foreground py-4">
-        데이터: Yahoo Finance · Google News · (KIS 옵션) — 투자 판단 보조용.
+        데이터: Naver Finance · Yahoo Finance · Google News — 투자 판단 보조용.
         본인 책임.
       </footer>
     </div>

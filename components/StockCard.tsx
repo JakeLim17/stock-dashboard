@@ -11,7 +11,7 @@ import {
   marketStateLabel,
   priceTimeLabel,
 } from "@/lib/utils";
-import { TrendingDown, TrendingUp, Minus, FlaskConical } from "lucide-react";
+import { TrendingDown, TrendingUp, Minus } from "lucide-react";
 
 const SIGNAL_LABEL: Record<string, string> = {
   BUY: "신규 매수",
@@ -41,7 +41,6 @@ export function StockCard({ snap, onSelect, selected }: {
     <Minus className="h-4 w-4" />;
 
   const market = marketStateLabel(quote.marketState);
-  const flowIsMock = flow.source === "mock";
 
   return (
     <Card
@@ -89,31 +88,16 @@ export function StockCard({ snap, onSelect, selected }: {
           <Row label="거래량" value={fmtNumber(quote.volume)} />
           <Row label="RSI(14)" value={tech.rsi14 != null ? tech.rsi14.toFixed(0) : "—"} />
           <Row
-            label={
-              <span className="inline-flex items-center gap-1">
-                외인 순매수
-                {flowIsMock && <FlaskConical className="h-3 w-3 text-warn" />}
-              </span>
-            }
+            label="외인 순매수"
             value={flowLabel(flow.foreignNet)}
             color={flow.foreignNet != null ? changeColor(flow.foreignNet) : undefined}
           />
           <Row
-            label={
-              <span className="inline-flex items-center gap-1">
-                기관 순매수
-                {flowIsMock && <FlaskConical className="h-3 w-3 text-warn" />}
-              </span>
-            }
+            label="기관 순매수"
             value={flowLabel(flow.institutionNet)}
             color={flow.institutionNet != null ? changeColor(flow.institutionNet) : undefined}
           />
         </div>
-        {flowIsMock && (
-          <div className="text-[11px] text-warn -mt-2 flex items-center gap-1">
-            <FlaskConical className="h-3 w-3" /> 외인/기관은 예측치 (KIS 키 연결 시 실데이터 전환)
-          </div>
-        )}
 
         {/* 시그널 + 한줄 헤드라인 */}
         <div className="border-t border-border pt-3 space-y-2">
