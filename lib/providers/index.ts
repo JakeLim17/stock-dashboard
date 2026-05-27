@@ -1,6 +1,6 @@
 import "server-only";
 import { fetchQuote as fetchYahooQuote, fetchQuotesBatch as fetchYahooQuotesBatch, fetchHistorical, computeTech } from "./yahoo";
-import { fetchNaverQuote, isKrStock } from "./naver";
+import { fetchNaverQuote, fetchNaverFlow, isKrStock } from "./naver";
 import { fetchFlow, kisEnabled } from "./kis";
 import { mockFlow } from "./mock";
 import type { FlowData, Quote } from "../types";
@@ -35,18 +35,34 @@ async function fetchQuotesBatch(
 export { fetchQuote, fetchQuotesBatch, fetchHistorical, computeTech };
 export { fetchAllNews, riskKeywords } from "./news";
 
-// 외인/기관 수급: KIS 활성화면 실제, 아니면 mock (UI 깨짐 방지용).
-export async function fetchFlowOrMock(code: string): Promise<{
+// 외인/기관 수급: Naver > KIS > mock 순으로 시도.
+export async function fetchFlowOrMock(
+  code: string,
+  currentPrice?: number
+): Promise<{
   flow: FlowData;
-  source: "kis" | "mock";
+  source: "naver" | "kis" | "mock";
 }> {
+  // 1) 한국 종목이면 Naver에서 수급 시도
+  if (isKrStock(code) && currentPrice) {
+    const naverFlow = await fetchNaverFlow(code, currentPrice);
+    if (naverFlow && (naverFlow.foreignNet != null || naverFlow.institutionNet != null)) {
+      return {
+        flow: { ...naverFlow, source: "kis" as const },
+        source: "naver",
+      };
+    }
+  }
+
+  // 2) KIS 활성화면 KIS 시도
   if (kisEnabled()) {
     const flow = await fetchFlow(code);
-    // KIS가 null만 돌려주면 mock fallback
     if (flow.foreignNet != null || flow.institutionNet != null) {
       return { flow: { ...flow, source: "kis" }, source: "kis" };
     }
   }
+
+  // 3) fallback: mock
   const m = mockFlow(code);
   return { flow: m, source: "mock" };
 }

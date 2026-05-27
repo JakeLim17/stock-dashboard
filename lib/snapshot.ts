@@ -70,14 +70,15 @@ export async function buildSnapshot(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, flowRes] = await Promise.all([
+      const [quoteRes, hist] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
-        fetchFlowOrMock(meta.code),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote = quoteRes.quote;
+
+      const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
       const flow = flowRes.flow;
       const analysis = analyze({ quote, tech, flow, context });

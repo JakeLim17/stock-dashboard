@@ -150,3 +150,76 @@ export async function fetchNaverQuote(
 export function isKrStock(code: string): boolean {
   return /^\d{6}\.K[SQ]$/.test(code);
 }
+
+/**
+ * 네이버에서 외인/기관 순매수 데이터를 가져온다 (일별 데이터, 최대 5일).
+ * 주(shares) 단위를 원(KRW) 단위로 변환하기 위해 현재가를 곱한다.
+ */
+export interface NaverFlowResult {
+  foreignNet: number | null;
+  institutionNet: number | null;
+  foreignNet5d: number | null;
+  institutionNet5d: number | null;
+}
+
+interface DealTrendInfo {
+  bizdate?: string;
+  foreignerPureBuyQuant?: string;
+  organPureBuyQuant?: string;
+  individualPureBuyQuant?: string;
+  closePrice?: string;
+}
+
+function parseSignedNumber(s: string | undefined | null): number | null {
+  if (!s) return null;
+  const cleaned = s.replace(/[,\s]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function fetchNaverFlow(
+  code: string,
+  currentPrice: number
+): Promise<NaverFlowResult | null> {
+  const naverCode = toNaverCode(code);
+  if (!naverCode) return null;
+
+  try {
+    const res = await fetch(`${NAVER_API_BASE}/${naverCode}/integration`, {
+      headers: { "User-Agent": USER_AGENT },
+      next: { revalidate: 0 },
+    });
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as NaverIntegrationResponse & {
+      dealTrendInfos?: DealTrendInfo[];
+    };
+    const deals = data.dealTrendInfos ?? [];
+    if (deals.length === 0) return null;
+
+    const today = deals[0];
+    const foreignShares = parseSignedNumber(today.foreignerPureBuyQuant);
+    const organShares = parseSignedNumber(today.organPureBuyQuant);
+
+    let foreign5dShares = 0;
+    let organ5dShares = 0;
+    const days = Math.min(deals.length, 5);
+    for (let i = 0; i < days; i++) {
+      const f = parseSignedNumber(deals[i].foreignerPureBuyQuant) ?? 0;
+      const o = parseSignedNumber(deals[i].organPureBuyQuant) ?? 0;
+      foreign5dShares += f;
+      organ5dShares += o;
+    }
+
+    const price = currentPrice || 1;
+
+    return {
+      foreignNet: foreignShares != null ? foreignShares * price : null,
+      institutionNet: organShares != null ? organShares * price : null,
+      foreignNet5d: foreign5dShares * price,
+      institutionNet5d: organ5dShares * price,
+    };
+  } catch {
+    return null;
+  }
+}
