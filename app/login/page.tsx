@@ -1,129 +1,75 @@
-"use client";
+import { Suspense } from "react";
+import { Activity, KeyRound } from "lucide-react";
 
-import { Suspense, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, KeyRound, Loader2 } from "lucide-react";
-
-function LoginInner() {
-  const router = useRouter();
-  const sp = useSearchParams();
-  // controlled state도 유지하지만 신뢰값은 ref.current.value 로 읽는다.
-  // iOS Safari / 데스크탑 비번 매니저가 자동완성한 경우 onChange 가 안 발생하는 일이 있어
-  // pw state 가 빈 채로 남고 버튼이 disabled 가 되는 함정이 있다.
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [pw, setPw] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit() {
-    if (loading) return;
-    const value = inputRef.current?.value ?? pw;
-    if (!value) {
-      setError("비밀번호를 입력해 주세요");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: value }),
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      if (!r.ok) {
-        const j = (await r.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(j?.error ?? `로그인 실패 (${r.status})`);
-      }
-      const next = sp.get("next") || "/";
-      window.location.replace(next);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function onFormSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    void submit();
-  }
-
-  function onButtonClick(e: React.MouseEvent) {
-    e.preventDefault();
-    void submit();
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-background text-foreground">
-      <form
-        onSubmit={onFormSubmit}
-        className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-card p-6 shadow-sm"
-      >
-        <div className="flex items-center gap-2">
-          <Activity className="h-5 w-5 text-accent" />
-          <h1 className="text-lg font-semibold">실시간 주식 대시보드</h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          비밀번호를 한 번 입력하면 30일 동안 묻지 않아요.
-        </p>
-
-        <label className="block space-y-1">
-          <span className="text-xs uppercase tracking-wider text-muted-foreground">
-            비밀번호
-          </span>
-          <div className="relative">
-            <KeyRound className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              type="password"
-              name="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              onInput={(e) => setPw((e.target as HTMLInputElement).value)}
-              placeholder="••••••••"
-              className="w-full h-10 pl-9 pr-3 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-accent/40 text-base"
-              autoComplete="current-password"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              enterKeyHint="go"
-            />
-          </div>
-        </label>
-
-        {error && (
-          <p className="text-sm text-down bg-down/10 border border-down/30 rounded-md px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={onButtonClick}
-          disabled={loading}
-          className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity active:opacity-80 touch-manipulation"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <KeyRound className="h-4 w-4" />
-          )}
-          들어가기
-        </button>
-      </form>
-    </div>
-  );
+interface PageProps {
+  searchParams: Promise<{ next?: string; error?: string }>;
 }
 
-export default function LoginPage() {
+// 모바일 호환성 100% 를 위해 일반 form POST 방식 사용.
+// JS 가 필요 없고, /api/login 이 직접 Set-Cookie + 303 redirect 로 응답한다.
+// 비번이 틀리면 /login?error=... 로 다시 redirect 되며 메시지를 표시한다.
+export default async function LoginPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const next = sp.next ?? "/";
+  const error = sp.error ?? null;
+
+  const action = `/api/login?next=${encodeURIComponent(next)}`;
+
   return (
     <Suspense fallback={null}>
-      <LoginInner />
+      <div className="min-h-screen flex items-center justify-center px-4 bg-background text-foreground">
+        <form
+          method="POST"
+          action={action}
+          className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-card p-6 shadow-sm"
+        >
+          <div className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-accent" />
+            <h1 className="text-lg font-semibold">실시간 주식 대시보드</h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            비밀번호를 한 번 입력하면 30일 동안 묻지 않아요.
+          </p>
+
+          <label className="block space-y-1">
+            <span className="text-xs uppercase tracking-wider text-muted-foreground">
+              비밀번호
+            </span>
+            <div className="relative">
+              <KeyRound className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="password"
+                name="password"
+                required
+                placeholder="••••••••"
+                className="w-full h-10 pl-9 pr-3 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-accent/40 text-base"
+                autoComplete="current-password"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+              />
+            </div>
+          </label>
+
+          {/* next 경로를 hidden input 으로도 동봉 (query 와 동일 효과, 안전망) */}
+          <input type="hidden" name="next" value={next} />
+
+          {error && (
+            <p className="text-sm text-down bg-down/10 border border-down/30 rounded-md px-3 py-2">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity active:opacity-80 touch-manipulation"
+          >
+            <KeyRound className="h-4 w-4" />
+            들어가기
+          </button>
+        </form>
+      </div>
     </Suspense>
   );
 }
