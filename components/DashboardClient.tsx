@@ -17,10 +17,12 @@ import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
 import { RefreshCw, Search, Plus, X } from "lucide-react";
 
-const REGULAR_REFRESH_MS = 10_000; // Yahoo 기반 장중 10초
-const OFF_HOURS_REFRESH_MS = 120_000; // Yahoo 기반 비장중 120초
-const KIS_REGULAR_REFRESH_MS = 2_000; // KIS 실데이터 장중 2초
-const KIS_OFF_HOURS_REFRESH_MS = 30_000; // KIS 실데이터 비장중 30초
+const REGULAR_REFRESH_MS = 10_000; // 정규장 OPEN: 10초
+const EXTENDED_REFRESH_MS = 15_000; // 시간외/프리/애프터 OPEN: 15초 (네이버 polling 권장 7초의 여유분)
+const OFF_HOURS_REFRESH_MS = 120_000; // 모두 마감: 120초
+const KIS_REGULAR_REFRESH_MS = 2_000; // KIS 실데이터 정규장: 2초
+const KIS_EXTENDED_REFRESH_MS = 5_000; // KIS 실데이터 + 시간외 OPEN: 5초
+const KIS_OFF_HOURS_REFRESH_MS = 30_000; // KIS 실데이터 + 모두 마감: 30초
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
 
@@ -37,14 +39,25 @@ function normalizeWatchCodes(input: string[]): string[] {
 }
 
 function resolveRefreshMs(snapshot: DashboardSnapshot): number {
+  // 1) 정규장 OPEN인 종목이 하나라도 있으면 가장 빠른 간격
+  // 2) 없으면 시간외(프리/애프터/한국 시간외 단일가)가 활성인지 확인
+  // 3) 그것마저 없으면 완전 비장중
   const isRegular = snapshot.primaries.some(
     (p) => (p.quote.marketState ?? "").toUpperCase() === "REGULAR"
   );
+  const isExtended = snapshot.primaries.some(
+    (p) => p.quote.extendedHours?.active === true
+  );
   const hasRealFlow = snapshot.primaries.some((p) => p.flow.source === "kis");
+
   if (hasRealFlow) {
-    return isRegular ? KIS_REGULAR_REFRESH_MS : KIS_OFF_HOURS_REFRESH_MS;
+    if (isRegular) return KIS_REGULAR_REFRESH_MS;
+    if (isExtended) return KIS_EXTENDED_REFRESH_MS;
+    return KIS_OFF_HOURS_REFRESH_MS;
   }
-  return isRegular ? REGULAR_REFRESH_MS : OFF_HOURS_REFRESH_MS;
+  if (isRegular) return REGULAR_REFRESH_MS;
+  if (isExtended) return EXTENDED_REFRESH_MS;
+  return OFF_HOURS_REFRESH_MS;
 }
 
 export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
