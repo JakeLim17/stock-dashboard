@@ -175,12 +175,35 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(watchCodes));
   }, [watchCodes]);
 
-  // 자동 새로고침
+  // 자동 새로고침 (탭이 활성일 때만 — Vercel 함수 호출 절약)
   useEffect(() => {
-    const t = setInterval(() => {
-      void refresh();
-    }, refreshMs);
-    return () => clearInterval(t);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (timer) return;
+      timer = setInterval(() => {
+        void refresh();
+      }, refreshMs);
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        // 다시 활성화되면 즉시 1회 갱신 후 인터벌 재가동
+        void refresh();
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh, refreshMs]);
 
   // 상대 시간 갱신
