@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// 미들웨어와 동일한 Edge Runtime 으로 실행해 cold start 를 줄이고
+// 미들웨어/route 간 환경 차이로 인한 모바일 이상 동작을 예방한다.
+export const runtime = "edge";
+
 // 로그인 토큰을 발급한다. 한 번 통과하면 30일 동안 비번을 다시 묻지 않는다.
 // middleware.ts 의 SHA-256(PASS + COOKIE_VERSION) 와 동일한 토큰을 쿠키에 심는다.
 

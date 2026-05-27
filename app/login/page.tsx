@@ -15,8 +15,7 @@ function LoginInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit() {
     if (loading) return;
     const value = inputRef.current?.value ?? pw;
     if (!value) {
@@ -30,8 +29,8 @@ function LoginInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: value }),
-        // 같은 origin 이라 default 로도 쿠키가 붙지만 명시
         credentials: "same-origin",
+        cache: "no-store",
       });
       if (!r.ok) {
         const j = (await r.json().catch(() => null)) as
@@ -40,7 +39,6 @@ function LoginInner() {
         throw new Error(j?.error ?? `로그인 실패 (${r.status})`);
       }
       const next = sp.get("next") || "/";
-      // 미들웨어가 쿠키를 다음 요청에서 인식하도록 hard navigation
       window.location.replace(next);
       router.refresh();
     } catch (err) {
@@ -50,10 +48,20 @@ function LoginInner() {
     }
   }
 
+  function onFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void submit();
+  }
+
+  function onButtonClick(e: React.MouseEvent) {
+    e.preventDefault();
+    void submit();
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-background text-foreground">
       <form
-        onSubmit={onSubmit}
+        onSubmit={onFormSubmit}
         className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-card p-6 shadow-sm"
       >
         <div className="flex items-center gap-2">
@@ -95,9 +103,10 @@ function LoginInner() {
         )}
 
         <button
-          type="submit"
+          type="button"
+          onClick={onButtonClick}
           disabled={loading}
-          className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity active:opacity-80"
+          className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity active:opacity-80 touch-manipulation"
         >
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
