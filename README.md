@@ -34,13 +34,12 @@ npm run start
 
 | 키 | 필수 | 설명 |
 |---|---|---|
-| `DASHBOARD_USER` | 권장 | Basic Auth 사용자명 (둘 다 설정 시 모든 페이지·API 잠김) |
-| `DASHBOARD_PASS` | 권장 | Basic Auth 비밀번호 |
+| `DASHBOARD_PASS` | 권장 | 비밀번호. 설정 시 `/login`에서 1회 입력 후 30일 자동 통과 |
 | `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
 | `KIS_APP_SECRET` | 선택 | 동 시크릿 |
 | `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |
 
-**Vercel 공개 배포에선 `DASHBOARD_USER` / `DASHBOARD_PASS` 둘 다 설정 권장** — 봇 크롤로 인한 함수 호출 폭주를 1회 401로 막아줍니다.
+**Vercel 공개 배포에선 `DASHBOARD_PASS` 설정 권장** — 봇 크롤로 인한 함수 호출 폭주를 막아줍니다. 한 번 로그인하면 같은 브라우저에서 30일 동안 비번을 다시 묻지 않습니다.
 **KIS 키를 비워두면 외인/기관 수급은 mock data로 표시** (UI 깨짐 방지). 시세·뉴스는 무료 소스만으로 정상 동작.
 
 ## 디렉토리 구조

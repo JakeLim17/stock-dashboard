@@ -1,37 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// 단순 Basic Auth 게이트.
-// env에 DASHBOARD_USER / DASHBOARD_PASS 가 둘 다 설정되어 있을 때만 활성화.
-// 둘 중 하나라도 비어있으면 미들웨어는 그냥 통과 (로컬 개발 편의용).
-export function middleware(req: NextRequest) {
-  const user = process.env.DASHBOARD_USER;
-  const pass = process.env.DASHBOARD_PASS;
-  if (!user || !pass) return NextResponse.next();
+// 쿠키 기반 로그인 게이트.
+// env DASHBOARD_PASS 가 설정돼 있을 때만 활성화.
+// 비어 있으면 무조건 통과 (로컬 개발 편의).
+//
+// 동작 흐름
+//  1. /login, /api/login, /favicon 등 공개 경로는 통과
+//  2. 쿠키 dashboard_token 이 SHA-256(PASS + COOKIE_VERSION) 과 일치하면 통과
+//  3. 아니면 /login?next=원래경로 로 리다이렉트
+//
+// 쿠키 versioning: PASS 가 바뀌면 자동으로 기존 토큰이 무효화된다.
 
-  const auth = req.headers.get("authorization");
-  if (auth?.startsWith("Basic ")) {
-    try {
-      const decoded = atob(auth.slice(6));
-      const idx = decoded.indexOf(":");
-      const u = decoded.slice(0, idx);
-      const p = decoded.slice(idx + 1);
-      if (u === user && p === pass) {
-        return NextResponse.next();
-      }
-    } catch {
-      // 잘못된 base64 → 인증 실패 처리
-    }
-  }
+const COOKIE_NAME = "dashboard_token";
+const COOKIE_VERSION = "v1";
+const PUBLIC_PATHS = ["/login", "/api/login"];
 
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": 'Basic realm="Stock Dashboard", charset="UTF-8"',
-    },
-  });
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
-// 정적 자원과 파비콘은 보호 대상에서 제외
+function isPublic(pathname: string): boolean {
+  return PUBLIC_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(p + "/")
+  );
+}
+
+export async function middleware(req: NextRequest) {
+  const pass = process.env.DASHBOARD_PASS;
+  if (!pass) return NextResponse.next();
+
+  const { pathname } = req.nextUrl;
+  if (isPublic(pathname)) return NextResponse.next();
+
+  const token = req.cookies.get(COOKIE_NAME)?.value;
+  if (token) {
+    const expected = await sha256Hex(pass + COOKIE_VERSION);
+    if (token === expected) return NextResponse.next();
+  }
+
+  const url = req.nextUrl.clone();
+  url.pathname = "/login";
+  // API 요청이 직접 보호 경로를 호출하다 막힌 경우 next 없이 /login만 안내
+  if (pathname !== "/login") {
+    url.searchParams.set("next", pathname + req.nextUrl.search);
+  }
+  return NextResponse.redirect(url);
+}
+
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
