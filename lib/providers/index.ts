@@ -1,8 +1,36 @@
 import "server-only";
-import { fetchQuote, fetchQuotesBatch, fetchHistorical, computeTech } from "./yahoo";
+import { fetchQuote as fetchYahooQuote, fetchQuotesBatch as fetchYahooQuotesBatch, fetchHistorical, computeTech } from "./yahoo";
+import { fetchNaverQuote, isKrStock } from "./naver";
 import { fetchFlow, kisEnabled } from "./kis";
 import { mockFlow } from "./mock";
-import type { FlowData } from "../types";
+import type { FlowData, Quote } from "../types";
+
+async function fetchQuote(code: string, name: string): Promise<Quote> {
+  if (isKrStock(code)) {
+    const naver = await fetchNaverQuote(code, name);
+    if (naver) return naver;
+  }
+  return fetchYahooQuote(code, name);
+}
+
+async function fetchQuotesBatch(
+  items: Array<{ code: string; name: string }>
+): Promise<Array<{ ok: true; quote: Quote } | { ok: false; code: string; error: string }>> {
+  return Promise.all(
+    items.map(async (it) => {
+      try {
+        const quote = await fetchQuote(it.code, it.name);
+        return { ok: true as const, quote };
+      } catch (e) {
+        return {
+          ok: false as const,
+          code: it.code,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    })
+  );
+}
 
 export { fetchQuote, fetchQuotesBatch, fetchHistorical, computeTech };
 export { fetchAllNews, riskKeywords } from "./news";
