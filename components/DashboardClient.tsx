@@ -15,7 +15,16 @@ import { AnalysisBox } from "./AnalysisBox";
 import { PriceChart } from "./PriceChart";
 import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
-import { RefreshCw, Search, Plus, X } from "lucide-react";
+import { LogOut, RefreshCw, Search, Plus, X } from "lucide-react";
+
+async function logout() {
+  try {
+    await fetch("/api/login", { method: "DELETE" });
+  } catch {
+    // 쿠키 삭제 실패해도 일단 로그인 페이지로 보냄 (미들웨어가 다시 막아줌)
+  }
+  window.location.replace("/login");
+}
 
 const REGULAR_REFRESH_MS = 10_000; // 정규장 OPEN: 10초
 const EXTENDED_REFRESH_MS = 15_000; // 시간외/프리/애프터 OPEN: 15초 (네이버 polling 권장 7초의 여유분)
@@ -261,20 +270,31 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             반도체 중심 · 룰 기반 판단 보조 (자동매매 아님)
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
+            type="button"
             onClick={() => {
               void refresh();
             }}
             disabled={refreshing}
-            className="inline-flex items-center gap-1.5 text-sm h-9 px-3 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
+            title="새로고침"
+            aria-label="새로고침"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
           >
             <RefreshCw
-              className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+              className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
             />
-            새로고침
           </button>
           <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => void logout()}
+            title="로그아웃"
+            aria-label="로그아웃"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
