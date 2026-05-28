@@ -96,12 +96,54 @@ export interface AnalysisResult {
   reasons: string[]; // 1~3줄 근거
 }
 
+// 예측 (통계 기반, 투자조언 아님)
+export interface PriceRange {
+  horizonLabel: string; // "1일", "1주" 등
+  horizonDays: number;
+  center: number; // 중심 예상 가격
+  low: number; // -1σ
+  high: number; // +1σ
+  confidence: number; // 0.68 (1σ) | 0.95 (2σ)
+}
+
+export interface PriceTargets {
+  entry: number; // 매수 진입 기준가
+  stopLoss: number; // 손절가
+  takeProfit1: number; // 1차 목표
+  takeProfit2: number; // 2차 목표
+  support: number; // 최근 20일 저점 기준 지지
+  resistance: number; // 최근 20일 고점 기준 저항
+  riskReward: number; // (목표1 - 진입) / (진입 - 손절)
+}
+
+export interface ScenarioRow {
+  label: string; // "나스닥 +1%"
+  expected: number; // 예상 변화율 (0.008 = +0.8%)
+  beta: number; // 회귀 계수
+  baselineLabel: string; // "NQ=F 60일 베타"
+}
+
+export interface Predictions {
+  // 최근 90일 데이터 기반 1σ 가격 범위
+  ranges: PriceRange[];
+  // ATR 기반 진입/손절/목표
+  targets: PriceTargets | null;
+  // 시장 베타 시나리오 (나스닥, 환율)
+  scenarios: ScenarioRow[];
+  // 신호 강도 (양방향 0~100)
+  strength: {
+    buy: number;
+    sell: number;
+  };
+}
+
 export interface StockSnapshot {
   meta: SymbolMeta;
   quote: Quote;
   flow: FlowData;
   tech: TechIndicators;
   analysis: AnalysisResult;
+  predictions?: Predictions | null;
 }
 
 export interface MarketIndicator {

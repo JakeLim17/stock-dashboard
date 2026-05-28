@@ -145,6 +145,22 @@ export function StockCard({ snap, onSelect, selected }: {
               <li key={r}>· {r}</li>
             ))}
           </ul>
+
+          {/* 1주 예상 범위 요약 (있을 때만) */}
+          {(() => {
+            const oneWeek = snap.predictions?.ranges.find(
+              (r) => r.horizonDays === 5
+            );
+            if (!oneWeek || quote.price <= 0) return null;
+            const lowPct = oneWeek.low / quote.price - 1;
+            const highPct = oneWeek.high / quote.price - 1;
+            return (
+              <div className="text-[11px] text-muted-foreground tabular mt-1.5">
+                1주 예상 {fmtPercent(lowPct, 1)} ~ {fmtPercent(highPct, 1)}{" "}
+                <span className="text-[10px]">(68%)</span>
+              </div>
+            );
+          })()}
         </div>
       </CardBody>
     </Card>

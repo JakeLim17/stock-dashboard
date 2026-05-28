@@ -7,7 +7,7 @@ import {
   fetchAllNews,
   riskKeywords,
 } from "./providers";
-import { analyze, marketMoodLabel } from "./analyzer";
+import { analyze, marketMoodLabel, predict } from "./analyzer";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import { PRIMARY_SYMBOLS, MARKET_INDICATORS, resolveWatchSymbols } from "./symbols";
 import type {
@@ -66,6 +66,12 @@ export async function buildSnapshot(
     vix: vix?.value ?? 15,
   };
 
+  // 1.5) 베타 시나리오용 시장 시계열 (관심 종목 전체에서 공유, 한 번만 호출)
+  const [nasdaqHistory, fxHistory] = await Promise.all([
+    fetchHistorical("NQ=F", 90).catch(() => []),
+    fetchHistorical("KRW=X", 90).catch(() => []),
+  ]);
+
   // 2) 관심 종목 — quote, historical, flow 병렬
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
@@ -82,6 +88,14 @@ export async function buildSnapshot(
       const tech = computeTech(hist);
       const flow = flowRes.flow;
       const analysis = analyze({ quote, tech, flow, context });
+      const predictions = predict({
+        quote,
+        history: hist,
+        nasdaqHistory,
+        fxHistory,
+        buyScore: analysis.buyScore,
+        heatScore: analysis.heatScore,
+      });
 
       // 저장
       saveQuote(quote);
@@ -89,7 +103,7 @@ export async function buildSnapshot(
       saveTech(meta.code, quote.fetchedAt, tech);
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
-      return { meta, quote, tech, flow, analysis };
+      return { meta, quote, tech, flow, analysis, predictions };
     })
   );
 

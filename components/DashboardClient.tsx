@@ -12,6 +12,7 @@ import { StockCard } from "./StockCard";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
 import { AnalysisBox } from "./AnalysisBox";
+import { PredictionPanel } from "./PredictionPanel";
 import { PriceChart } from "./PriceChart";
 import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
@@ -430,7 +431,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
       )}
 
-      {/* 핵심 분석 + 차트 */}
+      {/* 핵심 분석 + 차트 + 예측 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           {selectedSnap && <AnalysisBox snap={selectedSnap} />}
@@ -439,6 +440,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           )}
         </div>
         <div className="space-y-4">
+          {selectedSnap && <PredictionPanel snap={selectedSnap} />}
           <MarketPanel indicators={snap.indicators} />
         </div>
       </div>
