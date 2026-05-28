@@ -98,11 +98,19 @@ function clamp(n: number, lo = 0, hi = 100) {
 
 function decideSignal(heat: number, buy: number, marketState?: string): SignalStatus {
   // 장중/비장중 임계값을 분리해 과한 신호를 줄인다.
+  //
+  // 임계값 완화 (2026-05-28): 우상향·강세장에서 정상 강세 종목조차
+  //  ADD 가 거의 잡히지 않던 문제를 해결.
+  //   - 장중 BUY  : 70/50 → 68/52  (살짝)
+  //   - 장중 ADD  : 55/55 → 52/58  (정상 강세 종목 잡히게)
+  //   - 비장중 BUY: 78/45 → 73/48
+  //   - 비장중 ADD: 62/52 → 58/55
+  //  SELL/WATCH 는 그대로 — 과열 경계는 좁히지 않음.
   if (isRegularMarket(marketState)) {
     if (heat >= 70 && buy <= 35) return "SELL";
     if (heat >= 65) return "WATCH";
-    if (buy >= 70 && heat <= 50) return "BUY";
-    if (buy >= 55 && heat <= 55) return "ADD";
+    if (buy >= 68 && heat <= 52) return "BUY";
+    if (buy >= 52 && heat <= 58) return "ADD";
     if (buy <= 35 && heat <= 45) return "WATCH";
     return "HOLD";
   }
@@ -110,8 +118,8 @@ function decideSignal(heat: number, buy: number, marketState?: string): SignalSt
   // 비장중(종가/시간외 기준)은 신호를 더 보수적으로 판정.
   if (heat >= 72 && buy <= 32) return "SELL";
   if (heat >= 62) return "WATCH";
-  if (buy >= 78 && heat <= 45) return "BUY";
-  if (buy >= 62 && heat <= 52) return "ADD";
+  if (buy >= 73 && heat <= 48) return "BUY";
+  if (buy >= 58 && heat <= 55) return "ADD";
   if (buy <= 35 && heat <= 45) return "WATCH";
   return "HOLD";
 }
