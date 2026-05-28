@@ -43,7 +43,9 @@ export function StockCard({ snap, onSelect, selected }: {
     <Minus className="h-4 w-4" />;
 
   const market = marketDisplayLabel(quote);
-  const ext = quote.extendedHours ?? null;
+  const isRegular = (quote.marketState ?? "").toUpperCase() === "REGULAR";
+  // 정규장 중에는 시간외 박스를 숨김 (데이터가 잘못 와도 사용자 혼란 방지)
+  const ext = !isRegular ? quote.extendedHours ?? null : null;
 
   return (
     <Card

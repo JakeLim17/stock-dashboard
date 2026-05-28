@@ -195,12 +195,16 @@ export async function fetchNaverQuote(
 
 // 네이버의 overMarketPriceInfo → ExtendedHoursQuote 변환
 //  - tradingSessionType: BEFORE_MARKET(장전 시간외) / AFTER_MARKET(장후 시간외·앱장)
+//                        REGULAR_MARKET 은 정규장 거래 중이라는 뜻이므로 시간외로 취급하지 않음
 //  - 변동률은 정규장 종가 기준이 아니라 네이버가 주는 fluctuationsRatio(전일 종가 기준)을 그대로 사용
 function extractKoreanExtended(
   info: NaverOverMarketPriceInfo | null | undefined,
   prevClose: number
 ): ExtendedHoursQuote | null {
   if (!info) return null;
+  // 정규장 거래중이면 overMarketPriceInfo가 함께 와도 시간외 의미 없음
+  const session = (info.tradingSessionType ?? "").toUpperCase();
+  if (session === "REGULAR_MARKET" || session === "") return null;
   const price = parseNaverNumber(info.overPrice);
   if (price == null) return null;
 
@@ -216,11 +220,11 @@ function extractKoreanExtended(
         ? abs / prevClose
         : 0;
 
-  const session: ExtendedHoursQuote["session"] =
-    info.tradingSessionType === "BEFORE_MARKET" ? "kr-before" : "kr-after";
+  const sessionKind: ExtendedHoursQuote["session"] =
+    session === "BEFORE_MARKET" ? "kr-before" : "kr-after";
 
   return {
-    session,
+    session: sessionKind,
     price,
     changeAbs: abs,
     changeRate: rate,

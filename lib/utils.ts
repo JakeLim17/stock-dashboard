@@ -129,6 +129,11 @@ export function marketDisplayLabel(quote: {
   variant: "good" | "neutral" | "warn";
   hint?: string;
 } {
+  // 정규장이 OPEN 이면 정규장 라벨이 항상 우선 — 데이터 소스가 시간외 정보를
+  // 같이 보내더라도 무시한다.
+  const isRegular = (quote.marketState ?? "").toUpperCase() === "REGULAR";
+  if (isRegular) return marketStateLabel(quote.marketState);
+
   const ext = quote.extendedHours;
   if (ext?.active) {
     return {
