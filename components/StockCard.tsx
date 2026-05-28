@@ -145,23 +145,30 @@ export function StockCard({ snap, onSelect, selected }: {
               <li key={r}>· {r}</li>
             ))}
           </ul>
-
-          {/* 1주 예상 범위 요약 (있을 때만) */}
-          {(() => {
-            const oneWeek = snap.predictions?.ranges.find(
-              (r) => r.horizonDays === 5
-            );
-            if (!oneWeek || quote.price <= 0) return null;
-            const lowPct = oneWeek.low / quote.price - 1;
-            const highPct = oneWeek.high / quote.price - 1;
-            return (
-              <div className="text-[11px] text-muted-foreground tabular mt-1.5">
-                1주 예상 {fmtPercent(lowPct, 1)} ~ {fmtPercent(highPct, 1)}{" "}
-                <span className="text-[10px]">(68%)</span>
-              </div>
-            );
-          })()}
         </div>
+
+        {/* 1주 변동성 범위 요약 — 카드 맨 아래 별도 박스로 분리 */}
+        {(() => {
+          const oneWeek = snap.predictions?.ranges.find(
+            (r) => r.horizonDays === 5
+          );
+          if (!oneWeek || quote.price <= 0) return null;
+          const lowPct = oneWeek.low / quote.price - 1;
+          const highPct = oneWeek.high / quote.price - 1;
+          return (
+            <div className="rounded-md bg-muted/40 px-3 py-2 flex items-center justify-between text-[11px] tabular">
+              <span className="text-muted-foreground">1주 변동 범위</span>
+              <span className="font-medium">
+                <span className="text-down">{fmtPercent(lowPct, 1)}</span>
+                {" ~ "}
+                <span className="text-up">{fmtPercent(highPct, 1)}</span>
+                <span className="text-muted-foreground ml-1.5 text-[10px]">
+                  68%
+                </span>
+              </span>
+            </div>
+          );
+        })()}
       </CardBody>
     </Card>
   );

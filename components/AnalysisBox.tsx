@@ -33,21 +33,22 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
                 {a.signal}
               </Badge>
             </div>
-            <div className="text-base md:text-lg font-bold tracking-tight mt-1 lg:truncate">
+            {/* 헤드라인 — 잘리지 않게 wrap 허용. lg에서도 1~2줄까지는 자연스럽게 보이게 */}
+            <div className="text-base md:text-lg font-bold tracking-tight mt-1 leading-snug">
               {a.headline}
             </div>
           </div>
 
           {/* 중: 점수 막대 */}
-          <div className="grid grid-cols-2 gap-3 lg:w-64 lg:shrink-0">
+          <div className="grid grid-cols-2 gap-3 lg:w-56 lg:shrink-0">
             <ScoreBar label="과열도" value={a.heatScore} dangerHigh />
             <ScoreBar label="매수우위" value={a.buyScore} />
           </div>
 
-          {/* 우: 근거 (최대 3개) */}
-          <ul className="text-xs text-muted-foreground space-y-0.5 lg:w-64 lg:shrink-0 lg:border-l lg:border-border lg:pl-4">
+          {/* 우: 근거 (최대 3개) — 폭을 조금 더 주고 두 줄까지는 자연스럽게 wrap */}
+          <ul className="text-xs text-muted-foreground space-y-0.5 lg:w-72 lg:shrink-0 lg:border-l lg:border-border lg:pl-4">
             {a.reasons.slice(0, 3).map((r) => (
-              <li key={r} className="lg:truncate">
+              <li key={r} className="leading-snug">
                 · {r}
               </li>
             ))}

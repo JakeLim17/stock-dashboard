@@ -434,7 +434,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
       )}
 
-      {/* 차트 + 예측 + 마켓 */}
+      {/* 차트 + 마켓 시장신호 (예측은 아래 별도 행) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           {selectedSnap && (
@@ -442,10 +442,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           )}
         </div>
         <div className="space-y-4">
-          {selectedSnap && <PredictionPanel snap={selectedSnap} />}
           <MarketPanel indicators={snap.indicators} />
         </div>
       </div>
+
+      {/* 예측 패널 — 정보가 많아 단독 행으로 가로폭 확보 */}
+      {selectedSnap && <PredictionPanel snap={selectedSnap} />}
 
       {/* 뉴스 */}
       <NewsPanel items={snap.news} />
