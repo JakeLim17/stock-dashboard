@@ -407,6 +407,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           </div>
         )}
 
+        {/* 선택된 종목의 분석 결과 — 카드 grid 바로 위에 가로로 길게 */}
+        {selectedSnap && <AnalysisBox snap={selectedSnap} />}
+
         {/* 종목 카드 grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {snap.primaries.map((p) => (
@@ -431,10 +434,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
       )}
 
-      {/* 핵심 분석 + 차트 + 예측 */}
+      {/* 차트 + 예측 + 마켓 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
-          {selectedSnap && <AnalysisBox snap={selectedSnap} />}
           {selectedSnap && (
             <PriceChart code={selectedSnap.meta.code} name={selectedSnap.meta.name} />
           )}
