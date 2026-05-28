@@ -106,7 +106,7 @@ export function PredictionPanel({
           onSelect={setActiveCode}
         />
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <SummaryCard
             label={primaryRange ? `${primaryRange.horizonLabel} 예상 범위` : "예상 범위"}
             value={
@@ -123,6 +123,11 @@ export function PredictionPanel({
                 : "OFF/없음"
             }
             color={p.nightSignal ? changeColor(p.nightSignal.premiumRate) : ""}
+          />
+          <SummaryCard
+            label="밸류 위험"
+            value={p.valuation ? `${p.valuation.label} ${p.valuation.riskScore}` : "—"}
+            color={valuationRiskColor(p.valuation?.riskScore)}
           />
           <SummaryCard
             label="매수 / 매도 강도"
@@ -249,6 +254,42 @@ export function PredictionPanel({
                     </li>
                   ))}
                 </ul>
+              </Section>
+            )}
+
+            {p.valuation && (
+              <Section
+                title="밸류 위험 (PER/PBR)"
+                icon={<TrendingDown className="h-3.5 w-3.5" />}
+              >
+                <div className="space-y-2 text-sm">
+                  <div className="grid grid-cols-3 gap-2">
+                    <MiniMetric
+                      label="PER"
+                      value={p.valuation.per != null ? `${p.valuation.per.toFixed(1)}배` : "—"}
+                    />
+                    <MiniMetric
+                      label="추정PER"
+                      value={p.valuation.forwardPer != null ? `${p.valuation.forwardPer.toFixed(1)}배` : "—"}
+                    />
+                    <MiniMetric
+                      label="PBR"
+                      value={p.valuation.pbr != null ? `${p.valuation.pbr.toFixed(1)}배` : "—"}
+                    />
+                  </div>
+                  <StrengthBar
+                    label={`위험도 ${p.valuation.label}`}
+                    value={p.valuation.riskScore}
+                    color={
+                      p.valuation.riskScore >= 45 ? "bg-down" : "bg-muted-foreground"
+                    }
+                  />
+                  <ul className="text-xs text-muted-foreground space-y-1">
+                    {p.valuation.reasons.map((r) => (
+                      <li key={r}>· {r}</li>
+                    ))}
+                  </ul>
+                </div>
               </Section>
             )}
 
@@ -406,6 +447,14 @@ function nightMarketState(state?: string): {
     default:
       return { label: "해외장 상태 미확인", variant: "neutral" };
   }
+}
+
+function valuationRiskColor(score?: number | null): string {
+  if (score == null) return "";
+  if (score >= 70) return "text-down";
+  if (score >= 45) return "text-warn";
+  if (score <= 15) return "text-up";
+  return "";
 }
 
 function MiniMetric({

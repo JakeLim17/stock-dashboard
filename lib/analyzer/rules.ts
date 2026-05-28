@@ -99,6 +99,27 @@ function evaluateRules(input: AnalyzeInput): RuleHit[] {
     else if (nr <= -0.01) hits.push({ label: "해외 개별 야간 약세", heat: 8, buy: -8, good: false });
   }
 
+  // 11) 밸류에이션 부담. PER/PBR이 높으면 좋은 뉴스가 이미 가격에 반영됐을 가능성이 크다.
+  const per = quote.valuation?.per ?? null;
+  const forwardPer = quote.valuation?.forwardPer ?? null;
+  const pbr = quote.valuation?.pbr ?? null;
+  const activePer = forwardPer ?? per;
+
+  if (per != null) {
+    if (per >= 150) hits.push({ label: `PER ${per.toFixed(0)}배 초고평가 부담`, heat: 28, buy: -18, good: false });
+    else if (per >= 80) hits.push({ label: `PER ${per.toFixed(0)}배 고평가 부담`, heat: 20, buy: -12, good: false });
+    else if (per >= 40) hits.push({ label: `PER ${per.toFixed(0)}배 다소 부담`, heat: 10, buy: -5, good: false });
+  }
+
+  if (activePer != null && activePer <= 12 && per != null && per < 40) {
+    hits.push({ label: `PER ${activePer.toFixed(1)}배 저평가 구간`, heat: -5, buy: 8, good: true });
+  }
+
+  if (pbr != null) {
+    if (pbr >= 5) hits.push({ label: `PBR ${pbr.toFixed(1)}배 자산가치 부담`, heat: 15, buy: -10, good: false });
+    else if (pbr >= 3) hits.push({ label: `PBR ${pbr.toFixed(1)}배 다소 부담`, heat: 8, buy: -5, good: false });
+  }
+
   return hits;
 }
 

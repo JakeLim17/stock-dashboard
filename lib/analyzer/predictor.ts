@@ -7,6 +7,7 @@ import type {
   Quote,
   ScenarioRow,
   OverseasNightIndicator,
+  ValuationMetrics,
 } from "../types";
 
 // ─── 기본 통계 유틸 ────────────────────────────────────────
@@ -70,6 +71,68 @@ function averageTrueRange(hist: HistoricalPoint[], period = 14): number {
 
 function clamp(n: number, lo = 0, hi = 100): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
+  if (!v) return null;
+
+  const reasons: string[] = [];
+  let riskScore = 0;
+
+  if (v.per != null) {
+    if (v.per >= 150) {
+      riskScore += 55;
+      reasons.push(`PER ${v.per.toFixed(0)}배: 실적 기대가 크게 선반영`);
+    } else if (v.per >= 80) {
+      riskScore += 35;
+      reasons.push(`PER ${v.per.toFixed(0)}배: 고평가 부담`);
+    } else if (v.per >= 40) {
+      riskScore += 20;
+      reasons.push(`PER ${v.per.toFixed(0)}배: 다소 부담`);
+    } else if (v.per <= 12) {
+      riskScore -= 8;
+      reasons.push(`PER ${v.per.toFixed(1)}배: 밸류 부담 낮음`);
+    }
+  }
+
+  if (v.forwardPer != null) {
+    if (v.forwardPer >= 60) {
+      riskScore += 20;
+      reasons.push(`추정PER ${v.forwardPer.toFixed(0)}배: 다음 실적 기준도 부담`);
+    } else if (v.forwardPer <= 15 && (v.per == null || v.per < 40)) {
+      riskScore -= 6;
+      reasons.push(`추정PER ${v.forwardPer.toFixed(1)}배: 실적 개선 기대`);
+    }
+  }
+
+  if (v.pbr != null) {
+    if (v.pbr >= 5) {
+      riskScore += 20;
+      reasons.push(`PBR ${v.pbr.toFixed(1)}배: 자산가치 대비 부담`);
+    } else if (v.pbr >= 3) {
+      riskScore += 10;
+      reasons.push(`PBR ${v.pbr.toFixed(1)}배: 다소 부담`);
+    }
+  }
+
+  riskScore = clamp(Math.round(riskScore), 0, 100);
+  const label =
+    riskScore >= 70
+      ? "높음"
+      : riskScore >= 45
+        ? "주의"
+        : riskScore >= 20
+          ? "보통"
+          : "낮음";
+
+  return {
+    per: v.per,
+    forwardPer: v.forwardPer,
+    pbr: v.pbr,
+    riskScore,
+    label,
+    reasons: reasons.slice(0, 3),
+  };
 }
 
 // ─── Predictor 본체 ────────────────────────────────────────
@@ -229,6 +292,7 @@ export function predict(input: PredictorInput): Predictions {
     ranges,
     targets,
     scenarios,
+    valuation: valuationRisk(quote.valuation),
     nightSignal: overseasNight
       ? {
           label: overseasNight.name,

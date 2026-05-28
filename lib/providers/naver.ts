@@ -1,5 +1,5 @@
 import "server-only";
-import type { ExtendedHoursQuote, Quote } from "../types";
+import type { ExtendedHoursQuote, Quote, ValuationMetrics } from "../types";
 
 /**
  * 네이버 금융 모바일 API를 이용한 실시간 한국 주식 시세 조회.
@@ -104,6 +104,23 @@ function parseTradingValue(s: string | undefined | null): number | null {
   if (s.includes("억")) return n * 1_0000_0000;
   if (s.includes("백만")) return n * 1_000_000;
   return n;
+}
+
+function parseRatio(s: string | undefined | null): number | null {
+  const n = parseNaverNumber(s);
+  return n != null && n > 0 ? n : null;
+}
+
+function extractValuation(infoMap: Map<string, string>): ValuationMetrics {
+  return {
+    per: parseRatio(infoMap.get("per")),
+    forwardPer: parseRatio(infoMap.get("cnsPer")),
+    pbr: parseRatio(infoMap.get("pbr")),
+    eps: parseRatio(infoMap.get("eps")),
+    forwardEps: parseRatio(infoMap.get("cnsEps")),
+    bps: parseRatio(infoMap.get("bps")),
+    dividendYield: parseRatio(infoMap.get("dividendYieldRatio")),
+  };
 }
 
 /**
@@ -216,6 +233,7 @@ export async function fetchNaverQuote(
         parseNaverNumber(infoMap.get("lowPrice")),
       marketCap: parseMarketCap(infoMap.get("marketValue")),
       currency: "KRW",
+      valuation: extractValuation(infoMap),
       fetchedAt: Date.now(),
       marketState,
       priceTime: activeExtended?.time ?? priceTime,

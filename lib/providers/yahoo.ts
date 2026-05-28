@@ -49,6 +49,12 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
     low: num(q.regularMarketDayLow),
     marketCap: num(q.marketCap),
     currency: str(q.currency),
+    valuation: {
+      per: num(q.trailingPE),
+      forwardPer: num(q.forwardPE),
+      pbr: num(q.priceToBook),
+      eps: num(q.epsTrailingTwelveMonths),
+    },
     fetchedAt: Date.now(),
     marketState,
     priceTime,

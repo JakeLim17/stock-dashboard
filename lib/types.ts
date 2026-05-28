@@ -75,6 +75,7 @@ export interface Quote {
   low?: number | null;
   marketCap?: number | null;
   currency?: string;
+  valuation?: ValuationMetrics | null;
   fetchedAt: number; // epoch ms
   // Yahoo 시장 상태. REGULAR | PRE | POST | POSTPOST | CLOSED | PREPRE 등
   marketState?: string;
@@ -82,6 +83,16 @@ export interface Quote {
   priceTime?: number | null;
   // 정규장 외 거래 정보 (있을 때만 채움)
   extendedHours?: ExtendedHoursQuote | null;
+}
+
+export interface ValuationMetrics {
+  per?: number | null;
+  forwardPer?: number | null;
+  pbr?: number | null;
+  eps?: number | null;
+  forwardEps?: number | null;
+  bps?: number | null;
+  dividendYield?: number | null;
 }
 
 export interface FlowData {
@@ -159,6 +170,14 @@ export interface Predictions {
   targets: PriceTargets | null;
   // 시장 베타 시나리오 (나스닥, 환율)
   scenarios: ScenarioRow[];
+  valuation?: {
+    per?: number | null;
+    forwardPer?: number | null;
+    pbr?: number | null;
+    riskScore: number;
+    label: "낮음" | "보통" | "주의" | "높음";
+    reasons: string[];
+  } | null;
   // 해외 GDR/DR 등 개별 야간 참고 지표. 토글이 켜졌을 때만 채움.
   nightSignal?: {
     label: string;
