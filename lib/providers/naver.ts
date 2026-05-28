@@ -193,15 +193,17 @@ export async function fetchNaverQuote(
       pollingData?.overMarketPriceInfo,
       prevClose
     );
+    const activeExtended =
+      extendedHours?.active === true ? extendedHours : null;
     const livePriceInfo = pollingData?.integratedPriceInfo;
 
     return {
       code,
       name,
-      price,
+      price: activeExtended?.price ?? price,
       prevClose,
-      changeAbs: absChange,
-      changeRate,
+      changeAbs: activeExtended?.changeAbs ?? absChange,
+      changeRate: activeExtended?.changeRate ?? changeRate,
       volume:
         parseNaverNumber(livePriceInfo?.accumulatedTradingVolume) ??
         parseNaverNumber(infoMap.get("accumulatedTradingVolume")),
@@ -215,7 +217,7 @@ export async function fetchNaverQuote(
       currency: "KRW",
       fetchedAt: Date.now(),
       marketState,
-      priceTime,
+      priceTime: activeExtended?.time ?? priceTime,
       extendedHours,
     };
   } catch {

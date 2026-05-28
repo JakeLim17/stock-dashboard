@@ -46,6 +46,12 @@ export function StockCard({ snap, onSelect, selected }: {
   const isRegular = (quote.marketState ?? "").toUpperCase() === "REGULAR";
   // 정규장 중에는 시간외 박스를 숨김 (데이터가 잘못 와도 사용자 혼란 방지)
   const ext = !isRegular ? quote.extendedHours ?? null : null;
+  const priceTimePrefix =
+    ext?.active === true
+      ? `${extendedSessionLabel(ext.session)} · `
+      : ext
+        ? "정규장 종가 · "
+        : "기준 ";
 
   return (
     <Card
@@ -78,7 +84,7 @@ export function StockCard({ snap, onSelect, selected }: {
             </div>
             {quote.priceTime && (
               <div className="text-[11px] text-muted-foreground mt-1 tabular">
-                {ext ? "정규장 종가 · " : "기준 "}
+                {priceTimePrefix}
                 {priceTimeLabel(quote.priceTime)}
               </div>
             )}
