@@ -87,10 +87,10 @@ export function PredictionPanel({
         <div>
           <CardTitle>예측</CardTitle>
           <p className="text-[11px] text-muted-foreground mt-1">
-            종목을 직접 바꿔 비교 · 최근 90일 변동성 기반 · 투자조언 아님
+            최근 90일 변동성 기반
           </p>
         </div>
-        <Badge variant="neutral" size="sm">
+        <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
           σ {(stdSigma(p) * 100).toFixed(2)}%/일
         </Badge>
       </CardHeader>
@@ -111,11 +111,13 @@ export function PredictionPanel({
             }
           />
           <SummaryCard
-            label="해외 야간"
+            label="해외 환산"
             value={
-              p.nightSignal ? fmtPercent(p.nightSignal.expectedRate) : "OFF/없음"
+              p.nightSignal?.impliedKrwPrice
+                ? fmtNumber(p.nightSignal.impliedKrwPrice)
+                : "OFF/없음"
             }
-            color={p.nightSignal ? changeColor(p.nightSignal.expectedRate) : ""}
+            color={p.nightSignal ? changeColor(p.nightSignal.premiumRate) : ""}
           />
           <SummaryCard
             label="매수 / 매도 강도"
@@ -130,6 +132,8 @@ export function PredictionPanel({
             }
           />
         </div>
+
+        {p.nightSignal && <NightValuationCard signal={p.nightSignal} />}
 
         <details className="rounded-xl border border-border bg-muted/20 p-3">
           <summary className="cursor-pointer text-sm font-medium">
@@ -243,42 +247,6 @@ export function PredictionPanel({
               </Section>
             )}
 
-            {p.nightSignal && (
-              <Section
-                title="해외 개별 야간 참고"
-                icon={<MoonStar className="h-3.5 w-3.5" />}
-              >
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">
-                      {p.nightSignal.label}
-                    </span>
-                    <span
-                      className={`tabular font-medium ${changeColor(p.nightSignal.expectedRate)}`}
-                    >
-                      {fmtPercent(p.nightSignal.expectedRate)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">
-                      {p.nightSignal.source}
-                    </span>
-                    <span className="tabular">
-                      {fmtNumber(p.nightSignal.price, 2)}
-                      {p.nightSignal.currency
-                        ? ` ${p.nightSignal.currency}`
-                        : ""}
-                    </span>
-                  </div>
-                  {p.nightSignal.time && (
-                    <div className="text-[11px] text-muted-foreground tabular">
-                      갱신 {fmtTime(p.nightSignal.time)}
-                    </div>
-                  )}
-                </div>
-              </Section>
-            )}
-
             <Section
               title="신호 강도"
               icon={<TrendingDown className="h-3.5 w-3.5" />}
@@ -322,6 +290,102 @@ function StockSelector({
           {s.meta.name}
         </button>
       ))}
+    </div>
+  );
+}
+
+type NightSignal = NonNullable<
+  NonNullable<StockSnapshot["predictions"]>["nightSignal"]
+>;
+
+function NightValuationCard({ signal }: { signal: NightSignal }) {
+  const premium = signal.premiumRate;
+  const isEur = signal.currency?.toUpperCase() === "EUR";
+  const fxText = isEur
+    ? `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.eurUsd, 4)} × ${fmtNumber(signal.usdKrw, 0)} ÷ ${signal.sharesPerReceipt ?? 1}`
+    : `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.fxToKrw, 0)} ÷ ${signal.sharesPerReceipt ?? 1}`;
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Badge variant="neutral" size="sm" className="mb-2">
+            <MoonStar className="h-3 w-3" />
+            야간 보통주 환산
+          </Badge>
+          <div className="text-sm text-muted-foreground">
+            {signal.label} · {signal.source}
+          </div>
+        </div>
+        {signal.time && (
+          <span className="text-[11px] text-muted-foreground tabular whitespace-nowrap">
+            {fmtTime(signal.time)}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+          <div className="text-[11px] text-muted-foreground mb-1">
+            원화 환산가
+          </div>
+          <div className={`tabular text-2xl font-bold ${changeColor(premium)}`}>
+            {fmtNumber(signal.impliedKrwPrice, 0)}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-1">
+            KRX 정규 종가 {fmtNumber(signal.krxClose, 0)} 대비
+          </div>
+        </div>
+        <MiniMetric
+          label="괴리율"
+          value={fmtPercent(premium)}
+          color={changeColor(premium)}
+        />
+        <MiniMetric
+          label={`${signal.currency ?? ""} 원가격`}
+          value={`${fmtNumber(signal.price, 2)} ${signal.currency ?? ""}`}
+          sub={`${signal.sharesPerReceipt ?? 1}주 환산`}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {isEur && (
+          <MiniMetric label="EURUSD" value={fmtNumber(signal.eurUsd, 4)} />
+        )}
+        <MiniMetric label="USDKRW" value={fmtNumber(signal.usdKrw, 0)} />
+        <MiniMetric
+          label="GDR 등락"
+          value={fmtPercent(signal.expectedRate)}
+          color={changeColor(signal.expectedRate)}
+        />
+      </div>
+
+      <div className="rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="font-medium text-foreground mb-1">계산 방법</div>
+        <div className="tabular">
+          {fxText} = {fmtNumber(signal.impliedKrwPrice, 0)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+  sub,
+  color = "",
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+      <div className="text-[11px] text-muted-foreground mb-1">{label}</div>
+      <div className={`tabular text-base font-semibold ${color}`}>{value}</div>
+      {sub && <div className="text-[11px] text-muted-foreground mt-1">{sub}</div>}
     </div>
   );
 }

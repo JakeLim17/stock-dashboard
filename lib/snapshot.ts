@@ -21,6 +21,7 @@ import type {
   MarketIndicator,
   NewsItem,
   OverseasNightIndicator,
+  Quote,
   SymbolMeta,
   StockSnapshot,
 } from "./types";
@@ -79,30 +80,41 @@ export async function buildSnapshot(
     vix: vix?.value ?? 15,
   };
 
-  // 1.5) 베타 시나리오용 시장 시계열 (관심 종목 전체에서 공유, 한 번만 호출)
-  const [nasdaqHistory, fxHistory] = await Promise.all([
+  const usdKrw = fx?.value ?? null;
+
+  // 1.5) 베타 시나리오용 시장 시계열/환율 (관심 종목 전체에서 공유, 한 번만 호출)
+  const [nasdaqHistory, fxHistory, eurUsdQuote] = await Promise.all([
     fetchHistorical("NQ=F", 90).catch(() => []),
     fetchHistorical("KRW=X", 90).catch(() => []),
+    includeOverseasNight
+      ? fetchQuote("EURUSD=X", "유로/달러").catch((e) => {
+          errors["EURUSD=X"] = e instanceof Error ? e.message : String(e);
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
+  const eurUsd = eurUsdQuote?.price ?? null;
 
   // 2) 관심 종목 — quote, historical, flow 병렬
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, overseasNight] = await Promise.all([
+      const [quoteRes, hist] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
-        includeOverseasNight
-          ? fetchOverseasNightIndicator(meta).catch((e) => {
-              errors[`night:${meta.code}`] =
-                e instanceof Error ? e.message : String(e);
-              return null;
-            })
-          : Promise.resolve(null),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote = quoteRes.quote;
+      const overseasNight = includeOverseasNight
+        ? await fetchOverseasNightIndicator(meta, quote, usdKrw, eurUsd).catch(
+            (e) => {
+              errors[`night:${meta.code}`] =
+                e instanceof Error ? e.message : String(e);
+              return null;
+            }
+          )
+        : null;
 
       const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
@@ -173,22 +185,52 @@ export async function buildSnapshot(
 }
 
 async function fetchOverseasNightIndicator(
-  meta: SymbolMeta
+  meta: SymbolMeta,
+  domesticQuote: Quote,
+  usdKrw: number | null,
+  eurUsd: number | null
 ): Promise<OverseasNightIndicator | null> {
   const proxy = getOverseasNightProxy(meta.code);
   if (!proxy) return null;
 
   const quote = await fetchQuote(proxy.proxyCode, proxy.name);
   if (!quote.price || quote.changeRate == null) return null;
+  const currency = quote.currency?.toUpperCase();
+  const fxToKrw =
+    currency === "KRW"
+      ? 1
+      : currency === "USD"
+        ? usdKrw
+        : currency === "EUR" && eurUsd != null && usdKrw != null
+          ? eurUsd * usdKrw
+          : null;
+  const impliedKrwPrice =
+    fxToKrw != null ? (quote.price * fxToKrw) / proxy.sharesPerReceipt : null;
+  const krxClose =
+    domesticQuote.extendedHours?.regularClose ??
+    domesticQuote.price ??
+    domesticQuote.prevClose ??
+    null;
+  const premiumRate =
+    impliedKrwPrice != null && krxClose != null && krxClose > 0
+      ? impliedKrwPrice / krxClose - 1
+      : null;
 
   return {
     baseCode: meta.code,
     proxyCode: proxy.proxyCode,
     name: proxy.name,
     exchange: proxy.exchange,
+    sharesPerReceipt: proxy.sharesPerReceipt,
     price: quote.price,
     changeRate: quote.changeRate,
     currency: quote.currency,
+    fxToKrw,
+    usdKrw,
+    eurUsd,
+    impliedKrwPrice,
+    krxClose,
+    premiumRate,
     marketState: quote.marketState,
     priceTime: quote.priceTime,
     fetchedAt: quote.fetchedAt,

@@ -69,7 +69,7 @@ export const MARKET_INDICATORS: SymbolMeta[] = [
 
 type OverseasNightProxy = Pick<
   OverseasNightIndicator,
-  "baseCode" | "proxyCode" | "name" | "exchange"
+  "baseCode" | "proxyCode" | "name" | "exchange" | "sharesPerReceipt"
 >;
 
 // 해외장에서 거래되는 국내 개별주 대체 지표.
@@ -80,12 +80,14 @@ export const OVERSEAS_NIGHT_PROXIES: OverseasNightProxy[] = [
     proxyCode: "SMSN.IL",
     name: "삼성전자 GDR",
     exchange: "London IOB",
+    sharesPerReceipt: 25,
   },
   {
     baseCode: "000660.KS",
     proxyCode: "HY9H.F",
     name: "SK하이닉스 GDR",
     exchange: "Frankfurt",
+    sharesPerReceipt: 1,
   },
 ];
 

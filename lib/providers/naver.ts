@@ -191,7 +191,8 @@ export async function fetchNaverQuote(
     const pollingData = polling.datas?.[0];
     const extendedHours = extractKoreanExtended(
       pollingData?.overMarketPriceInfo,
-      prevClose
+      prevClose,
+      price
     );
     const activeExtended =
       extendedHours?.active === true ? extendedHours : null;
@@ -231,7 +232,8 @@ export async function fetchNaverQuote(
 //  - 변동률은 정규장 종가 기준이 아니라 네이버가 주는 fluctuationsRatio(전일 종가 기준)을 그대로 사용
 function extractKoreanExtended(
   info: NaverOverMarketPriceInfo | null | undefined,
-  prevClose: number
+  prevClose: number,
+  regularClose: number
 ): ExtendedHoursQuote | null {
   if (!info) return null;
   // 정규장 거래중이면 overMarketPriceInfo가 함께 와도 시간외 의미 없음
@@ -264,6 +266,7 @@ function extractKoreanExtended(
     tradingValue: parseTradingValue(info.accumulatedTradingValue),
     high: parseNaverNumber(info.highPrice),
     low: parseNaverNumber(info.lowPrice),
+    regularClose,
     time: info.localTradedAt ? new Date(info.localTradedAt).getTime() : null,
     active: info.overMarketStatus === "OPEN",
   };

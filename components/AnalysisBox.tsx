@@ -7,6 +7,13 @@ import { Badge } from "./ui/Badge";
 // 모바일에서는 자연스럽게 세로 stack.
 export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
   const a = snap.analysis;
+  const signalLabel: Record<typeof a.signal, string> = {
+    BUY: "신규 매수",
+    ADD: "분할 매수",
+    HOLD: "보유",
+    WATCH: "관망",
+    SELL: "비중 축소",
+  };
   const sigVariant =
     a.signal === "BUY"
       ? "buy"
@@ -30,7 +37,7 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
               </span>
               <span className="text-sm font-semibold">{snap.meta.name}</span>
               <Badge variant={sigVariant} size="md">
-                {a.signal}
+                {signalLabel[a.signal]}
               </Badge>
             </div>
             {/* 헤드라인 — 잘리지 않게 wrap 허용. lg에서도 1~2줄까지는 자연스럽게 보이게 */}

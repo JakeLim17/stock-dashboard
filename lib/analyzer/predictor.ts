@@ -236,6 +236,13 @@ export function predict(input: PredictorInput): Predictions {
           source: overseasNight.exchange,
           price: overseasNight.price,
           currency: overseasNight.currency,
+          sharesPerReceipt: overseasNight.sharesPerReceipt,
+          fxToKrw: overseasNight.fxToKrw,
+          usdKrw: overseasNight.usdKrw,
+          eurUsd: overseasNight.eurUsd,
+          impliedKrwPrice: overseasNight.impliedKrwPrice,
+          krxClose: overseasNight.krxClose,
+          premiumRate: overseasNight.premiumRate,
           time: overseasNight.priceTime,
         }
       : null,

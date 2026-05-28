@@ -21,9 +21,16 @@ export interface OverseasNightIndicator {
   proxyCode: string;
   name: string;
   exchange: string;
+  sharesPerReceipt: number;
   price: number;
   changeRate: number;
   currency?: string;
+  fxToKrw?: number | null;
+  usdKrw?: number | null;
+  eurUsd?: number | null;
+  impliedKrwPrice?: number | null;
+  krxClose?: number | null;
+  premiumRate?: number | null;
   marketState?: string;
   priceTime?: number | null;
   fetchedAt: number;
@@ -48,6 +55,8 @@ export interface ExtendedHoursQuote {
   tradingValue?: number | null;
   high?: number | null;
   low?: number | null;
+  // 한국 시간외 표시 때 비교 기준으로 쓰는 정규장 종가
+  regularClose?: number | null;
   // 마지막 체결 시각 (epoch ms)
   time?: number | null;
   // 현재 세션이 거래중인지(OPEN), 마감(CLOSE) 여부
@@ -157,6 +166,13 @@ export interface Predictions {
     source: string;
     price: number;
     currency?: string;
+    sharesPerReceipt?: number;
+    fxToKrw?: number | null;
+    usdKrw?: number | null;
+    eurUsd?: number | null;
+    impliedKrwPrice?: number | null;
+    krxClose?: number | null;
+    premiumRate?: number | null;
     time?: number | null;
   } | null;
   // 신호 강도 (양방향 0~100)

@@ -297,7 +297,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             실시간 주식 대시보드
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            반도체 중심 · 룰 기반 판단 보조 (자동매매 아님)
+            반도체 중심 · 룰 기반 판단 보조
           </p>
         </div>
         <div className="flex items-center gap-1.5">
