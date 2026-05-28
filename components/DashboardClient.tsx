@@ -29,6 +29,7 @@ async function logout() {
 
 const REGULAR_REFRESH_MS = 10_000; // 정규장 OPEN: 10초
 const EXTENDED_REFRESH_MS = 15_000; // 시간외/프리/애프터 OPEN: 15초 (네이버 polling 권장 7초의 여유분)
+const OVERSEAS_NIGHT_REFRESH_MS = 30_000; // 해외 GDR 장중: 소스 지연을 고려해 30초 조회
 const OFF_HOURS_REFRESH_MS = 120_000; // 모두 마감: 120초
 const KIS_REGULAR_REFRESH_MS = 2_000; // KIS 실데이터 정규장: 2초
 const KIS_EXTENDED_REFRESH_MS = 5_000; // KIS 실데이터 + 시간외 OPEN: 5초
@@ -59,6 +60,9 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   const isExtended = snapshot.primaries.some(
     (p) => p.quote.extendedHours?.active === true
   );
+  const isOverseasNightOpen = snapshot.primaries.some(
+    (p) => (p.overseasNight?.marketState ?? "").toUpperCase() === "REGULAR"
+  );
   const hasRealFlow = snapshot.primaries.some((p) => p.flow.source === "kis");
 
   if (hasRealFlow) {
@@ -68,6 +72,7 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   }
   if (isRegular) return REGULAR_REFRESH_MS;
   if (isExtended) return EXTENDED_REFRESH_MS;
+  if (isOverseasNightOpen) return OVERSEAS_NIGHT_REFRESH_MS;
   return OFF_HOURS_REFRESH_MS;
 }
 

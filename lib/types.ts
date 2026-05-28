@@ -173,7 +173,9 @@ export interface Predictions {
     impliedKrwPrice?: number | null;
     krxClose?: number | null;
     premiumRate?: number | null;
+    marketState?: string;
     time?: number | null;
+    fetchedAt?: number;
   } | null;
   // 신호 강도 (양방향 0~100)
   strength: {

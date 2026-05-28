@@ -243,7 +243,9 @@ export function predict(input: PredictorInput): Predictions {
           impliedKrwPrice: overseasNight.impliedKrwPrice,
           krxClose: overseasNight.krxClose,
           premiumRate: overseasNight.premiumRate,
+          marketState: overseasNight.marketState,
           time: overseasNight.priceTime,
+          fetchedAt: overseasNight.fetchedAt,
         }
       : null,
     strength: {

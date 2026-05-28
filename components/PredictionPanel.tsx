@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { changeColor, fmtNumber, fmtPercent, fmtTime } from "@/lib/utils";
+import {
+  changeColor,
+  fmtNumber,
+  fmtPercent,
+  fmtRelative,
+} from "@/lib/utils";
 import {
   Crosshair,
   LineChart,
@@ -300,6 +305,12 @@ type NightSignal = NonNullable<
 
 function NightValuationCard({ signal }: { signal: NightSignal }) {
   const premium = signal.premiumRate;
+  const state = nightMarketState(signal.marketState);
+  const staleMs =
+    signal.time && signal.marketState?.toUpperCase() === "REGULAR"
+      ? Date.now() - signal.time
+      : 0;
+  const isDelayed = staleMs > 15 * 60 * 1000;
   const isEur = signal.currency?.toUpperCase() === "EUR";
   const fxText = isEur
     ? `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.eurUsd, 4)} × ${fmtNumber(signal.usdKrw, 0)} ÷ ${signal.sharesPerReceipt ?? 1}`
@@ -309,20 +320,26 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
     <div className="rounded-xl border border-border bg-background p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <Badge variant="neutral" size="sm" className="mb-2">
+          <Badge variant={state.variant} size="sm" className="mb-2">
             <MoonStar className="h-3 w-3" />
-            야간 보통주 환산
+            {state.label}
           </Badge>
           <div className="text-sm text-muted-foreground">
             {signal.label} · {signal.source}
           </div>
         </div>
-        {signal.time && (
-          <span className="text-[11px] text-muted-foreground tabular whitespace-nowrap">
-            {fmtTime(signal.time)}
-          </span>
-        )}
+        <div className="text-right text-[11px] text-muted-foreground tabular whitespace-nowrap">
+          {signal.fetchedAt && <div>조회 {fmtRelative(signal.fetchedAt)}</div>}
+          {signal.time && <div>체결 {fmtRelative(signal.time)}</div>}
+        </div>
       </div>
+
+      {isDelayed && (
+        <div className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-[11px] text-warn">
+          해외 소스 체결 시각이 15분 이상 지연되어 있습니다. 화면은 30초마다
+          재조회하지만, 원천 데이터가 늦으면 가격도 늦게 바뀝니다.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
@@ -349,6 +366,7 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <MiniMetric label="장 구분" value={state.label} />
         {isEur && (
           <MiniMetric label="EURUSD" value={fmtNumber(signal.eurUsd, 4)} />
         )}
@@ -368,6 +386,26 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
       </div>
     </div>
   );
+}
+
+function nightMarketState(state?: string): {
+  label: string;
+  variant: "good" | "neutral" | "warn";
+} {
+  switch ((state ?? "").toUpperCase()) {
+    case "REGULAR":
+      return { label: "해외장 장중", variant: "good" };
+    case "PRE":
+    case "PREPRE":
+      return { label: "해외장 장전", variant: "neutral" };
+    case "POST":
+    case "POSTPOST":
+      return { label: "해외장 장후", variant: "neutral" };
+    case "CLOSED":
+      return { label: "해외장 마감", variant: "warn" };
+    default:
+      return { label: "해외장 상태 미확인", variant: "neutral" };
+  }
 }
 
 function MiniMetric({

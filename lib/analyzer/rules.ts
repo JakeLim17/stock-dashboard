@@ -107,29 +107,22 @@ function clamp(n: number, lo = 0, hi = 100) {
 }
 
 function decideSignal(heat: number, buy: number, marketState?: string): SignalStatus {
-  // 장중/비장중 임계값을 분리해 과한 신호를 줄인다.
-  //
-  // 임계값 완화 (2026-05-28): 우상향·강세장에서 정상 강세 종목조차
-  //  ADD 가 거의 잡히지 않던 문제를 해결.
-  //   - 장중 BUY  : 70/50 → 68/52  (살짝)
-  //   - 장중 ADD  : 55/55 → 52/58  (정상 강세 종목 잡히게)
-  //   - 비장중 BUY: 78/45 → 73/48
-  //   - 비장중 ADD: 62/52 → 58/55
-  //  SELL/WATCH 는 그대로 — 과열 경계는 좁히지 않음.
+  // 장중/비장중 임계값을 분리한다.
+  // 강한 매수 근거가 있으면 과열만으로 바로 관망/축소로 밀지 않는다.
   if (isRegularMarket(marketState)) {
-    if (heat >= 70 && buy <= 35) return "SELL";
-    if (heat >= 65) return "WATCH";
-    if (buy >= 68 && heat <= 52) return "BUY";
-    if (buy >= 52 && heat <= 58) return "ADD";
+    if (heat >= 78 && buy <= 30) return "SELL";
+    if (buy >= 68 && heat <= 55) return "BUY";
+    if (buy >= 56 && heat <= 62) return "ADD";
+    if (heat >= 65 && buy < 60) return "WATCH";
     if (buy <= 35 && heat <= 45) return "WATCH";
     return "HOLD";
   }
 
-  // 비장중(종가/시간외 기준)은 신호를 더 보수적으로 판정.
-  if (heat >= 72 && buy <= 32) return "SELL";
-  if (heat >= 62) return "WATCH";
-  if (buy >= 73 && heat <= 48) return "BUY";
-  if (buy >= 58 && heat <= 55) return "ADD";
+  // 비장중은 보수적으로 보되, 해외 야간 강세 같은 보조 근거가 있으면 기회를 남긴다.
+  if (heat >= 80 && buy <= 28) return "SELL";
+  if (buy >= 72 && heat <= 52) return "BUY";
+  if (buy >= 58 && heat <= 62) return "ADD";
+  if (heat >= 65 && buy < 62) return "WATCH";
   if (buy <= 35 && heat <= 45) return "WATCH";
   return "HOLD";
 }
@@ -143,9 +136,9 @@ function headlineFor(signal: SignalStatus, heat: number, buy: number): string {
     case "HOLD":
       return "보유 유지 / 추격은 자제";
     case "WATCH":
-      return heat >= 60 ? "추격매수 위험 — 관망 권고" : "방향성 불명확 — 관망 권고";
+      return heat >= 60 ? "과열 구간 — 눌림 확인" : "방향성 확인 필요";
     case "SELL":
-      return "과열 + 약세 신호 — 비중 축소 검토";
+      return "과열 + 약세 신호 — 일부 익절 검토";
   }
 }
 
@@ -176,7 +169,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     .map((h) => `${h.good ? "+ " : "− "}${h.label}`);
 
   if (!isRegularMarket(input.quote.marketState)) {
-    reasons.unshift("− 비장중 데이터라 신호를 보수적으로 판정");
+    reasons.unshift("· 비장중이라 종가/야간 지표 기준으로 판정");
   }
 
   if (reasons.length === 0) reasons.push("특이 신호 없음");
