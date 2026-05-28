@@ -33,33 +33,33 @@ export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
         <div>
           <CardTitle>예측 — {snap.meta.name}</CardTitle>
           <p className="text-[11px] text-muted-foreground mt-1">
-            최근 90일 데이터 기반 통계 추정 · 투자조언 아님
+            최근 90일 변동성 기반 · 추세 가정 없음 · 투자조언 아님
           </p>
         </div>
         <Badge variant="neutral" size="sm">
           σ {(stdSigma(p) * 100).toFixed(2)}%/일
         </Badge>
       </CardHeader>
-      <CardBody className="space-y-5">
-        {/* A. 가격 범위 */}
+      <CardBody className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5">
+        {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0) */}
         {p.ranges.length > 0 && (
           <Section
-            title="예상 가격 범위 (68% 신뢰)"
+            title="변동성 범위 (68% 신뢰)"
             icon={<LineChart className="h-3.5 w-3.5" />}
           >
             <div className="space-y-2">
               {p.ranges.map((r) => {
-                const centerChange = price > 0 ? r.center / price - 1 : 0;
+                // drift=0 이라 center=현재가. 폭만 ±%로 표시.
+                const halfWidth =
+                  price > 0 ? Math.max(r.high / price - 1, 1 - r.low / price) : 0;
                 return (
                   <div key={r.horizonDays} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">
                         {r.horizonLabel} 후
                       </span>
-                      <span
-                        className={`tabular ${changeColor(centerChange)} text-[11px]`}
-                      >
-                        중심 {fmtPercent(centerChange)}
+                      <span className="tabular text-muted-foreground text-[11px]">
+                        ±{fmtPercent(halfWidth, 1).replace("+", "")}
                       </span>
                     </div>
                     <RangeBar
@@ -169,8 +169,9 @@ export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
   );
 }
 
-// 통계 σ 역추출 (1일 horizonSigma = σ × √1 = σ. center=price·e^(μ), low=center·e^(-σ))
-// 표시용으로만 사용. ranges[0]이 1일이면 그 비율로 σ 추정.
+// 통계 σ 역추출 — 1일 horizonSigma = σ × √1 = σ.
+// drift=0 이라 center=price, low=center·exp(-σ). log(center/low) = σ.
+// 표시용 σ% 배지에만 사용.
 function stdSigma(p: { ranges: { horizonDays: number; center: number; low: number }[] }): number {
   const oneDay = p.ranges.find((r) => r.horizonDays === 1);
   if (!oneDay || oneDay.center <= 0 || oneDay.low <= 0) return 0;

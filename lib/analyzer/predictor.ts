@@ -91,12 +91,17 @@ export function predict(input: PredictorInput): Predictions {
   const closes = history.map((h) => h.close).filter((c) => Number.isFinite(c) && c > 0);
   const returns = dailyReturns(history);
   const sigma = stddev(returns); // 일일 변동성
-  const drift = mean(returns); // 일일 평균 수익률
 
   const price = quote.price || closes[closes.length - 1] || 0;
 
-  // A. 가격 범위 (Geometric Brownian: center = price·e^(μΔt), band = ±σ·√Δt)
-  //    표본이 너무 적으면 표시하지 않음 (오해 소지 방지)
+  // A. 가격 범위 — 변동성 기반 (drift=0, 추세 가정 없음)
+  //    이전엔 center = price·exp(mean(returns)·Δt) 였지만, 우상향 종목은
+  //    drift>0 이라 중심값이 항상 위로 편향되어 사용자가 "예측이 다 +"라고
+  //    오해하기 쉬웠다. 추세는 시나리오(C)·ATR 목표(B)에서 충분히 다루므로
+  //    A는 순수 변동성 신뢰구간만 보여준다.
+  //
+  //    center = price (변동 없음 가정)
+  //    band   = price · exp(±σ·√Δt)  → 68% 신뢰구간
   const ranges: PriceRange[] = [];
   if (price > 0 && returns.length >= 15) {
     const horizons: { label: string; days: number }[] = [
@@ -107,7 +112,7 @@ export function predict(input: PredictorInput): Predictions {
     ];
     for (const h of horizons) {
       const horizonSigma = sigma * Math.sqrt(h.days);
-      const center = price * Math.exp(drift * h.days);
+      const center = price;
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);
       ranges.push({
@@ -152,38 +157,56 @@ export function predict(input: PredictorInput): Predictions {
   }
 
   // C. 시장 시나리오 (최근 60일 회귀 베타)
+  //    표본 수가 너무 작거나(한·미 영업일 차이로 30 미만일 수 있음),
+  //    종목·시장 시리즈 길이가 크게 어긋나면 베타가 불안정해지므로 가드.
+  //    NOTE: 현재 일자별 정렬은 하지 않고 단순 tail join 이라
+  //    한국 휴장일·미국 휴장일이 다르면 베타가 약간 편향될 수 있다.
+  //    근본 해결은 일자 join 필요(추후 과제).
   const scenarios: ScenarioRow[] = [];
+  const MIN_SCENARIO_SAMPLES = 30;
   const stockRecent = returns.slice(-60);
 
-  if (nasdaqHistory && nasdaqHistory.length >= 20) {
+  if (
+    nasdaqHistory &&
+    nasdaqHistory.length >= 30 &&
+    stockRecent.length >= MIN_SCENARIO_SAMPLES
+  ) {
     const nqRet = dailyReturns(nasdaqHistory).slice(-60);
-    const beta = regressionBeta(stockRecent, nqRet);
-    if (Math.abs(beta) > 0.01) {
-      scenarios.push({
-        label: "나스닥 +1% 시",
-        expected: beta * 0.01,
-        beta,
-        baselineLabel: "NQ=F 60일",
-      });
-      scenarios.push({
-        label: "나스닥 -1% 시",
-        expected: -beta * 0.01,
-        beta,
-        baselineLabel: "NQ=F 60일",
-      });
+    if (nqRet.length >= MIN_SCENARIO_SAMPLES) {
+      const beta = regressionBeta(stockRecent, nqRet);
+      if (Math.abs(beta) > 0.05) {
+        scenarios.push({
+          label: "나스닥 +1% 시",
+          expected: beta * 0.01,
+          beta,
+          baselineLabel: "NQ=F 60일",
+        });
+        scenarios.push({
+          label: "나스닥 -1% 시",
+          expected: -beta * 0.01,
+          beta,
+          baselineLabel: "NQ=F 60일",
+        });
+      }
     }
   }
 
-  if (fxHistory && fxHistory.length >= 20) {
+  if (
+    fxHistory &&
+    fxHistory.length >= 30 &&
+    stockRecent.length >= MIN_SCENARIO_SAMPLES
+  ) {
     const fxRet = dailyReturns(fxHistory).slice(-60);
-    const beta = regressionBeta(stockRecent, fxRet);
-    if (Math.abs(beta) > 0.05) {
-      scenarios.push({
-        label: "환율 +1% (원화 약세) 시",
-        expected: beta * 0.01,
-        beta,
-        baselineLabel: "KRW=X 60일",
-      });
+    if (fxRet.length >= MIN_SCENARIO_SAMPLES) {
+      const beta = regressionBeta(stockRecent, fxRet);
+      if (Math.abs(beta) > 0.1) {
+        scenarios.push({
+          label: "환율 +1% (원화 약세) 시",
+          expected: beta * 0.01,
+          beta,
+          baselineLabel: "KRW=X 60일",
+        });
+      }
     }
   }
 
