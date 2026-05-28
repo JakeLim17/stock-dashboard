@@ -3,8 +3,8 @@
 import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
-import { Crosshair, LineChart, TrendingDown, TrendingUp } from "lucide-react";
+import { changeColor, fmtNumber, fmtPercent, fmtTime } from "@/lib/utils";
+import { Crosshair, LineChart, MoonStar, TrendingDown, TrendingUp } from "lucide-react";
 
 // 통계 기반 예측 패널 (선택된 종목 1개에 대해)
 //  A: 가격 범위 (1σ)  B: 진입/손절/목표(ATR)  C: 시장 베타  E: 신호 강도
@@ -149,6 +149,42 @@ export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
                 </li>
               ))}
             </ul>
+          </Section>
+        )}
+
+        {p.nightSignal && (
+          <Section
+            title="해외 개별 야간 참고"
+            icon={<MoonStar className="h-3.5 w-3.5" />}
+          >
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">
+                  {p.nightSignal.label}
+                </span>
+                <span
+                  className={`tabular font-medium ${changeColor(p.nightSignal.expectedRate)}`}
+                >
+                  {fmtPercent(p.nightSignal.expectedRate)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {p.nightSignal.source}
+                </span>
+                <span className="tabular">
+                  {fmtNumber(p.nightSignal.price, 2)}
+                  {p.nightSignal.currency
+                    ? ` ${p.nightSignal.currency}`
+                    : ""}
+                </span>
+              </div>
+              {p.nightSignal.time && (
+                <div className="text-[11px] text-muted-foreground tabular">
+                  갱신 {fmtTime(p.nightSignal.time)}
+                </div>
+              )}
+            </div>
           </Section>
         )}
 

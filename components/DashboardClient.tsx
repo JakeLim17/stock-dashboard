@@ -16,7 +16,7 @@ import { PredictionPanel } from "./PredictionPanel";
 import { PriceChart } from "./PriceChart";
 import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
-import { LogOut, RefreshCw, Search, Plus, X } from "lucide-react";
+import { LogOut, MoonStar, RefreshCw, Search, Plus, X } from "lucide-react";
 
 async function logout() {
   try {
@@ -35,6 +35,7 @@ const KIS_EXTENDED_REFRESH_MS = 5_000; // KIS 실데이터 + 시간외 OPEN: 5�
 const KIS_OFF_HOURS_REFRESH_MS = 30_000; // KIS 실데이터 + 모두 마감: 30초
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
+const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";
 
 const CANDIDATE_CODES = new Set(WATCHLIST_CANDIDATES.map((s) => s.code));
 const CANDIDATE_BY_CODE = new Map(WATCHLIST_CANDIDATES.map((s) => [s.code, s]));
@@ -85,22 +86,29 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [useOverseasNight, setUseOverseasNight] = useState(false);
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootedRef = useRef(false);
   const watchCodesRef = useRef(watchCodes);
+  const overseasNightRef = useRef(useOverseasNight);
   useEffect(() => {
     watchCodesRef.current = watchCodes;
   }, [watchCodes]);
+  useEffect(() => {
+    overseasNightRef.current = useOverseasNight;
+  }, [useOverseasNight]);
   const refreshMs = resolveRefreshMs(snap);
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
-  const refresh = useCallback(async (codes?: string[]) => {
+  const refresh = useCallback(async (codes?: string[], nightMode?: boolean) => {
     const target = codes ?? watchCodesRef.current;
     const query = encodeURIComponent(target.join(","));
-    lastQueryRef.current = query;
+    const includeNight = nightMode ?? overseasNightRef.current;
+    const requestKey = `${query}:${includeNight ? "night" : "regular"}`;
+    lastQueryRef.current = requestKey;
 
     // 진행 중인 요청이 있으면 취소하고 새 요청만 살림
     if (abortRef.current) abortRef.current.abort();
@@ -110,13 +118,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     setRefreshing(true);
     setError(null);
     try {
-      const r = await fetch(`/api/snapshot?symbols=${query}`, {
+      const r = await fetch(`/api/snapshot?symbols=${query}${includeNight ? "&night=1" : ""}`, {
         cache: "no-store",
         signal: ctrl.signal,
       });
       if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
       const j = (await r.json()) as DashboardSnapshot;
-      if (lastQueryRef.current === query) {
+      if (lastQueryRef.current === requestKey) {
         setSnap(j);
       }
     } catch (e) {
@@ -129,6 +137,16 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       }
     }
   }, []);
+
+  const toggleOverseasNight = useCallback(() => {
+    const next = !overseasNightRef.current;
+    overseasNightRef.current = next;
+    setUseOverseasNight(next);
+    if (bootedRef.current) {
+      localStorage.setItem(NIGHT_STORAGE_KEY, next ? "1" : "0");
+    }
+    void refresh(undefined, next);
+  }, [refresh]);
 
   // 관심종목 변경을 한 번에 모아서 처리: 칩은 즉시 업데이트, fetch는 debounce
   const commitWatch = useCallback(
@@ -160,18 +178,24 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     if (bootedRef.current) return;
     bootedRef.current = true;
     try {
+      const savedNight = localStorage.getItem(NIGHT_STORAGE_KEY) === "1";
+      if (savedNight) {
+        overseasNightRef.current = true;
+        setUseOverseasNight(true);
+      }
+
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const normalized = normalizeWatchCodes(parsed as string[]);
+      const parsed = raw ? JSON.parse(raw) : null;
       const current = normalizeWatchCodes(
         initial.primaries.map((p) => p.meta.code)
       );
-      if (normalized.join(",") !== current.join(",")) {
+      const normalized = Array.isArray(parsed)
+        ? normalizeWatchCodes(parsed as string[])
+        : current;
+      if (normalized.join(",") !== current.join(",") || savedNight) {
         setWatchCodes(normalized);
         setSelected(normalized[0] ?? "");
-        void refresh(normalized);
+        void refresh(normalized, savedNight);
       }
     } catch {
       // ignore storage parse errors
@@ -184,6 +208,11 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     if (!bootedRef.current) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(watchCodes));
   }, [watchCodes]);
+
+  useEffect(() => {
+    if (!bootedRef.current) return;
+    localStorage.setItem(NIGHT_STORAGE_KEY, useOverseasNight ? "1" : "0");
+  }, [useOverseasNight]);
 
   // 자동 새로고침 (탭이 활성일 때만 — Vercel 함수 호출 절약)
   useEffect(() => {
@@ -343,6 +372,19 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             className="text-xs px-2.5 py-1 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted transition-colors"
           >
             기본 복구
+          </button>
+          <button
+            type="button"
+            onClick={toggleOverseasNight}
+            className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              useOverseasNight
+                ? "bg-accent/15 border-accent/40 text-accent"
+                : "bg-card border-border text-muted-foreground hover:bg-muted"
+            }`}
+            title="삼성전자 GDR, SK하이닉스 GDR 같은 해외 개별 야간 지표를 예측에 반영"
+          >
+            <MoonStar className="h-3 w-3" />
+            해외 야간 {useOverseasNight ? "ON" : "OFF"}
           </button>
           <span className="ml-auto text-xs text-muted-foreground tabular">
             {watchCodes.length}/{MAX_WATCH}

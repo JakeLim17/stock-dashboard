@@ -18,6 +18,7 @@ export interface AnalyzeInput {
     nasdaqRate: number; // 나스닥 선물 등락률
     fxRate: number; // 환율 등락률 (원화 약세면 양수)
     vix: number; // VIX 수치
+    overseasNightRate?: number | null; // 해외 개별 GDR/DR 등락률
   };
 }
 
@@ -88,6 +89,15 @@ function evaluateRules(input: AnalyzeInput): RuleHit[] {
   // 9) 나스닥 선물
   if (context.nasdaqRate >= 0.005) hits.push({ label: "나스닥 선물 강세", heat: 0, buy: 10, good: true });
   if (context.nasdaqRate <= -0.01) hits.push({ label: "나스닥 선물 약세", heat: 10, buy: -10, good: false });
+
+  // 10) 해외 개별 야간 지표(GDR/DR). 토글이 켜졌을 때만 들어온다.
+  if (context.overseasNightRate != null) {
+    const nr = context.overseasNightRate;
+    if (nr >= 0.03) hits.push({ label: "해외 개별 야간 +3% 이상", heat: 8, buy: 12, good: true });
+    else if (nr >= 0.01) hits.push({ label: "해외 개별 야간 강세", heat: 3, buy: 8, good: true });
+    else if (nr <= -0.03) hits.push({ label: "해외 개별 야간 -3% 이상", heat: 12, buy: -12, good: false });
+    else if (nr <= -0.01) hits.push({ label: "해외 개별 야간 약세", heat: 8, buy: -8, good: false });
+  }
 
   return hits;
 }

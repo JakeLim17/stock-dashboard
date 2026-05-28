@@ -6,6 +6,7 @@ import type {
   Predictions,
   Quote,
   ScenarioRow,
+  OverseasNightIndicator,
 } from "../types";
 
 // ─── 기본 통계 유틸 ────────────────────────────────────────
@@ -82,11 +83,19 @@ export interface PredictorInput {
   // 기존 analyze() 결과에서 가져옴
   buyScore: number;
   heatScore: number;
+  overseasNight?: OverseasNightIndicator | null;
 }
 
 export function predict(input: PredictorInput): Predictions {
-  const { quote, history, nasdaqHistory, fxHistory, buyScore, heatScore } =
-    input;
+  const {
+    quote,
+    history,
+    nasdaqHistory,
+    fxHistory,
+    buyScore,
+    heatScore,
+    overseasNight,
+  } = input;
 
   const closes = history.map((h) => h.close).filter((c) => Number.isFinite(c) && c > 0);
   const returns = dailyReturns(history);
@@ -220,6 +229,16 @@ export function predict(input: PredictorInput): Predictions {
     ranges,
     targets,
     scenarios,
+    nightSignal: overseasNight
+      ? {
+          label: overseasNight.name,
+          expectedRate: overseasNight.changeRate,
+          source: overseasNight.exchange,
+          price: overseasNight.price,
+          currency: overseasNight.currency,
+          time: overseasNight.priceTime,
+        }
+      : null,
     strength: {
       buy: Math.round(buyStrength),
       sell: Math.round(sellStrength),

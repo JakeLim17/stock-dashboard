@@ -14,6 +14,21 @@ export interface SymbolMeta {
   primary?: boolean;
 }
 
+export interface OverseasNightIndicator {
+  // 국내 종목 코드 (예: 005930.KS)
+  baseCode: string;
+  // 해외 대체 티커 (예: SMSN.IL)
+  proxyCode: string;
+  name: string;
+  exchange: string;
+  price: number;
+  changeRate: number;
+  currency?: string;
+  marketState?: string;
+  priceTime?: number | null;
+  fetchedAt: number;
+}
+
 // 시간외 거래 세션
 //  - pre        : 미국 프리마켓 (Yahoo)
 //  - post       : 미국 애프터마켓 (Yahoo)
@@ -135,6 +150,15 @@ export interface Predictions {
   targets: PriceTargets | null;
   // 시장 베타 시나리오 (나스닥, 환율)
   scenarios: ScenarioRow[];
+  // 해외 GDR/DR 등 개별 야간 참고 지표. 토글이 켜졌을 때만 채움.
+  nightSignal?: {
+    label: string;
+    expectedRate: number;
+    source: string;
+    price: number;
+    currency?: string;
+    time?: number | null;
+  } | null;
   // 신호 강도 (양방향 0~100)
   strength: {
     buy: number;
@@ -148,6 +172,7 @@ export interface StockSnapshot {
   flow: FlowData;
   tech: TechIndicators;
   analysis: AnalysisResult;
+  overseasNight?: OverseasNightIndicator | null;
   predictions?: Predictions | null;
 }
 

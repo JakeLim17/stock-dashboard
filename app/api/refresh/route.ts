@@ -7,14 +7,19 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     let symbols: string[] = [];
+    let includeOverseasNight = false;
     try {
-      const body = (await req.json()) as { symbols?: string[] };
+      const body = (await req.json()) as {
+        symbols?: string[];
+        includeOverseasNight?: boolean;
+      };
       symbols = Array.isArray(body.symbols) ? body.symbols : [];
+      includeOverseasNight = body.includeOverseasNight === true;
     } catch {
       // empty body 허용
     }
 
-    const snap = await buildSnapshot(symbols);
+    const snap = await buildSnapshot(symbols, { includeOverseasNight });
     return NextResponse.json(snap);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

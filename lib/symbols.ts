@@ -1,4 +1,4 @@
-import type { SymbolMeta } from "./types";
+import type { OverseasNightIndicator, SymbolMeta } from "./types";
 
 // 메인 관심 종목 (기본 카드 3개)
 export const PRIMARY_SYMBOLS: SymbolMeta[] = [
@@ -66,6 +66,34 @@ export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "KRW=X", name: "달러/원", kind: "fx" },
   { code: "^VIX", name: "VIX 변동성", kind: "index" },
 ];
+
+type OverseasNightProxy = Pick<
+  OverseasNightIndicator,
+  "baseCode" | "proxyCode" | "name" | "exchange"
+>;
+
+// 해외장에서 거래되는 국내 개별주 대체 지표.
+// 삼성전기처럼 확인 가능한 GDR/DR 티커가 없는 종목은 매핑하지 않는다.
+export const OVERSEAS_NIGHT_PROXIES: OverseasNightProxy[] = [
+  {
+    baseCode: "005930.KS",
+    proxyCode: "SMSN.IL",
+    name: "삼성전자 GDR",
+    exchange: "London IOB",
+  },
+  {
+    baseCode: "000660.KS",
+    proxyCode: "HY9H.F",
+    name: "SK하이닉스 GDR",
+    exchange: "Frankfurt",
+  },
+];
+
+export function getOverseasNightProxy(
+  code: string
+): OverseasNightProxy | null {
+  return OVERSEAS_NIGHT_PROXIES.find((p) => p.baseCode === code) ?? null;
+}
 
 // 한국 종목 코드를 6자리 숫자로 변환 (KIS API 호환). 예: 005930.KS -> 005930
 export function toKisCode(code: string): string | null {

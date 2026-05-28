@@ -13,8 +13,9 @@ export async function GET(req: Request) {
       .map((s) => s.trim())
       .filter(Boolean)
       .slice(0, 8);
+    const includeOverseasNight = url.searchParams.get("night") === "1";
 
-    const snap = await buildSnapshot(symbols);
+    const snap = await buildSnapshot(symbols, { includeOverseasNight });
     return NextResponse.json(snap, {
       headers: { "Cache-Control": "no-store" },
     });

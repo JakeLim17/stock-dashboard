@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  fetchQuote,
   fetchQuotesBatch,
   fetchHistorical,
   computeTech,
@@ -9,21 +10,33 @@ import {
 } from "./providers";
 import { analyze, marketMoodLabel, predict } from "./analyzer";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
-import { PRIMARY_SYMBOLS, MARKET_INDICATORS, resolveWatchSymbols } from "./symbols";
+import {
+  PRIMARY_SYMBOLS,
+  MARKET_INDICATORS,
+  getOverseasNightProxy,
+  resolveWatchSymbols,
+} from "./symbols";
 import type {
   DashboardSnapshot,
   MarketIndicator,
   NewsItem,
+  OverseasNightIndicator,
   SymbolMeta,
   StockSnapshot,
 } from "./types";
 
+export interface BuildSnapshotOptions {
+  includeOverseasNight?: boolean;
+}
+
 // 메인 대시보드 1회 분의 스냅샷을 만든다. 실패한 부분은 errors 맵에 기록하고 가능한 부분은 채워서 반환.
 export async function buildSnapshot(
-  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code)
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
 ): Promise<DashboardSnapshot> {
   const errors: Record<string, string> = {};
   const watchSymbols: SymbolMeta[] = resolveWatchSymbols(requestedSymbols);
+  const includeOverseasNight = options.includeOverseasNight === true;
 
   // 1) 시장 지표 먼저 (분석 컨텍스트로 필요)
   const indicatorResults = await fetchQuotesBatch(MARKET_INDICATORS);
@@ -76,9 +89,16 @@ export async function buildSnapshot(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist] = await Promise.all([
+      const [quoteRes, hist, overseasNight] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
+        includeOverseasNight
+          ? fetchOverseasNightIndicator(meta).catch((e) => {
+              errors[`night:${meta.code}`] =
+                e instanceof Error ? e.message : String(e);
+              return null;
+            })
+          : Promise.resolve(null),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
@@ -87,7 +107,15 @@ export async function buildSnapshot(
       const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
       const flow = flowRes.flow;
-      const analysis = analyze({ quote, tech, flow, context });
+      const analysis = analyze({
+        quote,
+        tech,
+        flow,
+        context: {
+          ...context,
+          overseasNightRate: overseasNight?.changeRate ?? null,
+        },
+      });
       const predictions = predict({
         quote,
         history: hist,
@@ -95,6 +123,7 @@ export async function buildSnapshot(
         fxHistory,
         buyScore: analysis.buyScore,
         heatScore: analysis.heatScore,
+        overseasNight,
       });
 
       // 저장
@@ -103,7 +132,7 @@ export async function buildSnapshot(
       saveTech(meta.code, quote.fetchedAt, tech);
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
-      return { meta, quote, tech, flow, analysis, predictions };
+      return { meta, quote, tech, flow, analysis, overseasNight, predictions };
     })
   );
 
@@ -140,6 +169,29 @@ export async function buildSnapshot(
     marketMood,
     news,
     errors,
+  };
+}
+
+async function fetchOverseasNightIndicator(
+  meta: SymbolMeta
+): Promise<OverseasNightIndicator | null> {
+  const proxy = getOverseasNightProxy(meta.code);
+  if (!proxy) return null;
+
+  const quote = await fetchQuote(proxy.proxyCode, proxy.name);
+  if (!quote.price || quote.changeRate == null) return null;
+
+  return {
+    baseCode: meta.code,
+    proxyCode: proxy.proxyCode,
+    name: proxy.name,
+    exchange: proxy.exchange,
+    price: quote.price,
+    changeRate: quote.changeRate,
+    currency: quote.currency,
+    marketState: quote.marketState,
+    priceTime: quote.priceTime,
+    fetchedAt: quote.fetchedAt,
   };
 }
 
