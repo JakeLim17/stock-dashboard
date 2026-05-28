@@ -34,11 +34,22 @@ interface NaverOverMarketPriceInfo {
   overMarketStatus?: string;
   // 시간외 체결가 (원, 천단위 콤마)
   overPrice?: string;
+  highPrice?: string;
+  lowPrice?: string;
   // 전일 종가 대비 변화 (정규장 종가가 아님에 주의: 네이버는 전일 종가 기준으로 줌)
   compareToPreviousClosePrice?: string;
   compareToPreviousPrice?: { name?: string };
   fluctuationsRatio?: string;
   localTradedAt?: string;
+  accumulatedTradingVolume?: string;
+  accumulatedTradingValue?: string;
+}
+
+interface NaverIntegratedPriceInfo {
+  highPrice?: string;
+  lowPrice?: string;
+  accumulatedTradingVolume?: string;
+  accumulatedTradingValue?: string;
 }
 
 interface NaverPollingData {
@@ -46,6 +57,7 @@ interface NaverPollingData {
   marketStatus?: string;
   localTradedAt?: string;
   overMarketPriceInfo?: NaverOverMarketPriceInfo | null;
+  integratedPriceInfo?: NaverIntegratedPriceInfo | null;
 }
 
 interface NaverPollingResponse {
@@ -84,6 +96,16 @@ function parseMarketCap(s: string | undefined | null): number | null {
   return n != null ? n * multiplier : null;
 }
 
+function parseTradingValue(s: string | undefined | null): number | null {
+  if (!s) return null;
+  const n = parseNaverNumber(s);
+  if (n == null) return null;
+  if (s.includes("조")) return n * 1_0000_0000_0000;
+  if (s.includes("억")) return n * 1_0000_0000;
+  if (s.includes("백만")) return n * 1_000_000;
+  return n;
+}
+
 /**
  * Yahoo 종목코드(005930.KS)에서 네이버용 6자리 코드 추출.
  */
@@ -119,7 +141,7 @@ export async function fetchNaverQuote(
           Referer: "https://finance.naver.com/",
         },
         next: { revalidate: 0 },
-      }),
+      }).catch(() => null),
     ]);
 
     if (!basicRes.ok) return null;
@@ -128,7 +150,7 @@ export async function fetchNaverQuote(
     const integration: NaverIntegrationResponse = integrationRes.ok
       ? await integrationRes.json()
       : { totalInfos: [] };
-    const polling: NaverPollingResponse = pollingRes.ok
+    const polling: NaverPollingResponse = pollingRes?.ok
       ? await pollingRes.json()
       : {};
 
@@ -166,10 +188,12 @@ export async function fetchNaverQuote(
     else if (marketStatus === "CLOSE") marketState = "CLOSED";
     else marketState = marketStatus;
 
+    const pollingData = polling.datas?.[0];
     const extendedHours = extractKoreanExtended(
-      polling.datas?.[0]?.overMarketPriceInfo,
+      pollingData?.overMarketPriceInfo,
       prevClose
     );
+    const livePriceInfo = pollingData?.integratedPriceInfo;
 
     return {
       code,
@@ -178,9 +202,15 @@ export async function fetchNaverQuote(
       prevClose,
       changeAbs: absChange,
       changeRate,
-      volume: parseNaverNumber(infoMap.get("accumulatedTradingVolume")),
-      high: parseNaverNumber(infoMap.get("highPrice")),
-      low: parseNaverNumber(infoMap.get("lowPrice")),
+      volume:
+        parseNaverNumber(livePriceInfo?.accumulatedTradingVolume) ??
+        parseNaverNumber(infoMap.get("accumulatedTradingVolume")),
+      high:
+        parseNaverNumber(livePriceInfo?.highPrice) ??
+        parseNaverNumber(infoMap.get("highPrice")),
+      low:
+        parseNaverNumber(livePriceInfo?.lowPrice) ??
+        parseNaverNumber(infoMap.get("lowPrice")),
       marketCap: parseMarketCap(infoMap.get("marketValue")),
       currency: "KRW",
       fetchedAt: Date.now(),
@@ -228,6 +258,10 @@ function extractKoreanExtended(
     price,
     changeAbs: abs,
     changeRate: rate,
+    volume: parseNaverNumber(info.accumulatedTradingVolume),
+    tradingValue: parseTradingValue(info.accumulatedTradingValue),
+    high: parseNaverNumber(info.highPrice),
+    low: parseNaverNumber(info.lowPrice),
     time: info.localTradedAt ? new Date(info.localTradedAt).getTime() : null,
     active: info.overMarketStatus === "OPEN",
   };

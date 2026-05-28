@@ -91,16 +91,23 @@ export function StockCard({ snap, onSelect, selected }: {
 
         {/* 시간외(프리/애프터/한국 시간외 단일가) 가격 */}
         {ext && (
-          <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs">
-              <Badge variant={ext.active ? "good" : "neutral"} size="sm">
-                {extendedSessionLabel(ext.session)}
-                {ext.active ? " · 거래중" : ""}
-              </Badge>
-              {ext.time && (
-                <span className="text-muted-foreground tabular">
-                  {fmtTime(ext.time)}
-                </span>
+          <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 flex items-center justify-between gap-3">
+            <div className="space-y-1 text-xs">
+              <div className="flex items-center gap-2">
+                <Badge variant={ext.active ? "good" : "neutral"} size="sm">
+                  {extendedSessionLabel(ext.session)}
+                  {ext.active ? " · 거래중" : ""}
+                </Badge>
+                {ext.time && (
+                  <span className="text-muted-foreground tabular">
+                    {fmtTime(ext.time)}
+                  </span>
+                )}
+              </div>
+              {ext.volume != null && (
+                <div className="text-[11px] text-muted-foreground tabular">
+                  시간외 거래량 {fmtNumber(ext.volume)}
+                </div>
               )}
             </div>
             <div className="text-right">

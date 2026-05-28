@@ -28,6 +28,11 @@ export interface ExtendedHoursQuote {
   // 비교 기준값(정규장 종가) 대비 변화
   changeAbs: number;
   changeRate: number; // 0.0123 = +1.23%
+  // 시간외 누적 거래량/대금. 데이터 소스가 주는 경우에만 채움.
+  volume?: number | null;
+  tradingValue?: number | null;
+  high?: number | null;
+  low?: number | null;
   // 마지막 체결 시각 (epoch ms)
   time?: number | null;
   // 현재 세션이 거래중인지(OPEN), 마감(CLOSE) 여부
