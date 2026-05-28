@@ -1,14 +1,59 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { changeColor, fmtNumber, fmtPercent, fmtTime } from "@/lib/utils";
-import { Crosshair, LineChart, MoonStar, TrendingDown, TrendingUp } from "lucide-react";
+import {
+  Crosshair,
+  LineChart,
+  MoonStar,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 
-// 통계 기반 예측 패널 (선택된 종목 1개에 대해)
-//  A: 가격 범위 (1σ)  B: 진입/손절/목표(ATR)  C: 시장 베타  E: 신호 강도
-export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
+// 통계 기반 예측 패널. 내부 종목 선택을 지원해 카드 선택과 별도로 비교 가능.
+export function PredictionPanel({
+  snaps,
+  selectedCode,
+}: {
+  snaps: StockSnapshot[];
+  selectedCode?: string;
+}) {
+  const [activeCode, setActiveCode] = useState(
+    () => selectedCode ?? snaps[0]?.meta.code ?? ""
+  );
+
+  useEffect(() => {
+    if (selectedCode) setActiveCode(selectedCode);
+  }, [selectedCode]);
+
+  useEffect(() => {
+    if (snaps.some((s) => s.meta.code === activeCode)) return;
+    setActiveCode(snaps[0]?.meta.code ?? "");
+  }, [activeCode, snaps]);
+
+  const snap = useMemo(
+    () => snaps.find((s) => s.meta.code === activeCode) ?? snaps[0],
+    [activeCode, snaps]
+  );
+
+  if (!snap) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>예측</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <p className="text-sm text-muted-foreground">
+            예측할 종목 데이터가 없습니다.
+          </p>
+        </CardBody>
+      </Card>
+    );
+  }
+
   const p = snap.predictions;
   const price = snap.quote.price;
 
@@ -16,9 +61,14 @@ export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>예측</CardTitle>
+          <CardTitle>예측 — {snap.meta.name}</CardTitle>
         </CardHeader>
         <CardBody>
+          <StockSelector
+            snaps={snaps}
+            activeCode={snap.meta.code}
+            onSelect={setActiveCode}
+          />
           <p className="text-sm text-muted-foreground">
             데이터가 충분하지 않아 예측을 표시할 수 없습니다.
           </p>
@@ -27,181 +77,269 @@ export function PredictionPanel({ snap }: { snap: StockSnapshot }) {
     );
   }
 
+  const oneDay = p.ranges.find((r) => r.horizonDays === 1);
+  const oneWeek = p.ranges.find((r) => r.horizonDays === 5);
+  const primaryRange = oneDay ?? oneWeek ?? p.ranges[0];
+
   return (
     <Card>
-      <CardHeader className="flex items-start justify-between gap-2">
+      <CardHeader className="flex items-start justify-between gap-3">
         <div>
-          <CardTitle>예측 — {snap.meta.name}</CardTitle>
+          <CardTitle>예측</CardTitle>
           <p className="text-[11px] text-muted-foreground mt-1">
-            최근 90일 변동성 기반 · 추세 가정 없음 · 투자조언 아님
+            종목을 직접 바꿔 비교 · 최근 90일 변동성 기반 · 투자조언 아님
           </p>
         </div>
         <Badge variant="neutral" size="sm">
           σ {(stdSigma(p) * 100).toFixed(2)}%/일
         </Badge>
       </CardHeader>
-      <CardBody className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5">
-        {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0) */}
-        {p.ranges.length > 0 && (
-          <Section
-            title="변동성 범위 (68% 신뢰)"
-            icon={<LineChart className="h-3.5 w-3.5" />}
-          >
-            <div className="space-y-2">
-              {p.ranges.map((r) => {
-                // drift=0 이라 center=현재가. 폭만 ±%로 표시.
-                const halfWidth =
-                  price > 0 ? Math.max(r.high / price - 1, 1 - r.low / price) : 0;
-                return (
-                  <div key={r.horizonDays} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">
-                        {r.horizonLabel} 후
-                      </span>
-                      <span className="tabular text-muted-foreground text-[11px]">
-                        ±{fmtPercent(halfWidth, 1).replace("+", "")}
-                      </span>
-                    </div>
-                    <RangeBar
-                      currentPrice={price}
-                      low={r.low}
-                      center={r.center}
-                      high={r.high}
-                    />
-                    <div className="flex items-center justify-between text-[11px] tabular text-muted-foreground">
-                      <span>{fmtNumber(r.low)}</span>
-                      <span>{fmtNumber(r.high)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Section>
-        )}
+      <CardBody className="space-y-4">
+        <StockSelector
+          snaps={snaps}
+          activeCode={snap.meta.code}
+          onSelect={setActiveCode}
+        />
 
-        {/* B. 진입/손절/목표 */}
-        {p.targets && (
-          <Section
-            title="진입 · 손절 · 목표 (ATR 기반)"
-            icon={<Crosshair className="h-3.5 w-3.5" />}
-          >
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-              <PriceRow label="진입 기준" value={p.targets.entry} />
-              <PriceRow
-                label="손절"
-                value={p.targets.stopLoss}
-                refPrice={price}
-                tone="down"
-              />
-              <PriceRow
-                label="목표 1"
-                value={p.targets.takeProfit1}
-                refPrice={price}
-                tone="up"
-              />
-              <PriceRow
-                label="목표 2"
-                value={p.targets.takeProfit2}
-                refPrice={price}
-                tone="up"
-              />
-              <PriceRow label="지지선 (20일)" value={p.targets.support} />
-              <PriceRow label="저항선 (20일)" value={p.targets.resistance} />
-            </div>
-            <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/60 text-xs">
-              <span className="text-muted-foreground">손익비</span>
-              <span className="tabular font-medium">
-                1 : {p.targets.riskReward.toFixed(2)}
-                {p.targets.riskReward >= 2 && (
-                  <span className="text-up ml-1.5">우수</span>
-                )}
-                {p.targets.riskReward < 1 && p.targets.riskReward > 0 && (
-                  <span className="text-down ml-1.5">불리</span>
-                )}
-              </span>
-            </div>
-          </Section>
-        )}
-
-        {/* C. 시장 시나리오 */}
-        {p.scenarios.length > 0 && (
-          <Section
-            title="시장 시나리오 (60일 회귀)"
-            icon={
-              <TrendingUp className="h-3.5 w-3.5" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SummaryCard
+            label={primaryRange ? `${primaryRange.horizonLabel} 예상 범위` : "예상 범위"}
+            value={
+              primaryRange
+                ? `${fmtNumber(primaryRange.low)} ~ ${fmtNumber(primaryRange.high)}`
+                : "—"
             }
-          >
-            <ul className="space-y-1.5 text-sm">
-              {p.scenarios.map((s, i) => (
-                <li
-                  key={`${s.label}-${i}`}
-                  className="flex items-center justify-between"
-                >
-                  <span className="text-muted-foreground">{s.label}</span>
-                  <span
-                    className={`tabular font-medium ${changeColor(s.expected)}`}
-                  >
-                    {fmtPercent(s.expected)}
-                    <span className="text-[11px] text-muted-foreground ml-1.5 tabular">
-                      β {s.beta.toFixed(2)}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {p.nightSignal && (
-          <Section
-            title="해외 개별 야간 참고"
-            icon={<MoonStar className="h-3.5 w-3.5" />}
-          >
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">
-                  {p.nightSignal.label}
-                </span>
-                <span
-                  className={`tabular font-medium ${changeColor(p.nightSignal.expectedRate)}`}
-                >
-                  {fmtPercent(p.nightSignal.expectedRate)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">
-                  {p.nightSignal.source}
-                </span>
-                <span className="tabular">
-                  {fmtNumber(p.nightSignal.price, 2)}
-                  {p.nightSignal.currency
-                    ? ` ${p.nightSignal.currency}`
-                    : ""}
-                </span>
-              </div>
-              {p.nightSignal.time && (
-                <div className="text-[11px] text-muted-foreground tabular">
-                  갱신 {fmtTime(p.nightSignal.time)}
-                </div>
-              )}
-            </div>
-          </Section>
-        )}
-
-        {/* E. 신호 강도 */}
-        <Section
-          title="신호 강도"
-          icon={<TrendingDown className="h-3.5 w-3.5" />}
-        >
-          <StrengthBar label="매수 강도" value={p.strength.buy} color="bg-up" />
-          <StrengthBar
-            label="매도 강도"
-            value={p.strength.sell}
-            color="bg-down"
           />
-        </Section>
+          <SummaryCard
+            label="해외 야간"
+            value={
+              p.nightSignal ? fmtPercent(p.nightSignal.expectedRate) : "OFF/없음"
+            }
+            color={p.nightSignal ? changeColor(p.nightSignal.expectedRate) : ""}
+          />
+          <SummaryCard
+            label="매수 / 매도 강도"
+            value={`${p.strength.buy} / ${p.strength.sell}`}
+          />
+          <SummaryCard
+            label="손절 / 목표1"
+            value={
+              p.targets
+                ? `${fmtNumber(p.targets.stopLoss)} / ${fmtNumber(p.targets.takeProfit1)}`
+                : "—"
+            }
+          />
+        </div>
+
+        <details className="rounded-xl border border-border bg-muted/20 p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            상세 예측 보기
+          </summary>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5 pt-4">
+            {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0) */}
+            {p.ranges.length > 0 && (
+              <Section
+                title="변동성 범위 (68% 신뢰)"
+                icon={<LineChart className="h-3.5 w-3.5" />}
+              >
+                <div className="space-y-2">
+                  {p.ranges.map((r) => {
+                    // drift=0 이라 center=현재가. 폭만 ±%로 표시.
+                    const halfWidth =
+                      price > 0 ? Math.max(r.high / price - 1, 1 - r.low / price) : 0;
+                    return (
+                      <div key={r.horizonDays} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">
+                            {r.horizonLabel} 후
+                          </span>
+                          <span className="tabular text-muted-foreground text-[11px]">
+                            ±{fmtPercent(halfWidth, 1).replace("+", "")}
+                          </span>
+                        </div>
+                        <RangeBar
+                          currentPrice={price}
+                          low={r.low}
+                          center={r.center}
+                          high={r.high}
+                        />
+                        <div className="flex items-center justify-between text-[11px] tabular text-muted-foreground">
+                          <span>{fmtNumber(r.low)}</span>
+                          <span>{fmtNumber(r.high)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            )}
+
+            {p.targets && (
+              <Section
+                title="진입 · 손절 · 목표 (ATR 기반)"
+                icon={<Crosshair className="h-3.5 w-3.5" />}
+              >
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                  <PriceRow label="진입 기준" value={p.targets.entry} />
+                  <PriceRow
+                    label="손절"
+                    value={p.targets.stopLoss}
+                    refPrice={price}
+                    tone="down"
+                  />
+                  <PriceRow
+                    label="목표 1"
+                    value={p.targets.takeProfit1}
+                    refPrice={price}
+                    tone="up"
+                  />
+                  <PriceRow
+                    label="목표 2"
+                    value={p.targets.takeProfit2}
+                    refPrice={price}
+                    tone="up"
+                  />
+                  <PriceRow label="지지선 (20일)" value={p.targets.support} />
+                  <PriceRow label="저항선 (20일)" value={p.targets.resistance} />
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/60 text-xs">
+                  <span className="text-muted-foreground">손익비</span>
+                  <span className="tabular font-medium">
+                    1 : {p.targets.riskReward.toFixed(2)}
+                    {p.targets.riskReward >= 2 && (
+                      <span className="text-up ml-1.5">우수</span>
+                    )}
+                    {p.targets.riskReward < 1 && p.targets.riskReward > 0 && (
+                      <span className="text-down ml-1.5">불리</span>
+                    )}
+                  </span>
+                </div>
+              </Section>
+            )}
+
+            {p.scenarios.length > 0 && (
+              <Section
+                title="시장 시나리오 (60일 회귀)"
+                icon={<TrendingUp className="h-3.5 w-3.5" />}
+              >
+                <ul className="space-y-1.5 text-sm">
+                  {p.scenarios.map((s, i) => (
+                    <li
+                      key={`${s.label}-${i}`}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="text-muted-foreground">{s.label}</span>
+                      <span
+                        className={`tabular font-medium ${changeColor(s.expected)}`}
+                      >
+                        {fmtPercent(s.expected)}
+                        <span className="text-[11px] text-muted-foreground ml-1.5 tabular">
+                          β {s.beta.toFixed(2)}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            )}
+
+            {p.nightSignal && (
+              <Section
+                title="해외 개별 야간 참고"
+                icon={<MoonStar className="h-3.5 w-3.5" />}
+              >
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      {p.nightSignal.label}
+                    </span>
+                    <span
+                      className={`tabular font-medium ${changeColor(p.nightSignal.expectedRate)}`}
+                    >
+                      {fmtPercent(p.nightSignal.expectedRate)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {p.nightSignal.source}
+                    </span>
+                    <span className="tabular">
+                      {fmtNumber(p.nightSignal.price, 2)}
+                      {p.nightSignal.currency
+                        ? ` ${p.nightSignal.currency}`
+                        : ""}
+                    </span>
+                  </div>
+                  {p.nightSignal.time && (
+                    <div className="text-[11px] text-muted-foreground tabular">
+                      갱신 {fmtTime(p.nightSignal.time)}
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
+
+            <Section
+              title="신호 강도"
+              icon={<TrendingDown className="h-3.5 w-3.5" />}
+            >
+              <StrengthBar label="매수 강도" value={p.strength.buy} color="bg-up" />
+              <StrengthBar
+                label="매도 강도"
+                value={p.strength.sell}
+                color="bg-down"
+              />
+            </Section>
+          </div>
+        </details>
       </CardBody>
     </Card>
+  );
+}
+
+function StockSelector({
+  snaps,
+  activeCode,
+  onSelect,
+}: {
+  snaps: StockSnapshot[];
+  activeCode: string;
+  onSelect: (code: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {snaps.map((s) => (
+        <button
+          key={s.meta.code}
+          type="button"
+          onClick={() => onSelect(s.meta.code)}
+          className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+            activeCode === s.meta.code
+              ? "bg-foreground text-background border-foreground"
+              : "bg-background border-border text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          {s.meta.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  color = "",
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-background px-3 py-2">
+      <div className="text-[11px] text-muted-foreground mb-1">{label}</div>
+      <div className={`tabular text-sm font-semibold ${color}`}>{value}</div>
+    </div>
   );
 }
 

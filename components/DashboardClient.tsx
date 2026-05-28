@@ -488,8 +488,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
       </div>
 
-      {/* 예측 패널 — 정보가 많아 단독 행으로 가로폭 확보 */}
-      {selectedSnap && <PredictionPanel snap={selectedSnap} />}
+      {/* 예측 패널 — 내부에서 종목을 다시 선택해 비교 가능 */}
+      <PredictionPanel snaps={snap.primaries} selectedCode={selectedSnap?.meta.code} />
 
       {/* 뉴스 */}
       <NewsPanel items={snap.news} />

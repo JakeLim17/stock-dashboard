@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getOverseasNightProxy } from "@/lib/symbols";
 import {
   createChart,
   ColorType,
@@ -10,6 +11,7 @@ import {
 } from "lightweight-charts";
 
 type Range = "1w" | "1m" | "3m";
+type ChartMode = "domestic" | "overseas";
 
 interface Point {
   date: number;
@@ -21,8 +23,18 @@ export function PriceChart({ code, name }: { code: string; name: string }) {
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const [range, setRange] = useState<Range>("1m");
+  const [mode, setMode] = useState<ChartMode>("domestic");
   const [loading, setLoading] = useState(true);
   const [empty, setEmpty] = useState(false);
+  const overseasProxy = useMemo(() => getOverseasNightProxy(code), [code]);
+  const activeCode =
+    mode === "overseas" && overseasProxy ? overseasProxy.proxyCode : code;
+  const activeName =
+    mode === "overseas" && overseasProxy ? overseasProxy.name : name;
+
+  useEffect(() => {
+    if (!overseasProxy && mode === "overseas") setMode("domestic");
+  }, [mode, overseasProxy]);
 
   // 차트 생성 (1회)
   useEffect(() => {
@@ -64,7 +76,7 @@ export function PriceChart({ code, name }: { code: string; name: string }) {
     let aborted = false;
     setLoading(true);
     setEmpty(false);
-    fetch(`/api/history?code=${encodeURIComponent(code)}&range=${range}`)
+    fetch(`/api/history?code=${encodeURIComponent(activeCode)}&range=${range}`)
       .then((r) => r.json())
       .then((j: { points: Point[] }) => {
         if (aborted || !seriesRef.current) return;
@@ -81,29 +93,53 @@ export function PriceChart({ code, name }: { code: string; name: string }) {
     return () => {
       aborted = true;
     };
-  }, [code, range]);
+  }, [activeCode, range]);
 
   return (
     <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="text-xs uppercase tracking-wider text-muted-foreground">차트</div>
-          <div className="text-sm font-medium">{name}</div>
+          <div className="text-sm font-medium">{activeName}</div>
+          {mode === "overseas" && overseasProxy && (
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              {overseasProxy.exchange} · {overseasProxy.proxyCode}
+            </div>
+          )}
         </div>
-        <div className="flex gap-1">
-          {(["1w", "1m", "3m"] as Range[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                range === r
-                  ? "bg-foreground text-background border-foreground"
-                  : "border-border text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              {r === "1w" ? "1주" : r === "1m" ? "1개월" : "3개월"}
-            </button>
-          ))}
+        <div className="flex flex-col items-end gap-1.5">
+          {overseasProxy && (
+            <div className="flex gap-1">
+              {(["domestic", "overseas"] as ChartMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                    mode === m
+                      ? "bg-accent text-white border-accent"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {m === "domestic" ? "국내" : "해외 야간"}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-1">
+            {(["1w", "1m", "3m"] as Range[]).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                  range === r
+                    ? "bg-foreground text-background border-foreground"
+                    : "border-border text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {r === "1w" ? "1주" : r === "1m" ? "1개월" : "3개월"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="relative h-[280px]">
