@@ -15,6 +15,7 @@ import {
 } from "@/lib/utils";
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
 
+// 단기·장기 시그널 → 사용자 표시 라벨/색 (상세 영역에서만 사용)
 const SIGNAL_LABEL: Record<string, string> = {
   BUY: "신규 매수",
   ADD: "분할 추매",
@@ -69,8 +70,9 @@ export function StockCard({ snap, onSelect, selected }: {
             <Badge variant={market.variant}>{market.label}</Badge>
           </div>
         </div>
-        <Badge variant={SIGNAL_VARIANT[analysis.signal]} size="md">
-          {SIGNAL_LABEL[analysis.signal]}
+        {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}
+        <Badge variant={analysis.verdict.tone} size="md">
+          {analysis.verdict.label}
         </Badge>
       </CardHeader>
       <CardBody className="space-y-4">
@@ -145,29 +147,25 @@ export function StockCard({ snap, onSelect, selected }: {
           />
         </div>
 
-        {/* 시그널 — 단기/장기 두 줄로 분리. 같은 메인 헤드라인이라도
-            장기 매력이 큰 종목은 별도 행에서 즉시 보임 (SK하이닉스 케이스) */}
-        <div className="border-t border-border pt-3 space-y-2.5">
-          <div className="text-xs text-muted-foreground tracking-wide uppercase">분석</div>
+        {/* 분석 — 메인 결론(verdict)을 위로 크게, 단기/장기 상세는 접힘으로 정리.
+            "사라는 건지 말라는 건지" 피드백에 맞춰 1초 안에 행동을 정하도록 통합. */}
+        <div className="border-t border-border pt-3 space-y-2">
+          <div className="text-xs text-muted-foreground tracking-wide uppercase">
+            분석
+          </div>
 
-          {/* 단기 */}
-          <SignalRow
-            label="단기"
-            signal={analysis.shortTerm.signal}
-            headline={analysis.shortTerm.headline}
-            chips={[
-              `과열 ${analysis.heatScore}`,
-              `매수우위 ${analysis.buyScore}`,
-            ]}
-          />
-
-          {/* 장기 */}
-          <SignalRow
-            label="장기"
-            signal={analysis.longTerm.signal}
-            headline={analysis.longTerm.headline}
-            chips={longTermChips(snap)}
-          />
+          {/* 메인 verdict 배지 + 헤드라인 + detail */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant={analysis.verdict.tone} size="lg">
+              {analysis.verdict.label}
+            </Badge>
+            <span className="text-[11px] tabular text-muted-foreground">
+              {analysis.verdict.detail}
+            </span>
+          </div>
+          <p className="text-sm font-semibold leading-snug">
+            {analysis.verdict.headline}
+          </p>
 
           {/* 추세 배지(공통) */}
           {(tech.trend === "uptrend" || tech.trend === "downtrend") && (
@@ -181,12 +179,35 @@ export function StockCard({ snap, onSelect, selected }: {
             </div>
           )}
 
-          {/* 단기 reasons (상위 2개) */}
-          <ul className="text-xs text-muted-foreground space-y-0.5 mt-1">
-            {analysis.shortTerm.reasons.slice(0, 2).map((r) => (
-              <li key={r}>· {r}</li>
-            ))}
-          </ul>
+          {/* 상세 — 단기/장기 시그널 + 근거 (기본 접힘) */}
+          <details className="group [&_summary::-webkit-details-marker]:hidden">
+            <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground select-none inline-flex items-center gap-1 mt-1">
+              <span className="group-open:hidden">상세 보기 ▾</span>
+              <span className="hidden group-open:inline">상세 닫기 ▴</span>
+            </summary>
+            <div className="mt-2 space-y-2 pt-2 border-t border-border/60">
+              <SignalRow
+                label="단기"
+                signal={analysis.shortTerm.signal}
+                headline={analysis.shortTerm.headline}
+                chips={[
+                  `과열 ${analysis.heatScore}`,
+                  `매수우위 ${analysis.buyScore}`,
+                ]}
+              />
+              <SignalRow
+                label="장기"
+                signal={analysis.longTerm.signal}
+                headline={analysis.longTerm.headline}
+                chips={longTermChips(snap)}
+              />
+              <ul className="text-[11px] text-muted-foreground space-y-0.5 pl-9">
+                {analysis.shortTerm.reasons.slice(0, 2).map((r) => (
+                  <li key={r}>· {r}</li>
+                ))}
+              </ul>
+            </div>
+          </details>
         </div>
 
         {/* 1주 변동성 범위 요약 — 카드 맨 아래 별도 박스로 분리 */}

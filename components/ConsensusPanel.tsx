@@ -53,6 +53,7 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
   const price = snap.quote.price;
   const hasAnything = !!c || !!v || researches.length > 0;
   const longSig = snap.analysis.longTerm;
+  const verdict = snap.analysis.verdict;
 
   return (
     <Card>
@@ -60,6 +61,10 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <CardTitle>컨센서스 · 밸류에이션 — {snap.meta.name}</CardTitle>
+            {/* 메인 결론 verdict — 사이드에서도 같은 결론을 확인 */}
+            <Badge variant={verdict.tone} size="md" className="shrink-0">
+              {verdict.label}
+            </Badge>
             <Badge
               variant={LONG_SIGNAL_VARIANT[longSig.signal]}
               size="sm"
@@ -68,11 +73,13 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
               장기 · {LONG_SIGNAL_LABEL[longSig.signal]}
             </Badge>
           </div>
-          <p className="text-sm font-medium mt-1.5 leading-snug">
-            {longSig.headline}
-            <span className="ml-2 text-[11px] tabular text-muted-foreground">
-              종합 {longSig.score}
-            </span>
+          {/* 첫 줄 — verdict.headline (통합 결론) */}
+          <p className="text-sm font-semibold mt-1.5 leading-snug">
+            {verdict.headline}
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+            {verdict.detail} · 장기 헤드라인: {longSig.headline}
+            <span className="ml-2 tabular">종합 {longSig.score}</span>
           </p>
           <p className="text-[11px] text-muted-foreground mt-1">
             애널리스트 목표주가 · 분포 · 밸류 지표 · 최근 리서치 (6시간 캐시)

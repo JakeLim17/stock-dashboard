@@ -17,16 +17,22 @@ const STYLES: Record<Variant, string> = {
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: Variant;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
 }
 
+const SIZE_CLASSES: Record<NonNullable<BadgeProps["size"]>, string> = {
+  sm: "px-2 py-0.5 text-xs",
+  md: "px-3 py-1 text-sm",
+  // verdict 같은 메인 배지 전용 — 시각적으로 가장 강함
+  lg: "px-3.5 py-1.5 text-base font-semibold",
+};
+
 export function Badge({ variant = "neutral", size = "sm", className, ...props }: BadgeProps) {
-  const sizing = size === "md" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full border font-medium",
-        sizing,
+        SIZE_CLASSES[size],
         STYLES[variant],
         className
       )}
