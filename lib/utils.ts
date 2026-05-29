@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { Quote } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -143,6 +144,124 @@ export function marketDisplayLabel(quote: {
     };
   }
   return marketStateLabel(quote.marketState);
+}
+
+// 카드 메인 가격으로 무엇을 보여줄지 결정.
+// "지금 사용자가 가장 보고 싶은 가격"을 메인으로 올리는 게 핵심:
+//   - 정규장 OPEN  → 메인=정규장(실시간), 부연 없음
+//   - 정규장 마감 + 시간외 거래중 → 메인=시간외(라이브), 부연=정규장 종가
+//   - 정규장 마감 + 시간외 종료 → 메인=정규장 종가, 부연=시간외 마감가
+//   - 정규장 마감 + 시간외 데이터 없음 → 메인=정규장 종가, 부연 없음
+export interface PrimaryQuoteView {
+  price: number;
+  changeRate: number;
+  changeAbs: number;
+  // epoch ms (없으면 null)
+  time: number | null;
+  // 메인 위치에 표시되는 가격이 시간외 가격인지
+  isExtended: boolean;
+  // "지금 진행 중인 거래"인지 — 라이브 표시(펄스 등)에 사용
+  isLive: boolean;
+  // "정규장" / "시간외 단일가" 등 한글 세션 이름
+  sessionLabel: string;
+}
+
+export interface SecondaryQuoteView {
+  price: number;
+  changeRate: number;
+  changeAbs: number;
+  time: number | null;
+  // 좌측 배지 텍스트 (예: "정규장 종가", "시간외 단일가")
+  label: string;
+  // 거래중 배지 표시 여부
+  active: boolean;
+  // 부연 위치에 표시되는 가격이 시간외인지 (false면 정규장 종가)
+  isExtended: boolean;
+  // 시간외일 때 누적 거래량 (있는 경우만)
+  volume?: number | null;
+}
+
+export function pickPrimaryQuote(quote: Quote): {
+  primary: PrimaryQuoteView;
+  secondary: SecondaryQuoteView | null;
+} {
+  const isRegular = (quote.marketState ?? "").toUpperCase() === "REGULAR";
+  const ext = quote.extendedHours ?? null;
+
+  if (isRegular) {
+    return {
+      primary: {
+        price: quote.price,
+        changeRate: quote.changeRate,
+        changeAbs: quote.changeAbs,
+        time: quote.priceTime ?? null,
+        isExtended: false,
+        isLive: true,
+        sessionLabel: "정규장",
+      },
+      secondary: null,
+    };
+  }
+
+  if (ext?.active === true) {
+    return {
+      primary: {
+        price: ext.price,
+        changeRate: ext.changeRate,
+        changeAbs: ext.changeAbs,
+        time: ext.time ?? null,
+        isExtended: true,
+        isLive: true,
+        sessionLabel: extendedSessionLabel(ext.session),
+      },
+      secondary: {
+        price: quote.price,
+        changeRate: quote.changeRate,
+        changeAbs: quote.changeAbs,
+        time: quote.priceTime ?? null,
+        label: "정규장 종가",
+        active: false,
+        isExtended: false,
+      },
+    };
+  }
+
+  if (ext) {
+    return {
+      primary: {
+        price: quote.price,
+        changeRate: quote.changeRate,
+        changeAbs: quote.changeAbs,
+        time: quote.priceTime ?? null,
+        isExtended: false,
+        isLive: false,
+        sessionLabel: "정규장 종가",
+      },
+      secondary: {
+        price: ext.price,
+        changeRate: ext.changeRate,
+        changeAbs: ext.changeAbs,
+        time: ext.time ?? null,
+        label: extendedSessionLabel(ext.session),
+        active: !!ext.active,
+        isExtended: true,
+        volume: ext.volume ?? null,
+      },
+    };
+  }
+
+  return {
+    primary: {
+      price: quote.price,
+      changeRate: quote.changeRate,
+      changeAbs: quote.changeAbs,
+      time: quote.priceTime ?? null,
+      isExtended: false,
+      isLive: false,
+      sessionLabel: "정규장 종가",
+    },
+    secondary: null,
+  };
 }
 
 // 안전한 fetch with timeout

@@ -7,12 +7,12 @@ import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
 import {
   changeColor,
-  extendedSessionLabel,
   fmtNumber,
   fmtPercent,
   fmtSigned,
   fmtTime,
   marketDisplayLabel,
+  pickPrimaryQuote,
   priceTimeLabel,
 } from "@/lib/utils";
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
@@ -42,21 +42,17 @@ export function StockCard({ snap, onSelect, selected }: {
   selected?: boolean;
 }) {
   const { meta, quote, tech, flow, analysis, consensus } = snap;
+
+  // 메인/부연 가격 자동 스왑 — "지금 진행 중인 거래"가 있으면 그게 메인.
+  // 정규장 마감 후 시간외가 거래중이면 메인=시간외, 부연=정규장 종가.
+  const { primary, secondary } = pickPrimaryQuote(quote);
+
   const trendIcon =
-    quote.changeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
-    quote.changeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
+    primary.changeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
+    primary.changeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
     <Minus className="h-4 w-4" />;
 
   const market = marketDisplayLabel(quote);
-  const isRegular = (quote.marketState ?? "").toUpperCase() === "REGULAR";
-  // 정규장 중에는 시간외 박스를 숨김 (데이터가 잘못 와도 사용자 혼란 방지)
-  const ext = !isRegular ? quote.extendedHours ?? null : null;
-  const priceTimePrefix =
-    ext?.active === true
-      ? `${extendedSessionLabel(ext.session)} · `
-      : ext
-        ? "정규장 종가 · "
-        : "기준 ";
 
   return (
     <Card
@@ -78,22 +74,34 @@ export function StockCard({ snap, onSelect, selected }: {
         </Badge>
       </CardHeader>
       <CardBody className="space-y-4">
-        {/* 가격 */}
+        {/* 가격 — 메인은 항상 "지금 진행 중인 거래". 시간외 거래중이면 시간외가 메인. */}
         <div className="flex items-end justify-between">
           <div>
-            <div className={`tabular text-3xl font-bold ${changeColor(quote.changeRate)}`}>
-              {fmtNumber(quote.price, 0)}
+            <div className={`tabular text-3xl font-bold ${changeColor(primary.changeRate)}`}>
+              {fmtNumber(primary.price, 0)}
             </div>
-            <div className={`tabular text-sm mt-1 inline-flex items-center gap-1 ${changeColor(quote.changeRate)}`}>
+            <div className={`tabular text-sm mt-1 inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
               {trendIcon}
-              {fmtSigned(quote.changeAbs)} ({fmtPercent(quote.changeRate)})
+              {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
             </div>
-            {quote.priceTime && (
-              <div className="text-[11px] text-muted-foreground mt-1 tabular">
-                {priceTimePrefix}
-                {priceTimeLabel(quote.priceTime)}
+            {primary.isExtended && primary.isLive ? (
+              <div className="text-[11px] mt-1 tabular flex items-center gap-1.5">
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full bg-up animate-pulse"
+                  aria-hidden
+                />
+                <span className="text-foreground font-medium">시간외 거래중</span>
+                <span className="text-muted-foreground">
+                  · {primary.sessionLabel}
+                  {primary.time ? ` · ${fmtTime(primary.time)}` : ""}
+                </span>
               </div>
-            )}
+            ) : primary.time ? (
+              <div className="text-[11px] text-muted-foreground mt-1 tabular">
+                {primary.isLive ? "기준 " : `${primary.sessionLabel} · `}
+                {priceTimeLabel(primary.time)}
+              </div>
+            ) : null}
           </div>
           <div className="text-right text-xs text-muted-foreground space-y-1">
             <div>고가 <span className="tabular text-foreground">{fmtNumber(quote.high, 0)}</span></div>
@@ -101,33 +109,47 @@ export function StockCard({ snap, onSelect, selected }: {
           </div>
         </div>
 
-        {/* 시간외(프리/애프터/한국 시간외 단일가) 가격 */}
-        {ext && (
+        {/* 부연 박스 — 시간외 메인일 땐 정규장 종가, 시간외 종료 시엔 시간외 마감가. */}
+        {secondary && (
           <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 flex items-center justify-between gap-3">
             <div className="space-y-1 text-xs">
               <div className="flex items-center gap-2">
-                <Badge variant={ext.active ? "good" : "neutral"} size="sm">
-                  {extendedSessionLabel(ext.session)}
-                  {ext.active ? " · 거래중" : ""}
+                <Badge variant={secondary.active ? "good" : "neutral"} size="sm">
+                  {secondary.label}
+                  {secondary.active ? " · 거래중" : ""}
                 </Badge>
-                {ext.time && (
+                {secondary.time && (
                   <span className="text-muted-foreground tabular">
-                    {fmtTime(ext.time)}
+                    {secondary.isExtended
+                      ? fmtTime(secondary.time)
+                      : priceTimeLabel(secondary.time)}
                   </span>
                 )}
               </div>
-              {ext.volume != null && (
+              {secondary.isExtended && secondary.volume != null && (
                 <div className="text-[11px] text-muted-foreground tabular">
-                  시간외 거래량 {fmtNumber(ext.volume)}
+                  시간외 거래량 {fmtNumber(secondary.volume)}
                 </div>
               )}
             </div>
             <div className="text-right">
-              <div className={`tabular text-base font-semibold ${changeColor(ext.changeRate)}`}>
-                {fmtNumber(ext.price, 0)}
+              <div
+                className={`tabular text-base font-semibold ${
+                  secondary.isExtended
+                    ? changeColor(secondary.changeRate)
+                    : "text-muted-foreground"
+                }`}
+              >
+                {fmtNumber(secondary.price, 0)}
               </div>
-              <div className={`tabular text-[11px] ${changeColor(ext.changeRate)}`}>
-                {fmtSigned(ext.changeAbs)} ({fmtPercent(ext.changeRate)})
+              <div
+                className={`tabular text-[11px] ${
+                  secondary.isExtended
+                    ? changeColor(secondary.changeRate)
+                    : "text-muted-foreground"
+                }`}
+              >
+                {fmtSigned(secondary.changeAbs)} ({fmtPercent(secondary.changeRate)})
               </div>
             </div>
           </div>
