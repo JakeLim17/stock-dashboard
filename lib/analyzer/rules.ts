@@ -1,4 +1,6 @@
 import type {
+  ActionRecommendation,
+  ActionVerdict,
   AnalysisResult,
   AnalystConsensus,
   FlowData,
@@ -340,6 +342,143 @@ function longTermHeadline(signal: SignalStatus): string {
 }
 
 // ----------------------------------------------------------------------------
+// 통합 액션 매트릭스 (mergeVerdict) — 단·장기 조합으로 1초 안에 행동을 정할
+// 메인 결론(verdict)을 만든다. 주인님 관점: 장기 가치 우위 — 단기 SELL + 장기
+// BUY/ADD 조합은 단기 약세를 분할 진입 기회로 본다.
+//
+//   단기 \ 장기 | BUY        | ADD        | HOLD       | WATCH       | SELL
+//   ------------|------------|------------|------------|-------------|-----------
+//   BUY         | NEW_ENTRY  | NEW_ENTRY  | NEW_ENTRY  | SHORT_TRADE | SHORT_TRADE
+//   ADD         | SCALE_IN   | SCALE_IN   | SCALE_IN   | HOLD        | TRIM
+//   HOLD        | HOLD_WAIT  | HOLD_WAIT  | HOLD       | HOLD        | TRIM
+//   WATCH       | HOLD_WAIT  | AVOID      | AVOID      | AVOID       | REDUCE
+//   SELL        | SCALE_IN   | SCALE_IN   | TRIM       | REDUCE      | REDUCE
+// ----------------------------------------------------------------------------
+const VERDICT_MATRIX: Record<
+  SignalStatus,
+  Record<SignalStatus, ActionRecommendation>
+> = {
+  BUY: {
+    BUY: "NEW_ENTRY",
+    ADD: "NEW_ENTRY",
+    HOLD: "NEW_ENTRY",
+    WATCH: "SHORT_TRADE",
+    SELL: "SHORT_TRADE",
+  },
+  ADD: {
+    BUY: "SCALE_IN",
+    ADD: "SCALE_IN",
+    HOLD: "SCALE_IN",
+    WATCH: "HOLD",
+    SELL: "TRIM",
+  },
+  HOLD: {
+    BUY: "HOLD_WAIT",
+    ADD: "HOLD_WAIT",
+    HOLD: "HOLD",
+    WATCH: "HOLD",
+    SELL: "TRIM",
+  },
+  WATCH: {
+    BUY: "HOLD_WAIT",
+    ADD: "AVOID",
+    HOLD: "AVOID",
+    WATCH: "AVOID",
+    SELL: "REDUCE",
+  },
+  SELL: {
+    BUY: "SCALE_IN",
+    ADD: "SCALE_IN",
+    HOLD: "TRIM",
+    WATCH: "REDUCE",
+    SELL: "REDUCE",
+  },
+};
+
+// 각 액션의 라벨/톤/대표 헤드라인. SCALE_IN 만 단·장기 조합에 따라 헤드라인 분기.
+function actionMeta(
+  action: ActionRecommendation,
+  shortSig: SignalStatus,
+  longSig: SignalStatus
+): { label: string; tone: ActionVerdict["tone"]; headline: string } {
+  switch (action) {
+    case "NEW_ENTRY":
+      return {
+        label: "신규 진입",
+        tone: "buy",
+        headline: "단·장기 모두 양호 — 신규 진입 우위",
+      };
+    case "SCALE_IN": {
+      // SK하이닉스 케이스: 단기 SELL + 장기 BUY/ADD
+      if (shortSig === "SELL" && (longSig === "BUY" || longSig === "ADD")) {
+        return {
+          label: "분할 매수",
+          tone: "add",
+          headline: "단기 과열·차익실현 구간, 장기 매력 큼 — 분할 재진입 기회",
+        };
+      }
+      return {
+        label: "분할 매수",
+        tone: "add",
+        headline: "단·장기 매수 우위 — 분할 매수 적정",
+      };
+    }
+    case "HOLD_WAIT":
+      return {
+        label: "눌림목 대기",
+        tone: "watch",
+        headline: "장기 양호, 단기 추격 자제 — 눌림목 진입 대기",
+      };
+    case "HOLD":
+      return {
+        label: "보유 유지",
+        tone: "hold",
+        headline: "특별한 시그널 없음 — 보유 유지",
+      };
+    case "SHORT_TRADE":
+      return {
+        label: "짧게 매매",
+        tone: "add",
+        headline: "단기 모멘텀 살아있으나 장기 고평가 — 짧게 가져갈 것",
+      };
+    case "TRIM":
+      return {
+        label: "점진 축소",
+        tone: "watch",
+        headline: "단기 약세·장기도 평이 — 비중 점진 축소",
+      };
+    case "REDUCE":
+      return {
+        label: "비중 축소",
+        tone: "sell",
+        headline: "단·장기 모두 약세 — 비중 축소",
+      };
+    case "AVOID":
+      return {
+        label: "관망",
+        tone: "watch",
+        headline: "방향성 불명확 — 관망",
+      };
+  }
+}
+
+// 단·장기 신호 조합 → 메인 결론(verdict).
+export function mergeVerdict(
+  shortSig: SignalStatus,
+  longSig: SignalStatus
+): ActionVerdict {
+  const action = VERDICT_MATRIX[shortSig][longSig];
+  const meta = actionMeta(action, shortSig, longSig);
+  return {
+    action,
+    label: meta.label,
+    headline: meta.headline,
+    tone: meta.tone,
+    detail: `단기 ${shortSig} · 장기 ${longSig}`,
+  };
+}
+
+// ----------------------------------------------------------------------------
 // 메인 entry — 단기/장기를 각각 평가해 AnalysisResult로 합친다.
 // ----------------------------------------------------------------------------
 export function analyze(input: AnalyzeInput): AnalysisResult {
@@ -412,14 +551,18 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     score: longScore,
   };
 
+  // 통합 액션 — 단·장기 조합 매트릭스에서 메인 결론 도출.
+  const verdict = mergeVerdict(shortSignal, longSignal);
+
   return {
     shortTerm,
     longTerm,
-    // 백워드 호환 미러
+    verdict,
+    // 백워드 호환 미러 — headline은 verdict 메시지로 노출
     signal: shortTerm.signal,
     heatScore: heat,
     buyScore: buy,
-    headline: shortTerm.headline,
+    headline: verdict.headline,
     reasons: shortTerm.reasons,
   };
 }

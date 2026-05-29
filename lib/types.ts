@@ -138,16 +138,39 @@ export interface SignalDetail {
   score: number; // 0~100. 단기는 (buy - heat) 환산, 장기는 base 50 + 룰 가감산
 }
 
+// 단·장기 조합으로 도출되는 "지금 무엇을 할까?" 통합 액션.
+// 사용자 피드백: 두 시그널이 분리되어 있으면 결정에 시간이 걸려 메인 결론이 필요.
+export type ActionRecommendation =
+  | "NEW_ENTRY" // 신규 진입
+  | "SCALE_IN" // 분할 매수
+  | "HOLD_WAIT" // 눌림목 대기 (보유 중이면 유지, 신규는 대기)
+  | "HOLD" // 보유 유지
+  | "SHORT_TRADE" // 짧게 매매 (단기 모멘텀만 활용)
+  | "TRIM" // 점진적 비중 축소
+  | "REDUCE" // 비중 축소
+  | "AVOID"; // 관망 (신규 비추, 보유 中이면 검토)
+
+// 메인 결론 배지/헤드라인에 쓰는 통합 데이터.
+export interface ActionVerdict {
+  action: ActionRecommendation;
+  label: string; // 한국어 라벨 (예: "분할 매수")
+  headline: string; // 한 줄 헤드라인 — 왜 이 액션인지
+  tone: "buy" | "add" | "hold" | "watch" | "sell"; // 배지 색 (Badge variant)
+  detail: string; // 작은 부연 (예: "단기 SELL · 장기 BUY")
+}
+
 export interface AnalysisResult {
   // 새 구조 — 단기/장기 분리
   shortTerm: SignalDetail;
   longTerm: SignalDetail;
+  // 통합 액션 (메인 결론) — 단·장기 조합 매트릭스에서 도출
+  verdict: ActionVerdict;
   // 백워드 호환 — 기존 컴포넌트/DB는 아래 필드를 그대로 읽고 있어 단기 값을 미러링.
-  // 단, headline은 단·장기 조합 통합 메시지를 우선 노출하기 위해 shortTerm.headline을 그대로 쓴다.
+  // 단, headline은 verdict.headline(통합 메시지)을 노출한다.
   signal: SignalStatus; // = shortTerm.signal
   heatScore: number; // 0~100 (높을수록 과열) — 단기 룰 기반
   buyScore: number; // 0~100 (높을수록 매수우위) — 단기 룰 기반
-  headline: string; // = shortTerm.headline (단·장기 조합 메시지가 들어 있음)
+  headline: string; // = verdict.headline (단·장기 조합 통합 메시지)
   reasons: string[]; // = shortTerm.reasons
 }
 
