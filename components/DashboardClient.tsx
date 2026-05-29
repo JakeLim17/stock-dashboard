@@ -12,6 +12,7 @@ import { StockCard } from "./StockCard";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
 import { AnalysisBox } from "./AnalysisBox";
+import { ConsensusPanel } from "./ConsensusPanel";
 import { PredictionPanel } from "./PredictionPanel";
 import { PriceChart } from "./PriceChart";
 import { ThemeToggle } from "./ThemeToggle";
@@ -492,6 +493,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           <MarketPanel indicators={snap.indicators} />
         </div>
       </div>
+
+      {/* 컨센서스 · 밸류에이션 — 사이드 폭이 좁아 차트 아래 별도 행에 가로로 배치 */}
+      <ConsensusPanel snap={selectedSnap} />
 
       {/* 예측 패널 — 내부에서 종목을 다시 선택해 비교 가능 */}
       <PredictionPanel snaps={snap.primaries} selectedCode={selectedSnap?.meta.code} />

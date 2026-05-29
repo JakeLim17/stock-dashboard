@@ -11,7 +11,9 @@
 - **로컬 우선**: SQLite (`better-sqlite3`) 로 모든 데이터 저장. 외부 DB 없음
 - **풍부한 데이터, 심플한 화면**: 카드/패널 단위로 정보 분리
 - **룰 기반 신호**: `BUY / ADD / HOLD / WATCH / SELL` 5단계 + 과열도·매수우위 점수
-- **Provider 패턴**: Yahoo / KIS / 뉴스 RSS 각각 모듈화 — 나중에 교체 쉬움
+- **펀더멘털 보강**: Yahoo `quoteSummary` + 네이버 `integration` 으로 컨센서스 목표주가·애널리스트 분포·PER/PBR/52주·리서치 노트까지 룰과 UI에 정식 반영 (단기 기술 신호만이 아닌 장기 컨센서스도 함께 본다)
+- **Provider 패턴**: Yahoo / Naver / KIS / 뉴스 RSS 각각 모듈화 — 나중에 교체 쉬움
+- **컨센서스 캐시**: 6시간 메모리 TTL (`lib/providers/consensusCache.ts`). 5~15초 시세 갱신마다 컨센서스를 재호출하지 않아 차단 위험·비용 최소화
 - **다크/라이트 토글**, 자동 새로고침(소스/장상태 연동: Yahoo 장중 10초·비장중 120초, KIS 장중 2초·비장중 30초), 빈상태/에러 처리
 
 ## 빠른 시작
@@ -121,11 +123,20 @@ DashboardClient (60s polling)
 - 환율 급등 → heat +10
 - VIX 25+ → heat +15
 
-**결정 매트릭스**:
-- `heat≥70 && buy≤35` → **SELL**
-- `heat≥65` → **WATCH**
-- `buy≥70 && heat≤50` → **BUY**
-- `buy≥55 && heat≤55` → **ADD**
+펀더멘털 룰 (Yahoo + 네이버 컨센서스):
+- 컨센서스 평균 대비 +20% 이상 상승여력 → buy +25, heat -10
+- 컨센서스 평균 대비 -25% 이상 고평가 → buy -25, heat +10
+- 추정 PER < 8 → buy +15 (내년 실적 대비 매우 저렴)
+- Strong Buy 25%+, Sell 0 → buy +15
+- 매도 의견 20%+ → buy -15
+
+**결정 매트릭스** (정규장):
+- `heat≥80 && buy≤35` → **SELL**
+- `buy≥68 && heat≤55` → **BUY**
+- `buy≥90 && heat≤80` → **ADD** _(강한 매수 근거가 단기 과열을 덮음)_
+- `buy≥56 && heat≤62` → **ADD**
+- `heat≥65 && buy<60` → **WATCH**
+- `buy≤35 && heat≤45` → **WATCH**
 - 나머지 → **HOLD**
 
 ## 확장 가이드

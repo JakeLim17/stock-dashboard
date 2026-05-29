@@ -36,7 +36,7 @@ export function StockCard({ snap, onSelect, selected }: {
   onSelect?: (code: string) => void;
   selected?: boolean;
 }) {
-  const { meta, quote, tech, flow, analysis } = snap;
+  const { meta, quote, tech, flow, analysis, consensus } = snap;
   const trendIcon =
     quote.changeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
     quote.changeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
@@ -182,6 +182,28 @@ export function StockCard({ snap, onSelect, selected }: {
             </div>
           );
         })()}
+
+        {/* 컨센서스 한 줄 — 평균 목표가, 상승여력, Strong Buy / Buy / Hold 분포 */}
+        {consensus && consensus.targetMean != null && (
+          <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular flex items-center justify-between gap-2">
+            <span className="text-muted-foreground shrink-0">컨센서스</span>
+            <span className="font-medium text-right">
+              <span>{fmtNumber(consensus.targetMean, 0)}</span>
+              {consensus.upsidePercent != null && (
+                <span
+                  className={`ml-1.5 ${changeColor(consensus.upsidePercent)}`}
+                >
+                  ({fmtPercent(consensus.upsidePercent, 1)})
+                </span>
+              )}
+              {(consensus.strongBuy + consensus.buy + consensus.hold) > 0 && (
+                <span className="text-muted-foreground ml-1.5 text-[10px]">
+                  · SB {consensus.strongBuy}/{consensus.buy}/{consensus.hold}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
       </CardBody>
     </Card>
   );
