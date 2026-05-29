@@ -31,6 +31,8 @@ const SIGNAL_VARIANT = {
   SELL: "sell",
 } as const;
 
+type SignalKey = keyof typeof SIGNAL_VARIANT;
+
 export function StockCard({ snap, onSelect, selected }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -143,18 +145,45 @@ export function StockCard({ snap, onSelect, selected }: {
           />
         </div>
 
-        {/* 시그널 + 한줄 헤드라인 */}
-        <div className="border-t border-border pt-3 space-y-2">
+        {/* 시그널 — 단기/장기 두 줄로 분리. 같은 메인 헤드라인이라도
+            장기 매력이 큰 종목은 별도 행에서 즉시 보임 (SK하이닉스 케이스) */}
+        <div className="border-t border-border pt-3 space-y-2.5">
           <div className="text-xs text-muted-foreground tracking-wide uppercase">분석</div>
-          <div className="font-medium">{analysis.headline}</div>
-          <div className="flex flex-wrap gap-1.5">
-            <Badge variant="neutral">과열 {analysis.heatScore}</Badge>
-            <Badge variant="neutral">매수우위 {analysis.buyScore}</Badge>
-            {tech.trend === "uptrend" && <Badge variant="good">상승추세</Badge>}
-            {tech.trend === "downtrend" && <Badge variant="bad">하락추세</Badge>}
-          </div>
+
+          {/* 단기 */}
+          <SignalRow
+            label="단기"
+            signal={analysis.shortTerm.signal}
+            headline={analysis.shortTerm.headline}
+            chips={[
+              `과열 ${analysis.heatScore}`,
+              `매수우위 ${analysis.buyScore}`,
+            ]}
+          />
+
+          {/* 장기 */}
+          <SignalRow
+            label="장기"
+            signal={analysis.longTerm.signal}
+            headline={analysis.longTerm.headline}
+            chips={longTermChips(snap)}
+          />
+
+          {/* 추세 배지(공통) */}
+          {(tech.trend === "uptrend" || tech.trend === "downtrend") && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {tech.trend === "uptrend" && (
+                <Badge variant="good">상승추세</Badge>
+              )}
+              {tech.trend === "downtrend" && (
+                <Badge variant="bad">하락추세</Badge>
+              )}
+            </div>
+          )}
+
+          {/* 단기 reasons (상위 2개) */}
           <ul className="text-xs text-muted-foreground space-y-0.5 mt-1">
-            {analysis.reasons.slice(0, 2).map((r) => (
+            {analysis.shortTerm.reasons.slice(0, 2).map((r) => (
               <li key={r}>· {r}</li>
             ))}
           </ul>
@@ -223,4 +252,63 @@ function flowLabel(v: number | null): string {
   const eok = v / 1e8;
   const sign = eok > 0 ? "+" : "";
   return `${sign}${eok.toFixed(0)}억`;
+}
+
+// 단기 / 장기 한 줄 — 배지 + 헤드라인 + 작은 점수 칩.
+// 모바일에선 헤드라인이 다음 줄로 stack.
+function SignalRow({
+  label,
+  signal,
+  headline,
+  chips,
+}: {
+  label: string;
+  signal: SignalKey;
+  headline: string;
+  chips: string[];
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-start gap-2 flex-wrap">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-wider mt-1 shrink-0 w-7">
+          {label}
+        </span>
+        <Badge variant={SIGNAL_VARIANT[signal]} size="sm" className="shrink-0">
+          {SIGNAL_LABEL[signal]}
+        </Badge>
+        <span className="text-[13px] leading-snug font-medium flex-1 min-w-0">
+          {headline}
+        </span>
+      </div>
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1 pl-9">
+          {chips.map((c) => (
+            <span
+              key={c}
+              className="text-[10px] tabular text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 장기 시그널 옆에 보일 작은 컨센·밸류 요약 칩. 데이터 없으면 빈 배열.
+function longTermChips(snap: StockSnapshot): string[] {
+  const chips: string[] = [];
+  const c = snap.consensus;
+  const v = snap.consensusValuation;
+  if (c?.upsidePercent != null) {
+    const sign = c.upsidePercent >= 0 ? "+" : "";
+    chips.push(`컨센 ${sign}${(c.upsidePercent * 100).toFixed(0)}%`);
+  }
+  if (v?.forwardPer != null) {
+    chips.push(`추정PER ${v.forwardPer.toFixed(1)}`);
+  } else if (v?.per != null) {
+    chips.push(`PER ${v.per.toFixed(1)}`);
+  }
+  return chips;
 }

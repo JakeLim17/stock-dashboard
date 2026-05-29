@@ -1,10 +1,29 @@
 "use client";
 
-import type { StockSnapshot } from "@/lib/types";
+import type { SignalStatus, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 import { Target, Users, ScrollText, Building2 } from "lucide-react";
+
+const LONG_SIGNAL_LABEL: Record<SignalStatus, string> = {
+  BUY: "신규 매수",
+  ADD: "분할 매수",
+  HOLD: "보유",
+  WATCH: "관망",
+  SELL: "비중 축소",
+};
+
+const LONG_SIGNAL_VARIANT: Record<
+  SignalStatus,
+  "buy" | "add" | "hold" | "watch" | "sell"
+> = {
+  BUY: "buy",
+  ADD: "add",
+  HOLD: "hold",
+  WATCH: "watch",
+  SELL: "sell",
+};
 
 // 선택된 종목의 컨센서스 / 밸류에이션 / 리서치 노트를 한 패널에 모은다.
 // 사이드 폭이 좁으면 정보가 빽빽해지므로, 차트 아래 별도 행에 가로로 길게 둔다.
@@ -33,12 +52,28 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
   const researches = snap.researches ?? [];
   const price = snap.quote.price;
   const hasAnything = !!c || !!v || researches.length > 0;
+  const longSig = snap.analysis.longTerm;
 
   return (
     <Card>
       <CardHeader className="flex items-start justify-between gap-3">
-        <div>
-          <CardTitle>컨센서스 · 밸류에이션 — {snap.meta.name}</CardTitle>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CardTitle>컨센서스 · 밸류에이션 — {snap.meta.name}</CardTitle>
+            <Badge
+              variant={LONG_SIGNAL_VARIANT[longSig.signal]}
+              size="sm"
+              className="shrink-0"
+            >
+              장기 · {LONG_SIGNAL_LABEL[longSig.signal]}
+            </Badge>
+          </div>
+          <p className="text-sm font-medium mt-1.5 leading-snug">
+            {longSig.headline}
+            <span className="ml-2 text-[11px] tabular text-muted-foreground">
+              종합 {longSig.score}
+            </span>
+          </p>
           <p className="text-[11px] text-muted-foreground mt-1">
             애널리스트 목표주가 · 분포 · 밸류 지표 · 최근 리서치 (6시간 캐시)
           </p>
