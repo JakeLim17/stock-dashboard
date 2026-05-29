@@ -1,6 +1,12 @@
 import "server-only";
 import YahooFinance from "yahoo-finance2";
-import type { ExtendedHoursQuote, Quote, TechIndicators } from "../types";
+import type {
+  AnalystConsensus,
+  ExtendedHoursQuote,
+  Quote,
+  TechIndicators,
+  Valuation,
+} from "../types";
 
 // yahoo-finance2 v3는 인스턴스 기반. survey/historical 안내 로그 끄기.
 const yahooFinance = new YahooFinance({
@@ -251,4 +257,131 @@ function num(v: unknown): number | null {
 
 function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+// ─── 컨센서스 / 밸류에이션 ────────────────────────────────────────
+//
+// quoteSummary로 한 번에 받아 둘 다 채운다. 한국 종목(예: 005930.KS)도 정상 응답.
+// 단, 한국 종목은 trailingPE / priceToBook 등이 null로 오는 경우가 많아 네이버 보조와 머지가 필요.
+export async function fetchAnalystAndValuation(
+  code: string
+): Promise<{ consensus: AnalystConsensus | null; valuation: Valuation | null } | null> {
+  try {
+    const r = (await yahooFinance.quoteSummary(code, {
+      modules: [
+        "financialData",
+        "recommendationTrend",
+        "defaultKeyStatistics",
+        "price",
+        "summaryDetail",
+      ],
+    })) as unknown as RawRecord | null;
+    if (!r) return null;
+
+    const fin = (r.financialData ?? {}) as RawRecord;
+    const trend = ((r.recommendationTrend as RawRecord | undefined)?.trend ??
+      []) as RawRecord[];
+    const keyStats = (r.defaultKeyStatistics ?? {}) as RawRecord;
+    const price = (r.price ?? {}) as RawRecord;
+    const detail = (r.summaryDetail ?? {}) as RawRecord;
+
+    const targetMean = num(fin.targetMeanPrice);
+    const targetMedian = num(fin.targetMedianPrice);
+    const targetHigh = num(fin.targetHighPrice);
+    const targetLow = num(fin.targetLowPrice);
+    const analystCount = num(fin.numberOfAnalystOpinions);
+    const recommendationKey = ((): AnalystConsensus["recommendationKey"] => {
+      const k = str(fin.recommendationKey)?.toLowerCase();
+      if (
+        k === "strong_buy" ||
+        k === "buy" ||
+        k === "hold" ||
+        k === "sell" ||
+        k === "strong_sell"
+      )
+        return k;
+      return null;
+    })();
+    const recommendationMean = num(fin.recommendationMean);
+    const currentPrice = num(fin.currentPrice) ?? num(price.regularMarketPrice);
+
+    const head = trend[0] ?? {};
+    const strongBuy = num(head.strongBuy) ?? 0;
+    const buy = num(head.buy) ?? 0;
+    const hold = num(head.hold) ?? 0;
+    const sell = num(head.sell) ?? 0;
+    const strongSell = num(head.strongSell) ?? 0;
+
+    const hasConsensus =
+      targetMean != null ||
+      analystCount != null ||
+      strongBuy + buy + hold + sell + strongSell > 0 ||
+      recommendationKey != null;
+
+    const upsidePercent =
+      targetMean != null && currentPrice != null && currentPrice > 0
+        ? targetMean / currentPrice - 1
+        : null;
+
+    const consensus: AnalystConsensus | null = hasConsensus
+      ? {
+          targetMean,
+          targetMedian,
+          targetHigh,
+          targetLow,
+          analystCount,
+          recommendationKey,
+          recommendationMean,
+          strongBuy,
+          buy,
+          hold,
+          sell,
+          strongSell,
+          upsidePercent,
+          source: "yahoo",
+          asOf: Date.now(),
+        }
+      : null;
+
+    // 밸류에이션: trailing/forward EPS·PBR·BPS·배당. 한국 종목은 일부 null.
+    const trailingPE = num(detail.trailingPE) ?? num(price.trailingPE);
+    const forwardPE = num(detail.forwardPE) ?? num(keyStats.forwardPE);
+    const pbr = num(keyStats.priceToBook);
+    const eps = num(keyStats.trailingEps);
+    const forwardEps = num(keyStats.forwardEps);
+    const dividendYield = num(detail.dividendYield);
+    const week52High = num(detail.fiftyTwoWeekHigh);
+    const week52Low = num(detail.fiftyTwoWeekLow);
+    const bookValue = num(keyStats.bookValue);
+
+    const computedForwardPer =
+      forwardPE ??
+      (forwardEps != null && forwardEps > 0 && currentPrice != null
+        ? currentPrice / forwardEps
+        : null);
+
+    const valuation: Valuation | null =
+      trailingPE != null ||
+      computedForwardPer != null ||
+      pbr != null ||
+      eps != null ||
+      week52High != null
+        ? {
+            per: trailingPE,
+            forwardPer: computedForwardPer,
+            pbr,
+            eps,
+            bps: bookValue,
+            dividendYield,
+            week52High,
+            week52Low,
+            source: "yahoo",
+            asOf: Date.now(),
+          }
+        : null;
+
+    return { consensus, valuation };
+  } catch {
+    return null;
+  }
 }

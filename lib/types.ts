@@ -203,6 +203,58 @@ export interface Predictions {
   };
 }
 
+// 컨센서스 / 밸류에이션 / 리서치 노트 — 펀더멘털 보조 데이터.
+// 매 5~15초 시세 갱신과 별개로 6시간 TTL 캐시에서 끌어 쓴다.
+export interface AnalystConsensus {
+  // 컨센서스 목표가. 한국 종목은 네이버에서, 해외는 Yahoo에서 받는다.
+  targetMean: number | null;
+  targetMedian: number | null;
+  targetHigh: number | null;
+  targetLow: number | null;
+  // 애널리스트 의견 분포
+  analystCount: number | null;
+  // Yahoo 척도: strong_buy < buy < hold < sell < strong_sell
+  recommendationKey:
+    | "strong_buy"
+    | "buy"
+    | "hold"
+    | "sell"
+    | "strong_sell"
+    | null;
+  // Yahoo recommendationMean (1~5 scale, 낮을수록 매수). 네이버 척도(1~5, 높을수록 매수)와 다르므로
+  // 단일 진실의 소스로 Yahoo 척도만 사용한다.
+  recommendationMean: number | null;
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+  // (targetMean - currentPrice) / currentPrice. 0.05 = +5% 여력.
+  upsidePercent: number | null;
+  source: "yahoo" | "naver" | "merged";
+  asOf: number; // epoch ms
+}
+
+export interface Valuation {
+  per: number | null; // trailing
+  forwardPer: number | null; // 한국: 네이버 cnsPer, 해외: price/forwardEps
+  pbr: number | null;
+  eps: number | null;
+  bps: number | null;
+  dividendYield: number | null; // 0.0013 = 0.13%
+  week52High: number | null;
+  week52Low: number | null;
+  source: "yahoo" | "naver" | "merged";
+  asOf: number;
+}
+
+export interface ResearchNote {
+  brokerage: string;
+  title: string;
+  date: string; // 'YYYY-MM-DD'
+  id?: string;
+}
+
 export interface StockSnapshot {
   meta: SymbolMeta;
   quote: Quote;
@@ -211,6 +263,10 @@ export interface StockSnapshot {
   analysis: AnalysisResult;
   overseasNight?: OverseasNightIndicator | null;
   predictions?: Predictions | null;
+  // 펀더멘털 보조 (캐시)
+  consensus?: AnalystConsensus | null;
+  consensusValuation?: Valuation | null;
+  researches?: ResearchNote[] | null;
 }
 
 export interface MarketIndicator {
