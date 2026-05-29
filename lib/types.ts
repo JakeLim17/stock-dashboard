@@ -128,12 +128,27 @@ export interface NewsItem {
   keywords?: string[];
 }
 
-export interface AnalysisResult {
+// 단기 / 장기 각각의 점수·신호·헤드라인·근거를 분리한 갈래.
+// shortTerm: RSI/이평/등락률/수급/시장 컨텍스트 — 며칠~2~3주 시계.
+// longTerm : 컨센서스/추정 PER/PBR/애널 분포 — 분기~연간 시계.
+export interface SignalDetail {
   signal: SignalStatus;
-  heatScore: number; // 0~100 (높을수록 과열)
-  buyScore: number; // 0~100 (높을수록 매수우위)
-  headline: string; // "현재는 추격매수 위험" 같은 한 줄
-  reasons: string[]; // 1~3줄 근거
+  headline: string;
+  reasons: string[]; // 최대 3줄
+  score: number; // 0~100. 단기는 (buy - heat) 환산, 장기는 base 50 + 룰 가감산
+}
+
+export interface AnalysisResult {
+  // 새 구조 — 단기/장기 분리
+  shortTerm: SignalDetail;
+  longTerm: SignalDetail;
+  // 백워드 호환 — 기존 컴포넌트/DB는 아래 필드를 그대로 읽고 있어 단기 값을 미러링.
+  // 단, headline은 단·장기 조합 통합 메시지를 우선 노출하기 위해 shortTerm.headline을 그대로 쓴다.
+  signal: SignalStatus; // = shortTerm.signal
+  heatScore: number; // 0~100 (높을수록 과열) — 단기 룰 기반
+  buyScore: number; // 0~100 (높을수록 매수우위) — 단기 룰 기반
+  headline: string; // = shortTerm.headline (단·장기 조합 메시지가 들어 있음)
+  reasons: string[]; // = shortTerm.reasons
 }
 
 // 예측 (통계 기반, 투자조언 아님)
