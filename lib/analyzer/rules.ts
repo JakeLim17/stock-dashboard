@@ -5,12 +5,14 @@ import type {
   AnalystConsensus,
   FlowData,
   MarketIndicator,
+  NewsRiskAssessment,
   Quote,
   SignalDetail,
   SignalStatus,
   TechIndicators,
   Valuation,
 } from "../types";
+import { emptyRiskAssessment } from "../news/riskScore";
 
 // 분석 입력. provider에서 모은 1차 데이터.
 export interface AnalyzeInput {
@@ -20,6 +22,8 @@ export interface AnalyzeInput {
   // 펀더멘털 보조 (캐시) — 없을 수 있음.
   consensus?: AnalystConsensus | null;
   valuation?: Valuation | null;
+  // 외부 이벤트 리스크 (트럼프 주둥이·관세·지정학 등). 없으면 low로 처리.
+  externalRisk?: NewsRiskAssessment | null;
   // 시장 컨텍스트 (반도체 강세 여부 등 평가용)
   context: {
     semiHeat: number; // 0~100, 반도체 섹터 과열도
@@ -478,6 +482,68 @@ export function mergeVerdict(
   };
 }
 
+// 외부 리스크(트럼프·관세·지정학)가 high면 한 단계 보수적으로 시프트한다.
+// 매트릭스:
+//   NEW_ENTRY   → SCALE_IN
+//   SCALE_IN    → HOLD_WAIT
+//   HOLD_WAIT   → AVOID
+//   HOLD        → AVOID
+//   SHORT_TRADE → AVOID
+//   나머지(TRIM/REDUCE/AVOID)는 그대로
+// medium은 시프트 없이 headline에 "외부 리스크 주의" 부연만 추가.
+// low는 표시 없음.
+const RISK_SHIFT_MAP: Partial<Record<ActionRecommendation, ActionRecommendation>> = {
+  NEW_ENTRY: "SCALE_IN",
+  SCALE_IN: "HOLD_WAIT",
+  HOLD_WAIT: "AVOID",
+  HOLD: "AVOID",
+  SHORT_TRADE: "AVOID",
+};
+
+export function applyRiskShift(
+  verdict: ActionVerdict,
+  risk: NewsRiskAssessment,
+  shortSig: SignalStatus,
+  longSig: SignalStatus
+): ActionVerdict {
+  // 대표 driver 라벨 (UI 노출용)
+  const topDriver = risk.drivers[0]?.label;
+
+  if (risk.level === "high") {
+    const nextAction = RISK_SHIFT_MAP[verdict.action];
+    if (nextAction && nextAction !== verdict.action) {
+      const meta = actionMeta(nextAction, shortSig, longSig);
+      const driverHint = topDriver ? ` (${topDriver})` : "";
+      return {
+        action: nextAction,
+        label: meta.label,
+        tone: meta.tone,
+        headline: `${meta.headline} · 외부 리스크 ↑ 한 단계 보수${driverHint}`,
+        detail: verdict.detail,
+        riskShifted: true,
+      };
+    }
+    // 시프트 대상이 아닌 액션(TRIM/REDUCE/AVOID)이라도 헤드라인에 리스크 표시는 남긴다.
+    const driverHint = topDriver ? ` (${topDriver})` : "";
+    return {
+      ...verdict,
+      headline: `${verdict.headline} · 외부 리스크 ↑${driverHint}`,
+      riskShifted: true,
+    };
+  }
+
+  if (risk.level === "medium") {
+    const driverHint = topDriver ? ` (${topDriver})` : "";
+    return {
+      ...verdict,
+      headline: `${verdict.headline} · 외부 리스크 주의${driverHint}`,
+      // medium은 액션 자체는 안 바꿈 — 플래그도 false 유지.
+    };
+  }
+
+  return verdict;
+}
+
 // ----------------------------------------------------------------------------
 // 메인 entry — 단기/장기를 각각 평가해 AnalysisResult로 합친다.
 // ----------------------------------------------------------------------------
@@ -552,11 +618,21 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   };
 
   // 통합 액션 — 단·장기 조합 매트릭스에서 메인 결론 도출.
-  const verdict = mergeVerdict(shortSignal, longSignal);
+  const baseVerdict = mergeVerdict(shortSignal, longSignal);
+
+  // 외부 이벤트 리스크 시프트 — 트럼프 주둥이/관세/지정학 high면 한 단계 보수.
+  const externalRisk = input.externalRisk ?? emptyRiskAssessment();
+  const verdict = applyRiskShift(
+    baseVerdict,
+    externalRisk,
+    shortSignal,
+    longSignal
+  );
 
   return {
     shortTerm,
     longTerm,
+    externalRisk,
     verdict,
     // 백워드 호환 미러 — headline은 verdict 메시지로 노출
     signal: shortTerm.signal,

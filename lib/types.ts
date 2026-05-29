@@ -157,13 +157,38 @@ export interface ActionVerdict {
   headline: string; // 한 줄 헤드라인 — 왜 이 액션인지
   tone: "buy" | "add" | "hold" | "watch" | "sell"; // 배지 색 (Badge variant)
   detail: string; // 작은 부연 (예: "단기 SELL · 장기 BUY")
+  // 외부 리스크(트럼프·관세·지정학 등)로 인해 한 단계 보수적으로 시프트되었는지
+  riskShifted?: boolean;
+}
+
+// 외부 이벤트 리스크 평가 결과를 types에 일급 노출.
+// lib/news/riskScore.ts 의 정의를 그대로 re-export 한다 — 컴포넌트가 types만 import 해도
+// shape을 알 수 있게.
+export type NewsRiskLevel = "low" | "medium" | "high";
+
+export interface NewsRiskDriver {
+  label: string;
+  category: string;
+  headline: string;
+  date: number;
+  weight: number;
+  contribution: number;
+}
+
+export interface NewsRiskAssessment {
+  level: NewsRiskLevel;
+  score: number;
+  drivers: NewsRiskDriver[];
+  matchCount: number;
 }
 
 export interface AnalysisResult {
   // 새 구조 — 단기/장기 분리
   shortTerm: SignalDetail;
   longTerm: SignalDetail;
-  // 통합 액션 (메인 결론) — 단·장기 조합 매트릭스에서 도출
+  // 외부 이벤트 리스크 (트럼프·관세·지정학·정책 등). low/medium/high.
+  externalRisk: NewsRiskAssessment;
+  // 통합 액션 (메인 결론) — 단·장기 조합 매트릭스에서 도출 + 외부 리스크 시프트 적용
   verdict: ActionVerdict;
   // 백워드 호환 — 기존 컴포넌트/DB는 아래 필드를 그대로 읽고 있어 단기 값을 미러링.
   // 단, headline은 verdict.headline(통합 메시지)을 노출한다.

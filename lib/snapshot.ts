@@ -10,6 +10,7 @@ import {
 } from "./providers";
 import { getConsensusBundle } from "./providers/consensusCache";
 import { analyze, marketMoodLabel, predict } from "./analyzer";
+import { assessNewsRisk } from "./news/riskScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import {
   PRIMARY_SYMBOLS,
@@ -83,8 +84,9 @@ export async function buildSnapshot(
 
   const usdKrw = fx?.value ?? null;
 
-  // 1.5) 베타 시나리오용 시장 시계열/환율 (관심 종목 전체에서 공유, 한 번만 호출)
-  const [nasdaqHistory, fxHistory, eurUsdQuote] = await Promise.all([
+  // 1.5) 베타 시나리오용 시장 시계열/환율 + 뉴스(외부 리스크 평가에 필요) — 병렬.
+  // 뉴스는 종목 분석 전에 받아야 종목별 externalRisk를 analyze()에 넣을 수 있다.
+  const [nasdaqHistory, fxHistory, eurUsdQuote, newsFetched] = await Promise.all([
     fetchHistorical("NQ=F", 90).catch(() => []),
     fetchHistorical("KRW=X", 90).catch(() => []),
     includeOverseasNight
@@ -93,8 +95,21 @@ export async function buildSnapshot(
           return null;
         })
       : Promise.resolve(null),
+    fetchAllNews(30).catch((e) => {
+      errors["news"] = e instanceof Error ? e.message : String(e);
+      return [] as NewsItem[];
+    }),
   ]);
   const eurUsd = eurUsdQuote?.price ?? null;
+  const newsAll: NewsItem[] = newsFetched;
+  // 뉴스 DB 저장은 비차단으로 — 분석은 메모리 newsAll 기준.
+  if (newsAll.length > 0) {
+    try {
+      saveNews(newsAll);
+    } catch {
+      /* 메모리 DB 등 — 무시 */
+    }
+  }
 
   // 2) 관심 종목 — quote, historical, flow, 컨센서스(캐시) 병렬
   const primaries: StockSnapshot[] = [];
@@ -141,12 +156,24 @@ export async function buildSnapshot(
       const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
       const flow = flowRes.flow;
+
+      // 종목 관련 뉴스 + 시장 전반(symbol 미지정) 뉴스를 합쳐 외부 리스크 평가.
+      // 시장 전반 뉴스(예: "트럼프, 중국 반도체에 100% 관세")는 모든 watchlist에 영향.
+      const relatedNews = newsAll.filter(
+        (n) =>
+          n.symbol === meta.code ||
+          (n.title || "").includes(meta.name) ||
+          n.symbol == null
+      );
+      const externalRisk = assessNewsRisk(relatedNews);
+
       const analysis = analyze({
         quote,
         tech,
         flow,
         consensus,
         valuation: consensusValuation,
+        externalRisk,
         context: {
           ...context,
           overseasNightRate: overseasNight?.changeRate ?? null,
@@ -192,20 +219,11 @@ export async function buildSnapshot(
     }
   }
 
-  // 3) 뉴스
-  let news: NewsItem[] = [];
-  try {
-    const fetched = await fetchAllNews(30);
-    saveNews(fetched);
-    news = fetched;
-  } catch (e) {
-    errors["news"] = e instanceof Error ? e.message : String(e);
-  }
-
+  // 3) 뉴스는 이미 §1.5에서 newsAll로 받아 두었다.
   const marketMood = {
     label: marketMoodLabel(indicators),
     semiHeat: semiHeatClamped,
-    riskKeywords: riskKeywords(news),
+    riskKeywords: riskKeywords(newsAll),
   };
 
   return {
@@ -213,7 +231,7 @@ export async function buildSnapshot(
     primaries,
     indicators,
     marketMood,
-    news,
+    news: newsAll,
     errors,
   };
 }
