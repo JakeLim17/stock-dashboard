@@ -3,6 +3,7 @@
 import type { SignalStatus, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
+import { SignalDetailBadges } from "./SignalDetailBadges";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 import { Target, Users, ScrollText, Building2 } from "lucide-react";
 
@@ -77,10 +78,18 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
           <p className="text-sm font-semibold mt-1.5 leading-snug">
             {verdict.headline}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-            {verdict.detail} · 장기 헤드라인: {longSig.headline}
-            <span className="ml-2 tabular">종합 {longSig.score}</span>
-          </p>
+          {/* 단·장기 시그널 컬러 배지 (회색 detail 대체) + 장기 헤드라인·종합 점수 */}
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            <SignalDetailBadges
+              short={snap.analysis.shortTerm.signal}
+              long={longSig.signal}
+              title={verdict.detail}
+            />
+            <span className="text-[11px] text-muted-foreground leading-snug">
+              장기 헤드라인: {longSig.headline}
+              <span className="ml-2 tabular">종합 {longSig.score}</span>
+            </span>
+          </div>
           <p className="text-[11px] text-muted-foreground mt-1">
             애널리스트 목표주가 · 분포 · 밸류 지표 · 최근 리서치 (6시간 캐시)
           </p>

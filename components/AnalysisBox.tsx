@@ -1,6 +1,7 @@
 import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody } from "./ui/Card";
 import { Badge } from "./ui/Badge";
+import { SignalDetailBadges } from "./SignalDetailBadges";
 
 // 종목 카드 그리드 위에 가로로 길게 띄우는 컴팩트 분석 바.
 // 좌(종목명 + verdict 메인 배지·헤드라인) · 중(점수 막대) · 우(근거 + 장기 헤드라인) 3분할.
@@ -28,9 +29,11 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
             <div className="text-base md:text-lg font-bold tracking-tight leading-snug">
               {verdict.headline}
             </div>
-            <div className="text-[11px] tabular text-muted-foreground">
-              {verdict.detail}
-            </div>
+            <SignalDetailBadges
+              short={a.shortTerm.signal}
+              long={a.longTerm.signal}
+              title={verdict.detail}
+            />
           </div>
 
           {/* 중: 점수 막대 — 단기 과열/매수우위 + 장기 종합 점수 */}
