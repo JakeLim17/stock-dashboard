@@ -4,6 +4,7 @@ import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
+import { RiskBadge } from "./RiskBadge";
 import {
   changeColor,
   extendedSessionLabel,
@@ -155,7 +156,7 @@ export function StockCard({ snap, onSelect, selected }: {
             분석
           </div>
 
-          {/* 메인 verdict 배지 + 단·장기 시그널 컬러 배지 (회색 detail 대체) */}
+          {/* 메인 verdict 배지 + 단·장기 시그널 컬러 배지 + 외부 리스크 배지 */}
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={analysis.verdict.tone} size="lg">
               {analysis.verdict.label}
@@ -165,6 +166,7 @@ export function StockCard({ snap, onSelect, selected }: {
               long={analysis.longTerm.signal}
               title={analysis.verdict.detail}
             />
+            <RiskBadge assessment={analysis.externalRisk} />
           </div>
           <p className="text-sm font-semibold leading-snug">
             {analysis.verdict.headline}

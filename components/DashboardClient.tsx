@@ -501,7 +501,14 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       <PredictionPanel snaps={snap.primaries} selectedCode={selectedSnap?.meta.code} />
 
       {/* 뉴스 */}
-      <NewsPanel items={snap.news} />
+      <NewsPanel
+        items={snap.news}
+        selectedSymbol={
+          selectedSnap
+            ? { code: selectedSnap.meta.code, name: selectedSnap.meta.name }
+            : null
+        }
+      />
 
       {/* 에러/디버그 영역 */}
       {Object.keys(snap.errors).length > 0 && (
