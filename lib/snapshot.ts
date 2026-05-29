@@ -8,6 +8,7 @@ import {
   fetchAllNews,
   riskKeywords,
 } from "./providers";
+import { getConsensusBundle } from "./providers/consensusCache";
 import { analyze, marketMoodLabel, predict } from "./analyzer";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import {
@@ -95,17 +96,38 @@ export async function buildSnapshot(
   ]);
   const eurUsd = eurUsdQuote?.price ?? null;
 
-  // 2) 관심 종목 — quote, historical, flow 병렬
+  // 2) 관심 종목 — quote, historical, flow, 컨센서스(캐시) 병렬
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist] = await Promise.all([
+      const [quoteRes, hist, bundle] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
+        // 컨센서스/밸류에이션은 종목당 6시간 캐시. miss일 때만 Yahoo+Naver 호출.
+        getConsensusBundle(meta.code).catch(() => ({
+          consensus: null,
+          valuation: null,
+          researches: [],
+        })),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote = quoteRes.quote;
+
+      // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 오차가 누적된다.
+      // 현재 시세 대비로 매번 재계산해 룰/UI가 같은 값을 본다.
+      const consensus = bundle.consensus
+        ? {
+            ...bundle.consensus,
+            upsidePercent:
+              bundle.consensus.targetMean != null && quote.price > 0
+                ? bundle.consensus.targetMean / quote.price - 1
+                : null,
+          }
+        : null;
+      const consensusValuation = bundle.valuation;
+      const researches = bundle.researches;
+
       const overseasNight = includeOverseasNight
         ? await fetchOverseasNightIndicator(meta, quote, usdKrw, eurUsd).catch(
             (e) => {
@@ -123,6 +145,8 @@ export async function buildSnapshot(
         quote,
         tech,
         flow,
+        consensus,
+        valuation: consensusValuation,
         context: {
           ...context,
           overseasNightRate: overseasNight?.changeRate ?? null,
@@ -138,13 +162,23 @@ export async function buildSnapshot(
         overseasNight,
       });
 
-      // 저장
       saveQuote(quote);
       saveFlow(meta.code, quote.fetchedAt, flow);
       saveTech(meta.code, quote.fetchedAt, tech);
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
-      return { meta, quote, tech, flow, analysis, overseasNight, predictions };
+      return {
+        meta,
+        quote,
+        tech,
+        flow,
+        analysis,
+        overseasNight,
+        predictions,
+        consensus,
+        consensusValuation,
+        researches,
+      };
     })
   );
 

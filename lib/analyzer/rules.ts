@@ -1,10 +1,12 @@
 import type {
   AnalysisResult,
+  AnalystConsensus,
   FlowData,
   MarketIndicator,
   Quote,
   SignalStatus,
   TechIndicators,
+  Valuation,
 } from "../types";
 
 // 분석 입력. provider에서 모은 1차 데이터.
@@ -12,6 +14,9 @@ export interface AnalyzeInput {
   quote: Quote;
   tech: TechIndicators;
   flow: FlowData;
+  // 펀더멘털 보조 (캐시) — 없을 수 있음.
+  consensus?: AnalystConsensus | null;
+  valuation?: Valuation | null;
   // 시장 컨텍스트 (반도체 강세 여부 등 평가용)
   context: {
     semiHeat: number; // 0~100, 반도체 섹터 과열도
@@ -35,7 +40,7 @@ function isRegularMarket(marketState?: string): boolean {
 }
 
 function evaluateRules(input: AnalyzeInput): RuleHit[] {
-  const { quote, tech, flow, context } = input;
+  const { quote, tech, flow, consensus, valuation, context } = input;
   const hits: RuleHit[] = [];
   const flowWeight = flow.source === "mock" ? 0.35 : 1;
   const flowSuffix = flow.source === "mock" ? " (mock 가중치 축소)" : "";
@@ -99,10 +104,12 @@ function evaluateRules(input: AnalyzeInput): RuleHit[] {
     else if (nr <= -0.01) hits.push({ label: "해외 개별 야간 약세", heat: 8, buy: -8, good: false });
   }
 
-  // 11) 밸류에이션 부담. PER/PBR이 높으면 좋은 뉴스가 이미 가격에 반영됐을 가능성이 크다.
-  const per = quote.valuation?.per ?? null;
-  const forwardPer = quote.valuation?.forwardPer ?? null;
-  const pbr = quote.valuation?.pbr ?? null;
+  // 11) 밸류에이션 부담. 캐시된 valuation(Yahoo+네이버 머지)이 있으면 우선 사용,
+  //     없으면 quote.valuation으로 fallback.
+  const per = valuation?.per ?? quote.valuation?.per ?? null;
+  const forwardPer =
+    valuation?.forwardPer ?? quote.valuation?.forwardPer ?? null;
+  const pbr = valuation?.pbr ?? quote.valuation?.pbr ?? null;
   const activePer = forwardPer ?? per;
 
   if (per != null) {
@@ -115,9 +122,165 @@ function evaluateRules(input: AnalyzeInput): RuleHit[] {
     hits.push({ label: `PER ${activePer.toFixed(1)}배 저평가 구간`, heat: -5, buy: 8, good: true });
   }
 
+  // 12) 추정 PER (forwardPer) — 다음 실적 기준 저평가/고평가.
+  //     "현재 PER이 비싸도 내년 실적 대비로는 싸다" 같은 케이스를 잡는다.
+  if (forwardPer != null) {
+    if (forwardPer < 8) {
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(1)}배 — 내년 실적 대비 매우 저렴`,
+        heat: -5,
+        buy: 15,
+        good: true,
+      });
+    } else if (forwardPer < 10) {
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(1)}배 저평가`,
+        heat: -3,
+        buy: 10,
+        good: true,
+      });
+    } else if (forwardPer > 40) {
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 대비도 부담`,
+        heat: 10,
+        buy: -5,
+        good: false,
+      });
+    } else if (forwardPer > 25) {
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 부담`,
+        heat: 5,
+        buy: 0,
+        good: false,
+      });
+    }
+  }
+
   if (pbr != null) {
-    if (pbr >= 5) hits.push({ label: `PBR ${pbr.toFixed(1)}배 자산가치 부담`, heat: 15, buy: -10, good: false });
+    if (pbr >= 8) hits.push({ label: `PBR ${pbr.toFixed(1)}배 — 자산가치 대비 매우 부담`, heat: 20, buy: -10, good: false });
+    else if (pbr >= 5) hits.push({ label: `PBR ${pbr.toFixed(1)}배 자산가치 부담`, heat: 15, buy: -10, good: false });
     else if (pbr >= 3) hits.push({ label: `PBR ${pbr.toFixed(1)}배 다소 부담`, heat: 8, buy: -5, good: false });
+    else if (pbr < 1.0) hits.push({ label: `PBR ${pbr.toFixed(2)}배 — 청산가치 이하`, heat: -3, buy: 5, good: true });
+  }
+
+  // 13) 컨센서스 목표가 대비 상승여력. 단기 기술이 과열이어도 펀더멘털 여력이 크면
+  //     관망이 아니라 분할 진입이 우위. 반대로 이미 컨센 평균을 크게 초과하면 비중 축소.
+  if (consensus?.upsidePercent != null) {
+    const up = consensus.upsidePercent;
+    if (up <= -0.25) {
+      hits.push({
+        label: `컨센서스 평균 대비 ${(up * 100).toFixed(0)}% — 25% 이상 고평가`,
+        heat: 10,
+        buy: -25,
+        good: false,
+      });
+    } else if (up <= -0.1) {
+      hits.push({
+        label: `컨센서스 평균 대비 ${(up * 100).toFixed(0)}% — 이미 목표가 초과`,
+        heat: 5,
+        buy: -15,
+        good: false,
+      });
+    } else if (up <= -0.05) {
+      hits.push({
+        label: `컨센서스 평균 대비 ${(up * 100).toFixed(0)}% — 여력 제한적`,
+        heat: 0,
+        buy: -5,
+        good: false,
+      });
+    } else if (up < 0.1) {
+      // 0% ~ +10%
+      hits.push({
+        label: `컨센서스 대비 +${(up * 100).toFixed(0)}% 여력`,
+        heat: 0,
+        buy: 5,
+        good: true,
+      });
+    } else if (up < 0.2) {
+      hits.push({
+        label: `컨센서스 대비 +${(up * 100).toFixed(0)}% 상승여력`,
+        heat: -5,
+        buy: 15,
+        good: true,
+      });
+    } else {
+      hits.push({
+        label: `컨센서스 대비 +${(up * 100).toFixed(0)}% 상승여력`,
+        heat: -10,
+        buy: 25,
+        good: true,
+      });
+    }
+  }
+
+  // 14) 컨센서스 최고가 보너스. mean으로는 -10%여도 high가 +30% 이상이면
+  //     "범위 안에 강세 시나리오 존재" — 약한 보너스만.
+  if (consensus?.targetHigh != null && quote.price > 0) {
+    const highUp = consensus.targetHigh / quote.price - 1;
+    if (highUp >= 0.5) {
+      hits.push({
+        label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% — 강세 시나리오 존재`,
+        heat: -3,
+        buy: 8,
+        good: true,
+      });
+    } else if (highUp >= 0.3) {
+      hits.push({
+        label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% 여지`,
+        heat: -2,
+        buy: 5,
+        good: true,
+      });
+    }
+  }
+
+  // 15) 애널리스트 분포. Yahoo 기반(strongBuy/buy/hold/sell/strongSell). 한국 종목은
+  //     네이버에 분포 데이터가 없어 0,0,0,0,0이면 룰 미적용.
+  if (consensus) {
+    const total =
+      consensus.strongBuy +
+      consensus.buy +
+      consensus.hold +
+      consensus.sell +
+      consensus.strongSell;
+    if (total >= 5) {
+      const strongBuyShare = consensus.strongBuy / total;
+      const buyShare = (consensus.strongBuy + consensus.buy) / total;
+      const holdShare = consensus.hold / total;
+      const sellShare = (consensus.sell + consensus.strongSell) / total;
+
+      if (strongBuyShare >= 0.25 && consensus.sell + consensus.strongSell === 0) {
+        hits.push({
+          label: `Strong Buy 비중 ${(strongBuyShare * 100).toFixed(0)}%·매도 0`,
+          heat: -3,
+          buy: 15,
+          good: true,
+        });
+      } else if (buyShare >= 0.7 && sellShare <= 0.05) {
+        hits.push({
+          label: `매수 의견 ${(buyShare * 100).toFixed(0)}% 우세`,
+          heat: 0,
+          buy: 10,
+          good: true,
+        });
+      }
+
+      if (sellShare >= 0.2) {
+        hits.push({
+          label: `매도 의견 ${(sellShare * 100).toFixed(0)}% — 분포 부정적`,
+          heat: 5,
+          buy: -15,
+          good: false,
+        });
+      } else if (holdShare >= 0.5) {
+        hits.push({
+          label: `Hold 비중 ${(holdShare * 100).toFixed(0)}% — 의견 보수적`,
+          heat: 0,
+          buy: -5,
+          good: false,
+        });
+      }
+    }
   }
 
   return hits;
@@ -130,9 +293,13 @@ function clamp(n: number, lo = 0, hi = 100) {
 function decideSignal(heat: number, buy: number, marketState?: string): SignalStatus {
   // 장중/비장중 임계값을 분리한다.
   // 강한 매수 근거가 있으면 과열만으로 바로 관망/축소로 밀지 않는다.
+  // 추가: 펀더멘털·컨센이 강해 buy 점수가 매우 높으면 (>=85) 단기 과열(heat 65~78)이어도
+  //       관망이 아니라 ADD 우위로 본다. 사용자 피드백: "230대인데 관망만 하면 옳지 않다".
   if (isRegularMarket(marketState)) {
-    if (heat >= 78 && buy <= 30) return "SELL";
+    // 강한 buy(>=85)면 단기 과열을 덮어 SELL을 회피.
+    if (heat >= 80 && buy <= 35) return "SELL";
     if (buy >= 68 && heat <= 55) return "BUY";
+    if (buy >= 90 && heat <= 80) return "ADD"; // 강한 매수 근거가 단기 과열을 덮음
     if (buy >= 56 && heat <= 62) return "ADD";
     if (heat >= 65 && buy < 60) return "WATCH";
     if (buy <= 35 && heat <= 45) return "WATCH";
@@ -140,25 +307,63 @@ function decideSignal(heat: number, buy: number, marketState?: string): SignalSt
   }
 
   // 비장중은 보수적으로 보되, 해외 야간 강세 같은 보조 근거가 있으면 기회를 남긴다.
-  if (heat >= 80 && buy <= 28) return "SELL";
+  if (heat >= 82 && buy <= 32) return "SELL";
   if (buy >= 72 && heat <= 52) return "BUY";
+  if (buy >= 90 && heat <= 80) return "ADD";
   if (buy >= 58 && heat <= 62) return "ADD";
   if (heat >= 65 && buy < 62) return "WATCH";
   if (buy <= 35 && heat <= 45) return "WATCH";
   return "HOLD";
 }
 
-function headlineFor(signal: SignalStatus, heat: number, buy: number): string {
+// 펀더멘털 강도: 컨센 상승여력 + 추정PER 저평가 → 단기 과열을 일부 상쇄해 메시지를 바꾼다.
+function fundamentalStrength(
+  consensus?: AnalystConsensus | null,
+  valuation?: Valuation | null
+): "strong" | "weak" | "neutral" {
+  let score = 0;
+  if (consensus?.upsidePercent != null) {
+    if (consensus.upsidePercent >= 0.15) score += 2;
+    else if (consensus.upsidePercent >= 0.05) score += 1;
+    else if (consensus.upsidePercent <= -0.15) score -= 2;
+    else if (consensus.upsidePercent <= -0.05) score -= 1;
+  }
+  if (valuation?.forwardPer != null) {
+    if (valuation.forwardPer < 8) score += 2;
+    else if (valuation.forwardPer < 12) score += 1;
+    else if (valuation.forwardPer > 30) score -= 1;
+  }
+  if (score >= 2) return "strong";
+  if (score <= -2) return "weak";
+  return "neutral";
+}
+
+function headlineFor(
+  signal: SignalStatus,
+  heat: number,
+  buy: number,
+  consensus?: AnalystConsensus | null,
+  valuation?: Valuation | null
+): string {
+  const f = fundamentalStrength(consensus, valuation);
+
   switch (signal) {
     case "BUY":
       return "지금 신규 진입 우위";
     case "ADD":
+      if (f === "strong") return "장기 펀더멘털 양호 — 분할 진입 우위";
       return "눌림목 분할매수 우위";
     case "HOLD":
+      if (f === "strong" && heat >= 60)
+        return "장기 펀더멘털 양호, 단기 과열 — 분할 진입 고려";
+      if (f === "weak") return "보유 유지 / 신규 진입은 신중";
       return "보유 유지 / 추격은 자제";
     case "WATCH":
+      if (f === "strong" && heat >= 60)
+        return "장기 컨센서스 양호, 단기 과열 — 분할 진입 고려";
       return heat >= 60 ? "과열 구간 — 눌림 확인" : "방향성 확인 필요";
     case "SELL":
+      if (f === "weak") return "컨센 대비 고평가 + 약세 — 비중 축소 고려";
       return "과열 + 약세 신호 — 일부 익절 검토";
   }
 }
@@ -177,7 +382,13 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   buy = clamp(buy);
 
   const signal = decideSignal(heat, buy, input.quote.marketState);
-  const headlineBase = headlineFor(signal, heat, buy);
+  const headlineBase = headlineFor(
+    signal,
+    heat,
+    buy,
+    input.consensus,
+    input.valuation
+  );
   const headline = isRegularMarket(input.quote.marketState)
     ? headlineBase
     : `${headlineBase} (비장중 기준)`;
