@@ -8,6 +8,7 @@
     "start": "next start -p 9700"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "better-sqlite3": "^12.10.0",
     "clsx": "^2.1.1",
     "lightweight-charts": "^5.2.0",

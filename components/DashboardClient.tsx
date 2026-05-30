@@ -526,9 +526,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </details>
       )}
 
-      <footer className="text-center text-xs text-muted-foreground py-4">
-        데이터: Naver Finance · Yahoo Finance · Google News — 투자 판단 보조용.
-        본인 책임.
+      <footer className="text-center text-xs text-muted-foreground py-4 space-y-1">
+        <p>
+          데이터: Naver Finance · Yahoo Finance · Google News — 투자 판단 보조용.
+          본인 책임.
+        </p>
+        <p>익명 트래픽 통계(Vercel Analytics) 수집 · IP·쿠키 미저장.</p>
       </footer>
     </div>
   );
