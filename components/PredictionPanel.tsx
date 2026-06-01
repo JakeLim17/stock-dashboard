@@ -219,12 +219,18 @@ export function PredictionPanel({
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/60 text-xs">
                   <span className="text-muted-foreground">손익비</span>
                   <span className="tabular font-medium">
-                    1 : {p.targets.riskReward.toFixed(2)}
-                    {p.targets.riskReward >= 2 && (
-                      <span className="text-up ml-1.5">우수</span>
-                    )}
-                    {p.targets.riskReward < 1 && p.targets.riskReward > 0 && (
-                      <span className="text-down ml-1.5">불리</span>
+                    {p.targets.riskReward != null ? (
+                      <>
+                        1 : {p.targets.riskReward.toFixed(2)}
+                        {p.targets.riskReward >= 2 && (
+                          <span className="text-up ml-1.5">우수</span>
+                        )}
+                        {p.targets.riskReward < 1 && p.targets.riskReward > 0 && (
+                          <span className="text-down ml-1.5">불리</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">계산 불가</span>
                     )}
                   </span>
                 </div>

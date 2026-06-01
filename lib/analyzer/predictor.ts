@@ -55,6 +55,49 @@ function regressionBeta(stockReturns: number[], marketReturns: number[]): number
   return covariance(stockReturns, marketReturns) / v;
 }
 
+// ─── 일자별 inner join 회귀 베타 ───────────────────────────
+// 한·미 휴장일이 다르므로 단순 tail join 시 인덱스가 어긋나 베타가 편향된다.
+// 날짜(epoch ms)를 키로 inner join 후 dailyReturns로 계산해야 정확.
+function alignedDailyReturns(
+  stockHist: HistoricalPoint[],
+  marketHist: HistoricalPoint[]
+): { stock: number[]; market: number[] } {
+  // Yahoo는 timestamp를 일별 동일 시각(예: 한국 09:00 / 미국 16:00 close)으로 주지만
+  // ms 단위가 정확히 같다는 보장은 없다. YYYY-MM-DD 키로 정규화해서 join.
+  const dayKey = (ms: number): string => {
+    const d = new Date(ms);
+    return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+  };
+  const mMap = new Map<string, number>();
+  for (const p of marketHist) {
+    if (Number.isFinite(p.close) && p.close > 0) {
+      mMap.set(dayKey(p.date), p.close);
+    }
+  }
+  const aligned: { date: number; s: number; m: number }[] = [];
+  for (const p of stockHist) {
+    if (!Number.isFinite(p.close) || p.close <= 0) continue;
+    const m = mMap.get(dayKey(p.date));
+    if (m == null) continue;
+    aligned.push({ date: p.date, s: p.close, m });
+  }
+  aligned.sort((a, b) => a.date - b.date);
+
+  const sRet: number[] = [];
+  const mRet: number[] = [];
+  for (let i = 1; i < aligned.length; i++) {
+    const ps = aligned[i - 1].s;
+    const cs = aligned[i].s;
+    const pm = aligned[i - 1].m;
+    const cm = aligned[i].m;
+    if (ps > 0 && pm > 0) {
+      sRet.push((cs - ps) / ps);
+      mRet.push((cm - pm) / pm);
+    }
+  }
+  return { stock: sRet, market: mRet };
+}
+
 // ATR (Average True Range, 14일 기본)
 function averageTrueRange(hist: HistoricalPoint[], period = 14): number {
   if (hist.length < 2) return 0;
@@ -79,7 +122,9 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
   const reasons: string[] = [];
   let riskScore = 0;
 
-  if (v.per != null) {
+  // 음수 PER/PBR 가드 — 적자기업·자본잠식 회사가 "낮은 값 = 저평가"로 잘못 분류되는
+  // 결함을 방어한다. 음수일 때는 별도 reason으로 노출하고 감산 분기에 들어가지 않게 한다.
+  if (v.per != null && v.per > 0) {
     if (v.per >= 150) {
       riskScore += 55;
       reasons.push(`PER ${v.per.toFixed(0)}배: 실적 기대가 크게 선반영`);
@@ -93,9 +138,12 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
       riskScore -= 8;
       reasons.push(`PER ${v.per.toFixed(1)}배: 밸류 부담 낮음`);
     }
+  } else if (v.per != null && v.per <= 0) {
+    riskScore += 30;
+    reasons.push("적자(PER 음수): 펀더 부담 매우 큼 — 컨센 PER 적용 불가");
   }
 
-  if (v.forwardPer != null) {
+  if (v.forwardPer != null && v.forwardPer > 0) {
     if (v.forwardPer >= 60) {
       riskScore += 20;
       reasons.push(`추정PER ${v.forwardPer.toFixed(0)}배: 다음 실적 기준도 부담`);
@@ -103,9 +151,12 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
       riskScore -= 6;
       reasons.push(`추정PER ${v.forwardPer.toFixed(1)}배: 실적 개선 기대`);
     }
+  } else if (v.forwardPer != null && v.forwardPer <= 0) {
+    riskScore += 20;
+    reasons.push("적자 컨센(추정PER 음수): 실적 개선 기대 데이터 없음");
   }
 
-  if (v.pbr != null) {
+  if (v.pbr != null && v.pbr > 0) {
     if (v.pbr >= 5) {
       riskScore += 20;
       reasons.push(`PBR ${v.pbr.toFixed(1)}배: 자산가치 대비 부담`);
@@ -113,6 +164,9 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
       riskScore += 10;
       reasons.push(`PBR ${v.pbr.toFixed(1)}배: 다소 부담`);
     }
+  } else if (v.pbr != null && v.pbr <= 0) {
+    riskScore += 25;
+    reasons.push("자본잠식(PBR 음수): 큰 위험");
   }
 
   riskScore = clamp(Math.round(riskScore), 0, 100);
@@ -203,6 +257,9 @@ export function predict(input: PredictorInput): Predictions {
   //    - 손절: max(최근 20일 저점, 현재가 - 2·ATR)
   //    - 목표1: 현재가 + 2·ATR
   //    - 목표2: min(최근 20일 고점, 현재가 + 4·ATR)
+  //    신고가 갱신 종목은 resistance가 entry보다 낮을 수 있어 TP2 < entry 케이스가
+  //    발생할 수 있다. 이 경우 TP2를 entry × 1.02 또는 takeProfit1로 floor 처리.
+  //    또한 stopLoss > entry(손절선이 진입가 위)는 역방향 추세 신호이므로 entry로 클램프.
   let targets: PriceTargets | null = null;
   if (history.length >= 20 && price > 0) {
     const recent20 = history.slice(-20);
@@ -211,11 +268,24 @@ export function predict(input: PredictorInput): Predictions {
     const atr = averageTrueRange(history, 14);
     if (atr > 0) {
       const entry = price;
-      const stopLoss = Math.max(support, price - 2 * atr);
+      // stopLoss > entry 가드 — 손절은 항상 진입가 미만이어야 함
+      const rawStop = Math.max(support, price - 2 * atr);
+      const stopLoss = rawStop >= entry ? entry - 2 * atr : rawStop;
+
       const takeProfit1 = price + 2 * atr;
-      const takeProfit2 = Math.min(resistance, price + 4 * atr);
+      // TP2 floor — 신고가 갱신 종목에서 resistance가 entry 미만일 때 보정.
+      //   1) min(resistance, price + 4·ATR) 계산
+      //   2) entry 미만이면 max(takeProfit1, entry × 1.02)로 floor
+      const rawTP2 = Math.min(resistance, price + 4 * atr);
+      const takeProfit2 =
+        rawTP2 >= entry
+          ? rawTP2
+          : Math.max(takeProfit1, entry * 1.02);
+
+      // Risk-Reward — entry === stopLoss 면 분모 0이라 null로 노출.
+      // 산식: (TP1 - entry) / (entry - SL).
       const riskReward =
-        entry > stopLoss ? (takeProfit1 - entry) / (entry - stopLoss) : 0;
+        entry > stopLoss ? (takeProfit1 - entry) / (entry - stopLoss) : null;
       targets = {
         entry,
         stopLoss,
@@ -229,23 +299,21 @@ export function predict(input: PredictorInput): Predictions {
   }
 
   // C. 시장 시나리오 (최근 60일 회귀 베타)
-  //    표본 수가 너무 작거나(한·미 영업일 차이로 30 미만일 수 있음),
-  //    종목·시장 시리즈 길이가 크게 어긋나면 베타가 불안정해지므로 가드.
-  //    NOTE: 현재 일자별 정렬은 하지 않고 단순 tail join 이라
-  //    한국 휴장일·미국 휴장일이 다르면 베타가 약간 편향될 수 있다.
-  //    근본 해결은 일자 join 필요(추후 과제).
+  //    한·미 휴장일이 다르므로 단순 tail join이 아니라 일자별 inner join으로 정렬한 후
+  //    회귀를 계산해야 베타가 정확하다 (alignedDailyReturns).
+  //    표본 수가 너무 작으면 베타가 불안정해지므로 30 이상 가드.
   const scenarios: ScenarioRow[] = [];
   const MIN_SCENARIO_SAMPLES = 30;
-  const stockRecent = returns.slice(-60);
 
-  if (
-    nasdaqHistory &&
-    nasdaqHistory.length >= 30 &&
-    stockRecent.length >= MIN_SCENARIO_SAMPLES
-  ) {
-    const nqRet = dailyReturns(nasdaqHistory).slice(-60);
-    if (nqRet.length >= MIN_SCENARIO_SAMPLES) {
-      const beta = regressionBeta(stockRecent, nqRet);
+  if (nasdaqHistory && nasdaqHistory.length >= 30) {
+    const aligned = alignedDailyReturns(history, nasdaqHistory);
+    const sRet = aligned.stock.slice(-60);
+    const nqRet = aligned.market.slice(-60);
+    if (
+      sRet.length >= MIN_SCENARIO_SAMPLES &&
+      nqRet.length === sRet.length
+    ) {
+      const beta = regressionBeta(sRet, nqRet);
       if (Math.abs(beta) > 0.05) {
         scenarios.push({
           label: "나스닥 +1% 시",
@@ -263,14 +331,15 @@ export function predict(input: PredictorInput): Predictions {
     }
   }
 
-  if (
-    fxHistory &&
-    fxHistory.length >= 30 &&
-    stockRecent.length >= MIN_SCENARIO_SAMPLES
-  ) {
-    const fxRet = dailyReturns(fxHistory).slice(-60);
-    if (fxRet.length >= MIN_SCENARIO_SAMPLES) {
-      const beta = regressionBeta(stockRecent, fxRet);
+  if (fxHistory && fxHistory.length >= 30) {
+    const aligned = alignedDailyReturns(history, fxHistory);
+    const sRet = aligned.stock.slice(-60);
+    const fxRet = aligned.market.slice(-60);
+    if (
+      sRet.length >= MIN_SCENARIO_SAMPLES &&
+      fxRet.length === sRet.length
+    ) {
+      const beta = regressionBeta(sRet, fxRet);
       if (Math.abs(beta) > 0.1) {
         scenarios.push({
           label: "환율 +1% (원화 약세) 시",

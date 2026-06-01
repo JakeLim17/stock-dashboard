@@ -15,6 +15,7 @@ import { AnalysisBox } from "./AnalysisBox";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { PredictionPanel } from "./PredictionPanel";
 import { PriceChart } from "./PriceChart";
+import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
 import { LogOut, MoonStar, RefreshCw, Search, Plus, X } from "lucide-react";
@@ -169,6 +170,16 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       }, COMMIT_DEBOUNCE_MS);
     },
     [refresh]
+  );
+
+  // 추천 패널의 "관심종목 추가" 핸들러 — 이미 있거나 가득 차면 무시.
+  const handleAddFromRecommendation = useCallback(
+    (code: string) => {
+      if (watchCodesRef.current.includes(code)) return;
+      if (watchCodesRef.current.length >= MAX_WATCH) return;
+      commitWatch([...watchCodesRef.current, code]);
+    },
+    [commitWatch]
   );
 
   // 언마운트 시 debounce / 진행중 fetch 정리
@@ -336,6 +347,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
 
       {/* 요약 바 */}
       <SummaryBar snapshot={snap} lastUpdatedLabel={lastUpdated} />
+
+      {/* 종목 추천 — 펼침 패널 (기본 접힘). 펼치면 watchlist 후보 전체를 분석해 카테고리·섹터별로 노출 */}
+      <RecommendationsPanel
+        watchlist={watchCodes}
+        onAddToWatchlist={handleAddFromRecommendation}
+        maxWatch={MAX_WATCH}
+      />
 
       {/* 관심종목 한 줄 도구바 + 확장형 검색 + 카드 */}
       <section className="space-y-3">

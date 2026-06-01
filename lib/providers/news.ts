@@ -18,10 +18,29 @@ function feedUrl(query: string, lang: "ko" | "en"): string {
 }
 
 // 종목/시장 키워드별 fetch
+// 추천에 자주 등장하는 시총 상위 종목 위주로 회사별 뉴스 커버리지를 확대했다.
+// (RSS fetch 비용을 고려해 약 18종목 수준)
 const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
+  // 반도체 핵심
   { q: "삼성전자", symbol: "005930.KS", lang: "ko" },
   { q: "SK하이닉스", symbol: "000660.KS", lang: "ko" },
   { q: "삼성전기", symbol: "009150.KS", lang: "ko" },
+  // IT가전·자동차
+  { q: "LG전자", symbol: "066570.KS", lang: "ko" },
+  { q: "현대차", symbol: "005380.KS", lang: "ko" },
+  { q: "기아", symbol: "000270.KS", lang: "ko" },
+  // 배터리·인터넷
+  { q: "LG에너지솔루션", symbol: "373220.KS", lang: "ko" },
+  { q: "네이버 NAVER", symbol: "035420.KS", lang: "ko" },
+  { q: "카카오", symbol: "035720.KS", lang: "ko" },
+  // 방산·항공·조선·원전
+  { q: "한화에어로스페이스", symbol: "012450.KS", lang: "ko" },
+  { q: "한국항공우주", symbol: "047810.KS", lang: "ko" },
+  { q: "두산에너빌리티", symbol: "034020.KS", lang: "ko" },
+  { q: "대한항공", symbol: "003490.KS", lang: "ko" },
+  // 바이오
+  { q: "삼성바이오로직스", symbol: "207940.KS", lang: "ko" },
+  // 시장 전반
   { q: "반도체", lang: "ko" },
   { q: "환율 달러", lang: "ko" },
   { q: "Nvidia semiconductor", lang: "en" },
@@ -108,6 +127,17 @@ const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
   { kw: "삼성전자", code: "005930.KS" },
   { kw: "SK하이닉스", code: "000660.KS" },
   { kw: "삼성전기", code: "009150.KS" },
+  { kw: "LG전자", code: "066570.KS" },
+  { kw: "현대차", code: "005380.KS" },
+  { kw: "기아", code: "000270.KS" },
+  { kw: "LG에너지솔루션", code: "373220.KS" },
+  { kw: "네이버", code: "035420.KS" },
+  { kw: "카카오", code: "035720.KS" },
+  { kw: "한화에어로스페이스", code: "012450.KS" },
+  { kw: "한국항공우주", code: "047810.KS" },
+  { kw: "두산에너빌리티", code: "034020.KS" },
+  { kw: "대한항공", code: "003490.KS" },
+  { kw: "삼성바이오로직스", code: "207940.KS" },
   { kw: "엔비디아", code: "NVDA" },
   { kw: "nvidia", code: "NVDA" },
 ];

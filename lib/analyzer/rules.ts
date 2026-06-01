@@ -71,9 +71,13 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
   const flowSuffix = flow.source === "mock" ? " (mock 가중치 축소)" : "";
 
   // 1) 단기 등락률
+  //    한국 시장 상한가/하한가는 ±30%. ±29% 이상이면 별도 룰로 처리해
+  //    단순 "+4% 이상 급등"과 다르게 점수 가산하고 reason에 명시.
   const r = quote.changeRate;
-  if (r >= 0.04) hits.push({ label: "오늘 +4% 이상 급등", heat: 25, buy: -10, good: false });
+  if (r >= 0.295) hits.push({ label: "상한가 도달 (+30%) — 시장경보 위험권", heat: 40, buy: -20, good: false });
+  else if (r >= 0.04) hits.push({ label: "오늘 +4% 이상 급등", heat: 25, buy: -10, good: false });
   else if (r >= 0.02) hits.push({ label: "오늘 +2% 강세", heat: 10, buy: 0, good: true });
+  else if (r <= -0.295) hits.push({ label: "하한가 도달 (-30%) — 단기 반등 vs 추가 하락 분기", heat: 0, buy: 25, good: true });
   else if (r <= -0.03) hits.push({ label: "오늘 -3% 이상 급락", heat: -10, buy: 15, good: true });
 
   // 2) RSI 과열/침체
@@ -247,38 +251,99 @@ function evaluateLongTermRules(input: {
 
   // 2) 컨센 최고가 보너스 — mean이 박살나도 high가 크면 강세 시나리오 존재.
   //    SK하이닉스 케이스(최고 +71%) 대응: 50~80% 구간을 두텁게 보정.
+  //    targetHigh와 targetMean의 격차가 큰 경우(분산 큼)는 outlier로 보고 가중치 절반.
+  //    조건: (targetHigh - targetMean) / targetMean > 1.0 → 1배 이상 차이
   if (consensus?.targetHigh != null && quote.price > 0) {
     const highUp = consensus.targetHigh / quote.price - 1;
+    let outlierFactor = 1;
+    let outlierNote = "";
+    if (
+      consensus.targetMean != null &&
+      consensus.targetMean > 0 &&
+      (consensus.targetHigh - consensus.targetMean) / consensus.targetMean > 1.0
+    ) {
+      outlierFactor = 0.5;
+      outlierNote = " · 최고치는 outlier(다수 의견과 격차 큼)";
+    }
     if (highUp >= 0.8)
-      hits.push({ label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% — 강세 시나리오 큼`, score: 20, good: true });
+      hits.push({
+        label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% — 강세 시나리오 큼${outlierNote}`,
+        score: Math.round(20 * outlierFactor),
+        good: true,
+      });
     else if (highUp >= 0.5)
-      hits.push({ label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% — 강세 시나리오 존재`, score: 15, good: true });
+      hits.push({
+        label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% — 강세 시나리오 존재${outlierNote}`,
+        score: Math.round(15 * outlierFactor),
+        good: true,
+      });
     else if (highUp >= 0.3)
-      hits.push({ label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% 여지`, score: 8, good: true });
+      hits.push({
+        label: `최고 컨센서스 +${(highUp * 100).toFixed(0)}% 여지${outlierNote}`,
+        score: Math.round(8 * outlierFactor),
+        good: true,
+      });
   }
 
   // 3) 추정 PER (forwardPer) — "내년 실적 대비" 저평가/고평가
-  if (forwardPer != null) {
+  //    - 음수(적자기업) 가드: 양수 분기 진입 차단, 별도 reason으로 노출
+  //    - 두 소스(Yahoo/Naver) 신뢰도 "low" 시 가중치 절반 + reason 명시
+  const fpConfidence = valuation?.forwardPerConfidence ?? "high";
+  const fpFactor = fpConfidence === "low" ? 0.5 : 1;
+  const fpNote = fpConfidence === "low" ? " · 두 소스 격차 큼(가중치 축소)" : "";
+  if (forwardPer != null && forwardPer > 0) {
     if (forwardPer < 8)
-      hits.push({ label: `추정PER ${forwardPer.toFixed(1)}배 — 매우 저평가`, score: 15, good: true });
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(1)}배 — 매우 저평가${fpNote}`,
+        score: Math.round(15 * fpFactor),
+        good: true,
+      });
     else if (forwardPer < 10)
-      hits.push({ label: `추정PER ${forwardPer.toFixed(1)}배 저평가`, score: 10, good: true });
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(1)}배 저평가${fpNote}`,
+        score: Math.round(10 * fpFactor),
+        good: true,
+      });
     else if (forwardPer < 14)
-      hits.push({ label: `추정PER ${forwardPer.toFixed(1)}배 적정 이하`, score: 5, good: true });
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(1)}배 적정 이하${fpNote}`,
+        score: Math.round(5 * fpFactor),
+        good: true,
+      });
     else if (forwardPer > 40)
-      hits.push({ label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 대비도 부담`, score: -15, good: false });
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 대비도 부담${fpNote}`,
+        score: Math.round(-15 * fpFactor),
+        good: false,
+      });
     else if (forwardPer > 25)
-      hits.push({ label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 부담`, score: -5, good: false });
+      hits.push({
+        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 부담${fpNote}`,
+        score: Math.round(-5 * fpFactor),
+        good: false,
+      });
+  } else if (forwardPer != null && forwardPer <= 0) {
+    hits.push({
+      label: "적자(추정PER 음수) — 컨센 PER 적용 불가",
+      score: -20,
+      good: false,
+    });
   }
 
-  // 4) PBR
-  if (pbr != null) {
+  // 4) PBR — 음수(자본잠식) 가드
+  if (pbr != null && pbr > 0) {
     if (pbr < 1)
       hits.push({ label: `PBR ${pbr.toFixed(2)}배 — 청산가치 이하`, score: 5, good: true });
     else if (pbr >= 8)
       hits.push({ label: `PBR ${pbr.toFixed(1)}배 — 자산가치 대비 매우 부담`, score: -15, good: false });
     else if (pbr >= 5)
       hits.push({ label: `PBR ${pbr.toFixed(1)}배 자산가치 부담`, score: -8, good: false });
+  } else if (pbr != null && pbr <= 0) {
+    hits.push({
+      label: "자본잠식(PBR 음수) — 큰 위험",
+      score: -25,
+      good: false,
+    });
   }
 
   // 5) 애널리스트 분포 (Yahoo 기반). 한국 종목은 분포가 0,0,0,0,0이면 룰 미적용.

@@ -34,6 +34,7 @@ interface CacheEntry {
 declare global {
   // 핫 리로드/모듈 재평가 시 캐시 유실 방지
   var __consensusCache: Map<string, CacheEntry> | undefined;
+  var __consensusInFlight: Map<string, Promise<ConsensusBundle>> | undefined;
 }
 
 function cache(): Map<string, CacheEntry> {
@@ -41,6 +42,15 @@ function cache(): Map<string, CacheEntry> {
     global.__consensusCache = new Map();
   }
   return global.__consensusCache;
+}
+
+// 콜드 동시 호출 race 방지용 in-flight Promise 맵.
+// 같은 종목으로 동시에 여러 호출이 들어오면 첫 빌드를 공유한다.
+function inFlight(): Map<string, Promise<ConsensusBundle>> {
+  if (!global.__consensusInFlight) {
+    global.__consensusInFlight = new Map();
+  }
+  return global.__consensusInFlight;
 }
 
 // Yahoo + 네이버 결과 머지. 한국 종목은 네이버가 PER/PBR을 더 잘 줘서 네이버 우선,
@@ -76,6 +86,14 @@ function mergeBundle(
   // ── 밸류에이션: 네이버가 한국 종목 PER/PBR을 더 잘 줘서 우선. Yahoo는 52주가/배당으로 보강.
   let valuation: Valuation | null = null;
   if (yahoo?.valuation && naver?.valuation) {
+    // 두 소스의 forwardPer 비교 — 2배 이상 차이나면 신뢰도 "low".
+    const yFp = yahoo.valuation.forwardPer;
+    const nFp = naver.valuation.forwardPer;
+    let forwardPerConfidence: "high" | "low" = "high";
+    if (yFp != null && nFp != null && yFp > 0 && nFp > 0) {
+      const ratio = Math.max(yFp, nFp) / Math.min(yFp, nFp);
+      if (ratio >= 2) forwardPerConfidence = "low";
+    }
     valuation = {
       per: naver.valuation.per ?? yahoo.valuation.per,
       forwardPer: naver.valuation.forwardPer ?? yahoo.valuation.forwardPer,
@@ -88,11 +106,14 @@ function mergeBundle(
       week52Low: yahoo.valuation.week52Low ?? naver.valuation.week52Low,
       source: "merged",
       asOf: Date.now(),
+      forwardPerConfidence,
+      forwardPerYahoo: yFp,
+      forwardPerNaver: nFp,
     };
   } else if (naver?.valuation) {
-    valuation = naver.valuation;
+    valuation = { ...naver.valuation, forwardPerConfidence: "high" };
   } else if (yahoo?.valuation) {
-    valuation = yahoo.valuation;
+    valuation = { ...yahoo.valuation, forwardPerConfidence: "high" };
   }
 
   return {
@@ -110,15 +131,26 @@ export async function getConsensusBundle(
   const hit = c.get(code);
   if (hit && hit.expiresAt > now) return hit.data;
 
-  // 한국 종목은 Yahoo+Naver 병렬, 해외는 Yahoo만.
-  const [yahooResult, naverResult] = await Promise.all([
-    fetchAnalystAndValuation(code).catch(() => null),
-    isKrStock(code) ? fetchNaverIntegration(code).catch(() => null) : Promise.resolve(null),
-  ]);
+  // 같은 종목으로 빌드 중인 Promise가 있으면 공유 (cold race 방지)
+  const flight = inFlight();
+  const inProgress = flight.get(code);
+  if (inProgress) return inProgress;
 
-  const merged = mergeBundle(yahooResult, naverResult);
-  c.set(code, { data: merged, expiresAt: now + TTL_MS });
-  return merged;
+  // 한국 종목은 Yahoo+Naver 병렬, 해외는 Yahoo만.
+  const promise = (async () => {
+    const [yahooResult, naverResult] = await Promise.all([
+      fetchAnalystAndValuation(code).catch(() => null),
+      isKrStock(code) ? fetchNaverIntegration(code).catch(() => null) : Promise.resolve(null),
+    ]);
+
+    const merged = mergeBundle(yahooResult, naverResult);
+    c.set(code, { data: merged, expiresAt: Date.now() + TTL_MS });
+    return merged;
+  })().finally(() => {
+    flight.delete(code);
+  });
+  flight.set(code, promise);
+  return promise;
 }
 
 // 테스트/관리자용 — 현재 캐시 무효화

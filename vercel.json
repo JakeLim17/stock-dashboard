@@ -4,6 +4,7 @@
     "app/api/snapshot/route.ts": { "maxDuration": 30 },
     "app/api/refresh/route.ts": { "maxDuration": 30 },
     "app/api/news/route.ts": { "maxDuration": 20 },
-    "app/api/history/route.ts": { "maxDuration": 20 }
+    "app/api/history/route.ts": { "maxDuration": 20 },
+    "app/api/recommendations/route.ts": { "maxDuration": 60 }
   }
 }

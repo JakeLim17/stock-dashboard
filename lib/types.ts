@@ -4,6 +4,27 @@ export type SignalStatus = "BUY" | "ADD" | "HOLD" | "WATCH" | "SELL";
 
 export type SymbolKind = "kr-stock" | "us-stock" | "index" | "future" | "fx";
 
+// 섹터 태그 — 추천/스크리닝 UI의 탭과 시장 컨텍스트 보너스 계산에 사용.
+// 분류는 lib/symbols.ts 의 WATCHLIST_CANDIDATES 에서 채운다.
+export type SectorTag =
+  | "반도체"
+  | "IT가전"
+  | "자동차"
+  | "배터리"
+  | "화학"
+  | "철강소재"
+  | "금융"
+  | "바이오"
+  | "인터넷"
+  | "게임"
+  | "엔터"
+  | "방산"
+  | "조선"
+  | "원전전력"
+  | "통신"
+  | "유통종합"
+  | "항공";
+
 export interface SymbolMeta {
   // 내부 표준 코드 (예: 005930.KS)
   code: string;
@@ -12,6 +33,9 @@ export interface SymbolMeta {
   kind: SymbolKind;
   // 핵심 관심 종목 여부 (메인 카드 노출)
   primary?: boolean;
+  // 섹터 태그 — 추천/스크리닝에서 필터·보너스 계산에 사용.
+  // PRIMARY_SYMBOLS·MARKET_INDICATORS·해외 프록시처럼 분류가 불필요한 항목은 비워둔다.
+  sector?: SectorTag;
 }
 
 export interface OverseasNightIndicator {
@@ -233,7 +257,8 @@ export interface PriceTargets {
   takeProfit2: number; // 2차 목표
   support: number; // 최근 20일 저점 기준 지지
   resistance: number; // 최근 20일 고점 기준 저항
-  riskReward: number; // (목표1 - 진입) / (진입 - 손절)
+  // (목표1 - 진입) / (진입 - 손절). entry === stopLoss 면 분모 0이라 null.
+  riskReward: number | null;
 }
 
 export interface ScenarioRow {
@@ -326,6 +351,13 @@ export interface Valuation {
   week52Low: number | null;
   source: "yahoo" | "naver" | "merged";
   asOf: number;
+  // 두 소스(Yahoo forwardPE / Naver cnsPer) 비교 결과.
+  //   - "high": 단일 소스이거나 두 값이 가까움(2× 이내)
+  //   - "low" : 두 값이 2× 이상 차이 — 룰 적용 가중치 축소
+  forwardPerConfidence?: "high" | "low";
+  // 디버그/표시용 — 두 소스가 모두 있을 때 raw 비교값
+  forwardPerYahoo?: number | null;
+  forwardPerNaver?: number | null;
 }
 
 export interface ResearchNote {
@@ -369,4 +401,82 @@ export interface DashboardSnapshot {
   };
   news: NewsItem[];
   errors: Record<string, string>; // provider 별 에러 메시지
+}
+
+// ----------------------------------------------------------------------------
+// 추천 — watchlist candidates 전체를 분석 파이프라인에 돌려서 카테고리별로 정렬한 결과.
+// 새 데이터 소스 없이 기존 analyze + 컨센서스 + 뉴스리스크 + 시장경보 결과를 재사용한다.
+// ----------------------------------------------------------------------------
+
+// verdict.action 을 한국어 사용자 관점의 3개 버킷으로 묶는다.
+//   buy    : NEW_ENTRY · SCALE_IN  → "매수·분할매수 추천"
+//   hold   : HOLD_WAIT · HOLD · AVOID · SHORT_TRADE → "관망·눌림목 대기"
+//   reduce : TRIM · REDUCE → "비중축소 (참고)"
+export type RecommendationCategory = "buy" | "hold" | "reduce";
+
+// buy 버킷을 다시 두 갈래로 세분화 — UI 노출 분리용.
+//   new_entry : NEW_ENTRY (단·장기 모두 양호) — 신규 진입 우위
+//   scale_in  : SCALE_IN (단기 SELL/ADD + 장기 BUY/ADD) — 눌림 분할 매수
+// hold/reduce 버킷에는 의미 없으므로 buy 버킷에서만 사용.
+export type RecommendationSubCategory = "new_entry" | "scale_in";
+
+// 오늘 시장 컨텍스트 — 추천 헤더에 한 줄로 표시 + 섹터 보너스 계산 입력으로 사용.
+export interface MarketContext {
+  soxRate: number; // ^SOX 등락률 (0.025 = +2.5%)
+  fxRate: number; // KRW=X 등락률 (양수면 원화 약세)
+  nasdaqRate: number; // NQ=F 선물 등락률
+  vix: number; // VIX 수치
+  // 컨텍스트 한 줄 요약 — UI 헤더에 그대로 노출.
+  // 예: "오늘 시장: SOX +2.5%, 환율 +0.8% → 반도체·수출주 우호"
+  summary: string;
+  // 우호적인 섹터 라벨 (예: ["반도체", "수출주"]) — UI 부가 노출/툴팁용.
+  favorableSectors: SectorTag[];
+}
+
+// 한 종목당 추천 1건. 단·장기 시그널, 메인 verdict, 점수, 컨텍스트 가산점을 한 번에 들고 있다.
+export interface Recommendation {
+  code: string;
+  name: string;
+  kind: SymbolKind;
+  sector: SectorTag;
+  // 현재 시세 — 카드 노출용 (전체 Quote 가 아닌 핵심 필드만 노출해 응답 크기 절감)
+  price: number;
+  changeRate: number;
+  currency?: string;
+  // 분석 결과 — 메인 verdict + 단·장기 시그널 + 외부 리스크
+  verdict: ActionVerdict;
+  shortTerm: SignalDetail;
+  longTerm: SignalDetail;
+  externalRisk: NewsRiskAssessment;
+  // 점수 (analyze 결과 기준)
+  buyScore: number; // 0~100
+  heatScore: number; // 0~100
+  longScore: number; // 0~100
+  // 시장 컨텍스트 가산점 — 정렬에만 영향, 분석 자체는 안 바꿈
+  contextBonus: number;
+  // 정렬 키: buyScore + contextBonus
+  rankScore: number;
+  // 카테고리 (buy/hold/reduce)
+  category: RecommendationCategory;
+  // buy 버킷 내 세분화 — buy일 때만 의미. hold/reduce에서는 undefined.
+  subCategory?: RecommendationSubCategory;
+  // 한 줄 이유 — verdict.headline 미러
+  headline: string;
+  // 한국 종목인 경우 시장경보(투자주의 등) — 없으면 null
+  marketAlert?: MarketAlert | null;
+}
+
+export interface RecommendationsResponse {
+  generatedAt: number;
+  context: MarketContext;
+  // 응답에 포함된 종목들의 섹터 목록 (탭 UI 용, 가나다순)
+  sectors: SectorTag[];
+  // verdict 우선순위 > rankScore desc > heatScore asc 로 정렬된 전체 추천 목록
+  items: Recommendation[];
+  // 분석 실패한 종목들 (error 메시지). 클라이언트는 디버그 영역에만 노출.
+  errors: Record<string, string>;
+  // 빌드 소요 시간 (디버그/UI 안내용)
+  buildMs: number;
+  // 이 응답이 캐시에서 나온 것인지
+  cached: boolean;
 }

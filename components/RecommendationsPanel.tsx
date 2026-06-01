@@ -1,0 +1,631 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  Recommendation,
+  RecommendationCategory,
+  RecommendationsResponse,
+  SectorTag,
+} from "@/lib/types";
+import { Badge } from "./ui/Badge";
+import { Card, CardBody } from "./ui/Card";
+import {
+  ChevronDown,
+  Flame,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Check,
+  Target,
+  Hourglass,
+} from "lucide-react";
+import { changeColor, fmtPercent, fmtRelative } from "@/lib/utils";
+
+interface Props {
+  // 부모에서 관리하는 watchlist (관심종목 추가 시 중복 차단·이미 있음 표시에 사용)
+  watchlist: string[];
+  // 관심종목 추가 핸들러 — DashboardClient 의 commitWatch 와 동일 시그니처
+  onAddToWatchlist: (code: string) => void;
+  // 관심종목 최대 개수 (도달 시 추가 버튼 비활성화)
+  maxWatch: number;
+}
+
+const CATEGORY_LABEL: Record<RecommendationCategory, string> = {
+  buy: "매수·분할매수 추천",
+  hold: "관망·눌림목 대기",
+  reduce: "비중축소 (참고)",
+};
+
+const CATEGORY_VARIANT: Record<
+  RecommendationCategory,
+  "good" | "warn" | "bad"
+> = {
+  buy: "good",
+  hold: "warn",
+  reduce: "bad",
+};
+
+// 대시보드 상단에 펼침 패널 형태로 노출되는 종목 추천.
+// - 기본 접힘. 헤더 클릭 시 펼침.
+// - 펼치면 컨텍스트 한 줄 → 섹터 탭 → 추천 카드 그리드.
+// - 첫 fetch 는 ~30-50초 가능 (콘센·시장경보 미캐시), 그래서 안내 문구 추가.
+export function RecommendationsPanel({
+  watchlist,
+  onAddToWatchlist,
+  maxWatch,
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<RecommendationsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeSector, setActiveSector] = useState<SectorTag | "ALL">("ALL");
+  const [, setTick] = useState(0); // "n분 전" 표시 강제 갱신
+  const abortRef = useRef<AbortController | null>(null);
+  const fetchedOnce = useRef(false);
+
+  const fetchData = useCallback(async (refresh = false) => {
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(
+        `/api/recommendations${refresh ? "?refresh=1" : ""}`,
+        {
+          cache: "no-store",
+          signal: ctrl.signal,
+        }
+      );
+      if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
+      const j = (await r.json()) as RecommendationsResponse;
+      setData(j);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (abortRef.current === ctrl) {
+        abortRef.current = null;
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  // 펼침 시 lazy fetch — 처음 열 때 한 번만 자동 호출.
+  useEffect(() => {
+    if (!open) return;
+    if (fetchedOnce.current) return;
+    fetchedOnce.current = true;
+    void fetchData(false);
+  }, [open, fetchData]);
+
+  // 언마운트 시 진행 중 fetch 정리
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
+  // 상대 시각 라벨 갱신
+  useEffect(() => {
+    if (!open) return;
+    const t = setInterval(() => setTick((x) => x + 1), 30_000);
+    return () => clearInterval(t);
+  }, [open]);
+
+  // 선택된 섹터가 응답에 없으면 ALL 로 보정
+  useEffect(() => {
+    if (!data) return;
+    if (activeSector === "ALL") return;
+    if (!data.sectors.includes(activeSector)) setActiveSector("ALL");
+  }, [data, activeSector]);
+
+  const watchSet = useMemo(() => new Set(watchlist), [watchlist]);
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    if (activeSector === "ALL") return data.items;
+    return data.items.filter((i) => i.sector === activeSector);
+  }, [data, activeSector]);
+
+  // 카테고리별로 묶기 (정렬은 이미 서버에서 끝났으므로 순서 유지)
+  const grouped = useMemo(() => {
+    const map: Record<RecommendationCategory, Recommendation[]> = {
+      buy: [],
+      hold: [],
+      reduce: [],
+    };
+    for (const item of filtered) map[item.category].push(item);
+    return map;
+  }, [filtered]);
+
+  const topCount = grouped.buy.length;
+  const buildAgeLabel = data
+    ? `${fmtRelative(data.generatedAt)} 기준${
+        data.cached ? " · 캐시" : ""
+      }`
+    : null;
+
+  return (
+    <Card className="border-accent/30">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-muted/30 transition-colors rounded-2xl"
+        aria-expanded={open}
+      >
+        <Sparkles className="h-4 w-4 text-accent shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold">오늘의 추천</span>
+            {data ? (
+              <span className="text-[11px] text-muted-foreground">
+                매수 후보 {topCount}종목 · 전체 {data.items.length}종목
+              </span>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                {open ? "분석 중…" : "펼쳐서 추천 받기 (첫 분석 약 1분 소요)"}
+              </span>
+            )}
+            {buildAgeLabel && (
+              <span className="text-[11px] text-muted-foreground ml-1">
+                · {buildAgeLabel}
+              </span>
+            )}
+          </div>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {open && (
+        <CardBody className="pt-0 space-y-3">
+          {/* 컨텍스트 한 줄 + 새로고침 */}
+          <div className="flex items-start gap-2 flex-wrap pt-2 border-t border-border/60">
+            <div className="flex-1 min-w-0 text-xs text-muted-foreground leading-snug">
+              {data ? (
+                data.context.summary
+              ) : loading ? (
+                "오늘 시장 데이터 수집 중…"
+              ) : (
+                "잠시만 기다려 주세요."
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void fetchData(true)}
+              disabled={loading}
+              className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
+              title="추천 다시 분석 (캐시 무시)"
+            >
+              <RefreshCw
+                className={`h-3 w-3 ${loading ? "animate-spin" : ""}`}
+              />
+              새로고침
+            </button>
+          </div>
+
+          {/* 로딩/에러 */}
+          {loading && !data && (
+            <div className="text-xs text-muted-foreground py-6 text-center space-y-1">
+              <div className="flex items-center justify-center gap-2">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                <span>40여개 종목 분석 중…</span>
+              </div>
+              <p className="text-[11px]">
+                처음 분석엔 약 1분 소요됩니다. 이후 1시간은 캐시에서 즉시 표시.
+              </p>
+            </div>
+          )}
+
+          {error && !loading && (
+            <div className="rounded-lg border border-down/30 bg-down/10 text-down text-xs px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {data && (
+            <>
+              {/* 섹터 탭 */}
+              <div className="flex flex-wrap gap-1.5">
+                <SectorTab
+                  active={activeSector === "ALL"}
+                  onClick={() => setActiveSector("ALL")}
+                  label={`전체 ${data.items.length}`}
+                />
+                {data.sectors.map((s) => {
+                  const count = data.items.filter((i) => i.sector === s).length;
+                  const favored = data.context.favorableSectors.includes(s);
+                  return (
+                    <SectorTab
+                      key={s}
+                      active={activeSector === s}
+                      onClick={() => setActiveSector(s)}
+                      label={`${s} ${count}`}
+                      highlight={favored}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* 카테고리별 그리드 */}
+              <div className="space-y-4">
+                {(
+                  ["buy", "hold", "reduce"] as RecommendationCategory[]
+                ).map((cat) => {
+                  const list = grouped[cat];
+                  if (list.length === 0) return null;
+                  // buy 버킷은 sub 분리 (신규 진입 / 눌림 분할 매수)
+                  if (cat === "buy") {
+                    const newEntry = list.filter(
+                      (r) => r.subCategory === "new_entry"
+                    );
+                    const scaleIn = list.filter(
+                      (r) => r.subCategory === "scale_in"
+                    );
+                    const others = list.filter(
+                      (r) =>
+                        r.subCategory !== "new_entry" &&
+                        r.subCategory !== "scale_in"
+                    );
+                    return (
+                      <section key={cat} className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Badge variant={CATEGORY_VARIANT[cat]} size="sm">
+                            {CATEGORY_LABEL[cat]}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground">
+                            {list.length}종목
+                          </span>
+                        </div>
+                        {newEntry.length > 0 && (
+                          <BuySubBlock
+                            icon={
+                              <Target className="h-3 w-3 text-up" />
+                            }
+                            label="신규 진입"
+                            description="단·장기 모두 양호"
+                            list={newEntry}
+                            watchSet={watchSet}
+                            watchlist={watchlist}
+                            maxWatch={maxWatch}
+                            onAddToWatchlist={onAddToWatchlist}
+                          />
+                        )}
+                        {scaleIn.length > 0 && (
+                          <BuySubBlock
+                            icon={
+                              <Hourglass className="h-3 w-3 text-warn" />
+                            }
+                            label="눌림 분할 매수"
+                            description="단기 과열·차익실현 + 장기 양호"
+                            list={scaleIn}
+                            watchSet={watchSet}
+                            watchlist={watchlist}
+                            maxWatch={maxWatch}
+                            onAddToWatchlist={onAddToWatchlist}
+                          />
+                        )}
+                        {others.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                            {others.map((rec) => (
+                              <RecommendationCard
+                                key={rec.code}
+                                rec={rec}
+                                inWatchlist={watchSet.has(rec.code)}
+                                disabled={
+                                  !watchSet.has(rec.code) &&
+                                  watchlist.length >= maxWatch
+                                }
+                                onAdd={() => onAddToWatchlist(rec.code)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  }
+                  return (
+                    <section key={cat} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={CATEGORY_VARIANT[cat]} size="sm">
+                          {CATEGORY_LABEL[cat]}
+                        </Badge>
+                        <span className="text-[11px] text-muted-foreground">
+                          {list.length}종목
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                        {list.map((rec) => (
+                          <RecommendationCard
+                            key={rec.code}
+                            rec={rec}
+                            inWatchlist={watchSet.has(rec.code)}
+                            disabled={
+                              !watchSet.has(rec.code) &&
+                              watchlist.length >= maxWatch
+                            }
+                            onAdd={() => onAddToWatchlist(rec.code)}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <div className="text-xs text-muted-foreground py-4 text-center">
+                    이 섹터에 해당하는 종목이 없습니다.
+                  </div>
+                )}
+              </div>
+
+              {Object.keys(data.errors).length > 0 && (
+                <details className="text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+                  <summary className="cursor-pointer">
+                    분석 실패 종목 ({Object.keys(data.errors).length})
+                  </summary>
+                  <ul className="mt-1 space-y-0.5">
+                    {Object.entries(data.errors).map(([k, v]) => (
+                      <li key={k}>
+                        <code className="text-foreground">{k}</code>: {v}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          )}
+        </CardBody>
+      )}
+    </Card>
+  );
+}
+
+function SectorTab({
+  label,
+  active,
+  highlight,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  highlight?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+        active
+          ? "bg-foreground text-background border-foreground"
+          : highlight
+          ? "bg-accent/10 border-accent/30 text-accent hover:bg-accent/20"
+          : "bg-card border-border text-muted-foreground hover:bg-muted"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RecommendationCard({
+  rec,
+  inWatchlist,
+  disabled,
+  onAdd,
+}: {
+  rec: Recommendation;
+  inWatchlist: boolean;
+  disabled: boolean;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card px-3 py-2.5 space-y-2 hover:border-foreground/20 transition-colors">
+      {/* 상단: 종목명·티커 + verdict 배지 + 현재가/등락률 */}
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-semibold truncate">{rec.name}</span>
+            <Badge variant={rec.verdict.tone} size="sm">
+              {rec.verdict.label}
+            </Badge>
+          </div>
+          <div className="text-[10px] text-muted-foreground tabular mt-0.5">
+            {rec.code} · {rec.sector}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-sm font-semibold tabular">
+            {rec.price.toLocaleString("ko-KR")}
+          </div>
+          <div className={`text-[11px] tabular ${changeColor(rec.changeRate)}`}>
+            {fmtPercent(rec.changeRate)}
+          </div>
+        </div>
+      </div>
+
+      {/* 한 줄 헤드라인 */}
+      <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
+        {rec.headline}
+      </p>
+
+      {/* 단·장기 미니 배지 — 한눈에 두 시그널 차이 인지 (P0 권고) */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <SignalBadge label="단기" signal={rec.shortTerm.signal} />
+        <SignalBadge label="장기" signal={rec.longTerm.signal} />
+      </div>
+
+      {/* 점수 미니바: 매수우위 / 과열도 + 보너스 표기 */}
+      <div className="grid grid-cols-2 gap-2">
+        <MiniScoreBar
+          label="매수우위"
+          value={rec.buyScore}
+          variantHigh="up"
+          bonus={rec.contextBonus}
+        />
+        <MiniScoreBar
+          label={
+            <span className="inline-flex items-center gap-0.5">
+              <Flame className="h-2.5 w-2.5" />
+              과열
+            </span>
+          }
+          value={rec.heatScore}
+          variantHigh="warn"
+        />
+      </div>
+
+      {/* 하단: 추가 버튼 (단/장기 시그널은 위 미니배지로 노출) */}
+      <div className="flex items-center justify-end gap-2 pt-1">
+        {inWatchlist ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground px-2 py-1 rounded-md border border-border bg-muted/40">
+            <Check className="h-3 w-3" />
+            관심종목
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={disabled}
+            className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            title={disabled ? "관심종목이 가득 찼습니다" : "관심종목에 추가"}
+          >
+            <Plus className="h-3 w-3" />
+            추가
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniScoreBar({
+  label,
+  value,
+  variantHigh,
+  bonus,
+}: {
+  label: React.ReactNode;
+  value: number;
+  variantHigh: "up" | "warn";
+  bonus?: number;
+}) {
+  // variantHigh="up"  : 높은 값이 좋음 (매수우위)
+  // variantHigh="warn": 높은 값이 위험 (과열)
+  const color =
+    variantHigh === "up"
+      ? value >= 65
+        ? "bg-up"
+        : value <= 35
+        ? "bg-down"
+        : "bg-muted-foreground"
+      : value >= 65
+      ? "bg-warn"
+      : value <= 35
+      ? "bg-up"
+      : "bg-muted-foreground";
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
+        <span>{label}</span>
+        <span className="tabular font-medium text-foreground">
+          {value}
+          {bonus !== undefined && bonus !== 0 && (
+            <span
+              className={`ml-1 text-[10px] ${
+                bonus > 0 ? "text-up" : "text-down"
+              }`}
+              title="섹터 컨텍스트 가산점"
+            >
+              {bonus > 0 ? "+" : ""}
+              {bonus}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+        <div
+          className={`h-full ${color} transition-all`}
+          style={{ width: `${value}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// buy 버킷을 sub로 묶어서 노출하는 블록.
+// 예: 신규 진입(NEW_ENTRY) / 눌림 분할 매수(SCALE_IN)
+function BuySubBlock({
+  icon,
+  label,
+  description,
+  list,
+  watchSet,
+  watchlist,
+  maxWatch,
+  onAddToWatchlist,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  list: Recommendation[];
+  watchSet: Set<string>;
+  watchlist: string[];
+  maxWatch: number;
+  onAddToWatchlist: (code: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5 pl-2 border-l-2 border-border/60">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {icon}
+        <span className="text-xs font-semibold text-foreground/90">{label}</span>
+        <span className="text-[10px] text-muted-foreground">
+          · {description} · {list.length}종목
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+        {list.map((rec) => (
+          <RecommendationCard
+            key={rec.code}
+            rec={rec}
+            inWatchlist={watchSet.has(rec.code)}
+            disabled={!watchSet.has(rec.code) && watchlist.length >= maxWatch}
+            onAdd={() => onAddToWatchlist(rec.code)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 단/장기 시그널 미니 배지 — 한눈에 두 시그널 차이 인지.
+// 단기 SELL + 장기 BUY 같은 SCALE_IN 케이스에서 두 시그널을 분명히 보여준다.
+function SignalBadge({
+  label,
+  signal,
+}: {
+  label: string;
+  signal: "BUY" | "ADD" | "HOLD" | "WATCH" | "SELL";
+}) {
+  const tone: Record<typeof signal, string> = {
+    BUY: "bg-up/15 text-up border-up/30",
+    ADD: "bg-up/10 text-up border-up/20",
+    HOLD: "bg-muted text-muted-foreground border-border",
+    WATCH: "bg-warn/10 text-warn border-warn/30",
+    SELL: "bg-down/10 text-down border-down/30",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-md border tabular ${tone[signal]}`}
+    >
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold">{signal}</span>
+    </span>
+  );
+}

@@ -51,14 +51,61 @@ export function assessNewsRisk(
   let raw = 0;
   let matchCount = 0;
 
+  // 동일 이벤트 클러스터링용 — 같은 키워드 라벨 + 정규화된 헤드라인(앞 20자) 해시로
+  // 중복 제거. 하나의 사건이 여러 매체에 동일 헤드라인으로 올라오면 점수 부풀림이
+  // 발생하는 결함을 방어한다. 같은 클러스터에서는 가장 큰 contribution만 카운트.
+  const clusterMax = new Map<string, number>();
+  // 같은 키워드 카테고리는 24h 내 최대 3개로 cap
+  const categoryCount = new Map<string, number>();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  // 헤드라인 정규화 — 공백·특수문자 제거 후 앞 20자.
+  const normalize = (s: string): string =>
+    s.replace(/[\s.,!?·…\-—()[\]"'""'']/g, "").slice(0, 20);
+
   for (const item of newsItems) {
     const age = now - item.publishedAt;
     const decay = timeDecay(age);
     if (decay === 0) continue;
     const hits = matchRiskKeywords(item.title);
+    const headlineKey = normalize(item.title);
     for (const h of hits) {
       const contribution = h.weight * decay;
-      raw += contribution;
+      const clusterKey = `${h.label}::${headlineKey}`;
+      // 같은 클러스터(같은 라벨 + 동일/유사 헤드라인): 최대 contribution만 채택
+      const prev = clusterMax.get(clusterKey) ?? 0;
+      if (contribution <= prev) {
+        // 약한 중복은 drivers에는 추가하되 raw 합산은 건너뜀 (UI 표시용)
+        drivers.push({
+          label: h.label,
+          category: h.category,
+          headline: item.title,
+          date: item.publishedAt,
+          weight: h.weight,
+          contribution,
+        });
+        continue;
+      }
+      // 새 cluster 또는 기존보다 큰 contribution — 차이만큼 raw 가산
+      // 24h 내 같은 카테고리 최대 3개 cap (이벤트 다중 보도 방어)
+      if (age <= DAY_MS) {
+        const cnt = categoryCount.get(h.category) ?? 0;
+        if (cnt >= 3 && prev === 0) {
+          // cap 초과 새 클러스터는 drivers만 기록하고 raw에는 가산하지 않음
+          drivers.push({
+            label: h.label,
+            category: h.category,
+            headline: item.title,
+            date: item.publishedAt,
+            weight: h.weight,
+            contribution,
+          });
+          continue;
+        }
+        if (prev === 0) categoryCount.set(h.category, cnt + 1);
+      }
+      raw += contribution - prev;
+      clusterMax.set(clusterKey, contribution);
       matchCount += 1;
       drivers.push({
         label: h.label,
