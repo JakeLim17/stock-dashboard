@@ -43,7 +43,7 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "068270.KS", name: "셀트리온", kind: "kr-stock" },
   { code: "196170.KQ", name: "알테오젠", kind: "kr-stock" },
   // 인터넷 / 게임 / 엔터
-  { code: "035420.KS", name: "NAVER", kind: "kr-stock" },
+  { code: "035420.KS", name: "네이버", kind: "kr-stock" },
   { code: "035720.KS", name: "카카오", kind: "kr-stock" },
   { code: "036570.KS", name: "엔씨소프트", kind: "kr-stock" },
   { code: "251270.KS", name: "넷마블", kind: "kr-stock" },
