@@ -4,6 +4,8 @@ import type {
   AnalysisResult,
   AnalystConsensus,
   FlowData,
+  MarketAlert,
+  MarketAlertLevel,
   MarketIndicator,
   NewsRiskAssessment,
   Quote,
@@ -125,6 +127,56 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
     else if (nr >= 0.01) hits.push({ label: "해외 개별 야간 강세", heat: 3, buy: 8, good: true });
     else if (nr <= -0.03) hits.push({ label: "해외 개별 야간 -3% 이상", heat: 12, buy: -12, good: false });
     else if (nr <= -0.01) hits.push({ label: "해외 개별 야간 약세", heat: 8, buy: -8, good: false });
+  }
+
+  // 11) 한국거래소 시장경보 — 단기 급등에 따른 매매 거래 정지/관리종목 위험.
+  //     주인님 관점: caution은 가벼운 주의 신호, warning/risk 는 매수를 사실상 막아야 함.
+  if (quote.marketAlert) {
+    const ma = quote.marketAlert;
+    switch (ma.level) {
+      case "caution":
+        hits.push({
+          label: "투자주의 종목 — 단기 급등 주의",
+          heat: 5,
+          buy: -3,
+          good: false,
+        });
+        break;
+      case "warning":
+        hits.push({
+          label: "투자경고 종목 — 매매 거래정지 가능",
+          heat: 20,
+          buy: -15,
+          good: false,
+        });
+        break;
+      case "risk":
+        hits.push({
+          label: "투자위험 종목 — 추가 상승 시 거래정지",
+          heat: 35,
+          buy: -25,
+          good: false,
+        });
+        break;
+      case "halt":
+        // 이미 거래 안 되는 상태 — heat/buy를 크게 흔들지 않고 경고만.
+        // verdict 시프트 단계에서 액션을 AVOID로 강제한다.
+        hits.push({
+          label: "거래정지 종목 — 매매 불가",
+          heat: 10,
+          buy: -20,
+          good: false,
+        });
+        break;
+      case "admin":
+        hits.push({
+          label: "관리종목 — 상장 폐지 위험",
+          heat: 15,
+          buy: -20,
+          good: false,
+        });
+        break;
+    }
   }
 
   return hits;
@@ -500,6 +552,68 @@ const RISK_SHIFT_MAP: Partial<Record<ActionRecommendation, ActionRecommendation>
   SHORT_TRADE: "AVOID",
 };
 
+// 한국거래소 시장경보로 인한 verdict 시프트.
+//   - caution         : 액션 그대로, 헤드라인에만 표기
+//   - warning / risk  : 외부 리스크 high 와 동일한 한 단계 보수 시프트 + headline 부연
+//   - admin           : warning 과 동일 취급
+//   - halt            : 거래 자체가 안 되므로 무조건 AVOID 로 고정
+//
+// 외부 리스크 high 가 이미 시프트한 액션도 시장경보가 warning 이상이면 추가 시프트.
+// (즉, 두 단계 보수까지 가능 — NEW_ENTRY → SCALE_IN → HOLD_WAIT)
+export function applyMarketAlertShift(
+  verdict: ActionVerdict,
+  alert: MarketAlert | null | undefined,
+  shortSig: SignalStatus,
+  longSig: SignalStatus
+): ActionVerdict {
+  if (!alert) return verdict;
+
+  // 헤드라인 끝에 시장경보 부연 — 항상 추가
+  const suffix = ` · 시장경보(${alert.label})`;
+
+  // 거래정지는 매수/추가 자체가 불가능하므로 AVOID 강제
+  if (alert.level === "halt") {
+    const meta = actionMeta("AVOID", shortSig, longSig);
+    return {
+      action: "AVOID",
+      label: meta.label,
+      tone: "sell", // 거래정지는 시각적으로도 가장 강하게
+      headline: `거래정지 — 매매 불가${suffix}`,
+      detail: verdict.detail,
+      riskShifted: true,
+    };
+  }
+
+  // warning / risk / admin → 한 단계 보수 시프트
+  const heavy: MarketAlertLevel[] = ["warning", "risk", "admin"];
+  if (heavy.includes(alert.level)) {
+    const nextAction = RISK_SHIFT_MAP[verdict.action];
+    if (nextAction && nextAction !== verdict.action) {
+      const meta = actionMeta(nextAction, shortSig, longSig);
+      return {
+        action: nextAction,
+        label: meta.label,
+        tone: meta.tone,
+        headline: `${meta.headline}${suffix}`,
+        detail: verdict.detail,
+        riskShifted: true,
+      };
+    }
+    // 이미 보수 액션(TRIM/REDUCE/AVOID)이면 헤드라인만 표기
+    return {
+      ...verdict,
+      headline: `${verdict.headline}${suffix}`,
+      riskShifted: true,
+    };
+  }
+
+  // caution — 액션은 유지, 헤드라인만 표기
+  return {
+    ...verdict,
+    headline: `${verdict.headline}${suffix}`,
+  };
+}
+
 export function applyRiskShift(
   verdict: ActionVerdict,
   risk: NewsRiskAssessment,
@@ -622,9 +736,17 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
 
   // 외부 이벤트 리스크 시프트 — 트럼프 주둥이/관세/지정학 high면 한 단계 보수.
   const externalRisk = input.externalRisk ?? emptyRiskAssessment();
-  const verdict = applyRiskShift(
+  const riskShifted = applyRiskShift(
     baseVerdict,
     externalRisk,
+    shortSignal,
+    longSignal
+  );
+  // 시장경보 시프트 — warning/risk/admin이면 추가로 한 단계 보수, halt면 AVOID 고정.
+  // 외부 리스크 시프트 이후에 적용해 누적이 가능하게(예: high 뉴스 + 투자경고).
+  const verdict = applyMarketAlertShift(
+    riskShifted,
+    input.quote.marketAlert,
     shortSignal,
     longSignal
   );

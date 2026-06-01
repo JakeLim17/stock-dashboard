@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
+import { MarketAlertBadge } from "./MarketAlertBadge";
 import {
   changeColor,
   fmtNumber,
@@ -63,9 +64,11 @@ export function StockCard({ snap, onSelect, selected }: {
       <CardHeader className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="text-base font-semibold">{meta.name}</div>
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span>{meta.code}</span>
             <Badge variant={market.variant}>{market.label}</Badge>
+            {/* 한국거래소 시장경보 — 헤더에서 한눈에 보이도록 시장 상태 배지 옆에 노출 */}
+            <MarketAlertBadge alert={quote.marketAlert} />
           </div>
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}
@@ -178,7 +181,7 @@ export function StockCard({ snap, onSelect, selected }: {
             분석
           </div>
 
-          {/* 메인 verdict 배지 + 단·장기 시그널 컬러 배지 + 외부 리스크 배지 */}
+          {/* 메인 verdict 배지 + 단·장기 시그널 컬러 배지 + 외부 리스크 + 시장경보 */}
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={analysis.verdict.tone} size="lg">
               {analysis.verdict.label}
@@ -189,6 +192,7 @@ export function StockCard({ snap, onSelect, selected }: {
               title={analysis.verdict.detail}
             />
             <RiskBadge assessment={analysis.externalRisk} />
+            <MarketAlertBadge alert={quote.marketAlert} />
           </div>
           <p className="text-sm font-semibold leading-snug">
             {analysis.verdict.headline}

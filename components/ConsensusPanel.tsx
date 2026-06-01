@@ -4,6 +4,7 @@ import type { SignalStatus, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
+import { MarketAlertBadge } from "./MarketAlertBadge";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 import { Target, Users, ScrollText, Building2 } from "lucide-react";
 
@@ -73,6 +74,12 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
             >
               장기 · {LONG_SIGNAL_LABEL[longSig.signal]}
             </Badge>
+            {/* 한국거래소 시장경보 — 헤더에서도 즉시 식별되도록 */}
+            <MarketAlertBadge
+              alert={snap.quote.marketAlert}
+              size="sm"
+              className="shrink-0"
+            />
           </div>
           {/* 첫 줄 — verdict.headline (통합 결론) */}
           <p className="text-sm font-semibold mt-1.5 leading-snug">
