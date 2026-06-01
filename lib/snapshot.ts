@@ -9,6 +9,8 @@ import {
   riskKeywords,
 } from "./providers";
 import { getConsensusBundle } from "./providers/consensusCache";
+import { getMarketAlertCached } from "./providers/marketAlertCache";
+import { isKrStock } from "./providers/naver";
 import { analyze, marketMoodLabel, predict } from "./analyzer";
 import { assessNewsRisk } from "./news/riskScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
@@ -115,7 +117,7 @@ export async function buildSnapshot(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, bundle] = await Promise.all([
+      const [quoteRes, hist, bundle, marketAlert] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
         // 컨센서스/밸류에이션은 종목당 6시간 캐시. miss일 때만 Yahoo+Naver 호출.
@@ -124,10 +126,16 @@ export async function buildSnapshot(
           valuation: null,
           researches: [],
         })),
+        // 한국 종목만 시장경보(투자주의/경고/위험 등) 조회 — 6시간 캐시.
+        // 미국 종목·지수는 호출 자체를 스킵해 네트워크 낭비 방지.
+        isKrStock(meta.code)
+          ? getMarketAlertCached(meta.code).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
-      const quote = quoteRes.quote;
+      // 시장경보를 quote에 부착 — UI/분석 룰이 quote 한 객체에서 모두 읽도록.
+      const quote: typeof quoteRes.quote = { ...quoteRes.quote, marketAlert };
 
       // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 오차가 누적된다.
       // 현재 시세 대비로 매번 재계산해 룰/UI가 같은 값을 본다.

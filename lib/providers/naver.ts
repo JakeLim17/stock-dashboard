@@ -2,6 +2,8 @@ import "server-only";
 import type {
   AnalystConsensus,
   ExtendedHoursQuote,
+  MarketAlert,
+  MarketAlertLevel,
   Quote,
   ResearchNote,
   Valuation,
@@ -471,6 +473,116 @@ export async function fetchNaverIntegration(
       .filter((r) => r.title);
 
     return { consensus, valuation, researches };
+  } catch {
+    return null;
+  }
+}
+
+// ─── 시장경보 (한국거래소) — 네이버 PC HTML 파싱 ──────────────────
+//
+// 모바일 API의 iconInfos/tradeStopType은 시장경보 종목에서도 대부분 null이라
+// PC 종목 페이지(`/item/main.naver?code=XXXXXX`)의 마크업을 직접 파싱한다.
+//
+// 실측 표본 (2026-06-01): 네이처셀 007390 → `<em class="warning"> <span class="blind">투자경고</span></em>`
+//                       SK하이닉스 000660 → 마크업 없음
+//
+// 마크업이 등장하는 위치는 종목명 옆 알림 영역으로, em 의 class 가 caution/warning/risk 셋 중 하나.
+// 관리종목·거래정지는 같은 영역 또는 종목명 상단 표기로 등장할 수 있어
+// `<em class="admin">`/`<em class="halt">`도 함께 매칭하되, 발견되면 추가 검증 없이 채택.
+//
+// **주의:** 정규식 기반이므로 네이버가 마크업을 바꾸면 작동하지 않는다.
+// 그때는 매월 한 번 정도 표본 확인 + 정규식 보정 필요.
+
+const NAVER_ITEM_BASE = "https://finance.naver.com/item/main.naver";
+
+// 강도 우선순위: halt > risk > warning > admin > caution.
+// 거래정지(halt)는 사실상 최상위 위험이고, 관리종목(admin)은 risk만큼은 아니지만
+// 단기 caution 보다는 무겁다는 관점.
+const ALERT_PRIORITY: Record<MarketAlertLevel, number> = {
+  halt: 50,
+  risk: 40,
+  warning: 30,
+  admin: 20,
+  caution: 10,
+};
+
+const ALERT_LABEL: Record<MarketAlertLevel, string> = {
+  caution: "투자주의",
+  warning: "투자경고",
+  risk: "투자위험",
+  halt: "거래정지",
+  admin: "관리종목",
+};
+
+// 종목명 옆 알림 영역의 `<em class="..."><span class="blind">...</span></em>` 패턴.
+// caution/warning/risk 는 class 명에서, halt/admin 은 보조로 blind 텍스트("거래정지"·"관리종목") 매칭.
+const ALERT_EM_RE =
+  /<em\s+class=\"(caution|warning|risk|halt|admin)\"[^>]*>[\s\S]*?<\/em>/gi;
+// 보조 — class 명을 못 잡았을 때 blind 텍스트로 fallback.
+const ALERT_BLIND_RE =
+  /<span\s+class=\"blind\">\s*(투자주의|투자경고|투자위험|거래정지|관리종목)\s*<\/span>/gi;
+
+const BLIND_TO_LEVEL: Record<string, MarketAlertLevel> = {
+  투자주의: "caution",
+  투자경고: "warning",
+  투자위험: "risk",
+  거래정지: "halt",
+  관리종목: "admin",
+};
+
+function isKrxCode(code: string): boolean {
+  return /^\d{6}$/.test(code);
+}
+
+/**
+ * 한국 종목의 시장경보 상태를 네이버 PC 페이지에서 읽어온다.
+ * 호출자는 6자리 KRX 코드(예: "007390") 또는 Yahoo 코드("007390.KS") 모두 넘길 수 있다.
+ * 시장경보가 없거나 실패하면 null 반환.
+ */
+export async function fetchMarketAlert(
+  code: string
+): Promise<MarketAlert | null> {
+  // 입력 정규화: "007390.KS" → "007390"
+  const naverCode = isKrxCode(code) ? code : toNaverCode(code);
+  if (!naverCode) return null;
+
+  try {
+    const res = await fetch(`${NAVER_ITEM_BASE}?code=${naverCode}`, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      next: { revalidate: 0 },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    if (!html) return null;
+
+    // 1차: class 명으로 잡기
+    const found = new Set<MarketAlertLevel>();
+    for (const m of html.matchAll(ALERT_EM_RE)) {
+      const lvl = m[1].toLowerCase() as MarketAlertLevel;
+      if (lvl in ALERT_PRIORITY) found.add(lvl);
+    }
+    // 2차 보조: blind 텍스트
+    for (const m of html.matchAll(ALERT_BLIND_RE)) {
+      const lvl = BLIND_TO_LEVEL[m[1]];
+      if (lvl) found.add(lvl);
+    }
+    if (found.size === 0) return null;
+
+    // 가장 강한 단계 채택
+    const top = Array.from(found).reduce((a, b) =>
+      ALERT_PRIORITY[a] >= ALERT_PRIORITY[b] ? a : b
+    );
+
+    return {
+      level: top,
+      label: ALERT_LABEL[top],
+      source: "naver",
+      asOf: Date.now(),
+    };
   } catch {
     return null;
   }

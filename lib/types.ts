@@ -63,6 +63,21 @@ export interface ExtendedHoursQuote {
   active?: boolean;
 }
 
+// 한국거래소 시장경보 — 네이버 PC 종목 페이지 마크업에서 추출.
+//   caution (투자주의)  : 단기 급등 — 1일 주의
+//   warning (투자경고)  : 추가 상승 시 매매거래 정지 가능
+//   risk    (투자위험)  : 더 오르면 즉시 1일 거래정지
+//   halt    (거래정지)  : 이미 거래 정지된 상태
+//   admin   (관리종목)  : 상장폐지 위험 단계
+export type MarketAlertLevel = "caution" | "warning" | "risk" | "halt" | "admin";
+
+export interface MarketAlert {
+  level: MarketAlertLevel;
+  label: string;        // 한글 라벨 ("투자경고" 등)
+  source: "naver";
+  asOf: number;         // epoch ms (캐시 갱신 시각)
+}
+
 export interface Quote {
   code: string;
   name: string;
@@ -83,6 +98,8 @@ export interface Quote {
   priceTime?: number | null;
   // 정규장 외 거래 정보 (있을 때만 채움)
   extendedHours?: ExtendedHoursQuote | null;
+  // 한국거래소 시장경보 (한국 종목만). 없으면 null.
+  marketAlert?: MarketAlert | null;
 }
 
 export interface ValuationMetrics {
