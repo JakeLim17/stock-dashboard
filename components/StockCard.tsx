@@ -241,25 +241,48 @@ export function StockCard({ snap, onSelect, selected }: {
           </details>
         </div>
 
-        {/* 1주 변동성 범위 요약 — 카드 맨 아래 별도 박스로 분리 */}
+        {/* 예상 변동 범위 — 1일/1주 horizon을 stack으로 노출. 카드만 보고도 즉시 판단 가능. */}
         {(() => {
-          const oneWeek = snap.predictions?.ranges.find(
-            (r) => r.horizonDays === 5
-          );
-          if (!oneWeek || quote.price <= 0) return null;
-          const lowPct = oneWeek.low / quote.price - 1;
-          const highPct = oneWeek.high / quote.price - 1;
+          const ranges = snap.predictions?.ranges;
+          if (!ranges || quote.price <= 0) return null;
+          const oneDay = ranges.find((r) => r.horizonDays === 1);
+          const oneWeek = ranges.find((r) => r.horizonDays === 5);
+          // 1주가 없으면 박스 자체 숨김 (기존 정책 유지)
+          if (!oneWeek) return null;
+          const rows: { label: string; low: number; high: number }[] = [];
+          if (oneDay) {
+            rows.push({
+              label: "1일",
+              low: oneDay.low / quote.price - 1,
+              high: oneDay.high / quote.price - 1,
+            });
+          }
+          rows.push({
+            label: "1주",
+            low: oneWeek.low / quote.price - 1,
+            high: oneWeek.high / quote.price - 1,
+          });
           return (
-            <div className="rounded-md bg-muted/40 px-3 py-2 flex items-center justify-between text-[11px] tabular">
-              <span className="text-muted-foreground">1주 변동 범위</span>
-              <span className="font-medium">
-                <span className="text-down">{fmtPercent(lowPct, 1)}</span>
-                {" ~ "}
-                <span className="text-up">{fmtPercent(highPct, 1)}</span>
-                <span className="text-muted-foreground ml-1.5 text-[10px]">
-                  68%
-                </span>
-              </span>
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">예상 변동 범위</span>
+                <span className="text-muted-foreground text-[10px]">68%</span>
+              </div>
+              <div className="space-y-0.5">
+                {rows.map((r) => (
+                  <div
+                    key={r.label}
+                    className="flex items-center justify-between"
+                  >
+                    <span className="text-muted-foreground">{r.label}</span>
+                    <span className="font-medium">
+                      <span className="text-down">{fmtPercent(r.low, 1)}</span>
+                      {" ~ "}
+                      <span className="text-up">{fmtPercent(r.high, 1)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })()}
