@@ -16,21 +16,28 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // 반도체
   ...PRIMARY_SYMBOLS,
   { code: "042700.KS", name: "한미반도체", kind: "kr-stock" },
-  // 자동차 / 2차전지
+  // IT가전
+  { code: "066570.KS", name: "LG전자", kind: "kr-stock" },
+  // 자동차 / 2차전지 / 정유
   { code: "005380.KS", name: "현대차", kind: "kr-stock" },
   { code: "000270.KS", name: "기아", kind: "kr-stock" },
+  { code: "012330.KS", name: "현대모비스", kind: "kr-stock" },
   { code: "373220.KS", name: "LG에너지솔루션", kind: "kr-stock" },
   { code: "006400.KS", name: "삼성SDI", kind: "kr-stock" },
+  { code: "096770.KS", name: "SK이노베이션", kind: "kr-stock" },
   { code: "247540.KQ", name: "에코프로비엠", kind: "kr-stock" },
   { code: "086520.KQ", name: "에코프로", kind: "kr-stock" },
-  // 금융
+  // 금융 / 보험 / 인터넷은행
   { code: "105560.KS", name: "KB금융", kind: "kr-stock" },
   { code: "055550.KS", name: "신한지주", kind: "kr-stock" },
   { code: "086790.KS", name: "하나금융지주", kind: "kr-stock" },
-  // 화학 / 소재 / 철강
+  { code: "032830.KS", name: "삼성생명", kind: "kr-stock" },
+  { code: "323410.KS", name: "카카오뱅크", kind: "kr-stock" },
+  // 화학 / 소재 / 철강 / 비철금속
   { code: "051910.KS", name: "LG화학", kind: "kr-stock" },
   { code: "011170.KS", name: "롯데케미칼", kind: "kr-stock" },
   { code: "005490.KS", name: "POSCO홀딩스", kind: "kr-stock" },
+  { code: "010130.KS", name: "고려아연", kind: "kr-stock" },
   // 바이오 / 제약
   { code: "207940.KS", name: "삼성바이오로직스", kind: "kr-stock" },
   { code: "068270.KS", name: "셀트리온", kind: "kr-stock" },
@@ -41,6 +48,7 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "036570.KS", name: "엔씨소프트", kind: "kr-stock" },
   { code: "251270.KS", name: "넷마블", kind: "kr-stock" },
   { code: "293490.KQ", name: "카카오게임즈", kind: "kr-stock" },
+  { code: "259960.KS", name: "크래프톤", kind: "kr-stock" },
   { code: "352820.KS", name: "하이브", kind: "kr-stock" },
   { code: "041510.KQ", name: "에스엠", kind: "kr-stock" },
   // 방산 / 항공우주
@@ -52,8 +60,12 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "010140.KS", name: "삼성중공업", kind: "kr-stock" },
   { code: "042660.KS", name: "한화오션", kind: "kr-stock" },
   { code: "011200.KS", name: "HMM", kind: "kr-stock" },
-  // 유틸 / 종합
+  // 원전 / 전력기기
+  { code: "034020.KS", name: "두산에너빌리티", kind: "kr-stock" },
+  { code: "267260.KS", name: "HD현대일렉트릭", kind: "kr-stock" },
+  // 유틸 / 통신 / 종합
   { code: "015760.KS", name: "한국전력", kind: "kr-stock" },
+  { code: "017670.KS", name: "SK텔레콤", kind: "kr-stock" },
   { code: "028260.KS", name: "삼성물산", kind: "kr-stock" },
   { code: "003490.KS", name: "대한항공", kind: "kr-stock" },
 ];
