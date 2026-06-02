@@ -19,12 +19,17 @@ import {
 } from "lucide-react";
 
 // 통계 기반 예측 패널. 내부 종목 선택을 지원해 카드 선택과 별도로 비교 가능.
+//
+// embedded=true 면 헤더/selector를 숨겨 StockDetailPanel 같은 부모 컨테이너 안에
+// 깔끔하게 임베드된다. 부모가 헤더와 종목 결정을 책임지므로 selectedCode 1개만 사용.
 export function PredictionPanel({
   snaps,
   selectedCode,
+  embedded = false,
 }: {
   snaps: StockSnapshot[];
   selectedCode?: string;
+  embedded?: boolean;
 }) {
   const [activeCode, setActiveCode] = useState(
     () => selectedCode ?? snaps[0]?.meta.code ?? ""
@@ -45,6 +50,13 @@ export function PredictionPanel({
   );
 
   if (!snap) {
+    if (embedded) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          예측할 종목 데이터가 없습니다.
+        </p>
+      );
+    }
     return (
       <Card>
         <CardHeader>
@@ -63,6 +75,13 @@ export function PredictionPanel({
   const price = snap.quote.price;
 
   if (!p) {
+    if (embedded) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          데이터가 충분하지 않아 예측을 표시할 수 없습니다.
+        </p>
+      );
+    }
     return (
       <Card>
         <CardHeader>
@@ -86,25 +105,15 @@ export function PredictionPanel({
   const oneWeek = p.ranges.find((r) => r.horizonDays === 5);
   const primaryRange = oneDay ?? oneWeek ?? p.ranges[0];
 
-  return (
-    <Card>
-      <CardHeader className="flex items-start justify-between gap-3">
-        <div>
-          <CardTitle>예측</CardTitle>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            최근 90일 변동성 기반
-          </p>
-        </div>
-        <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
-          σ {(stdSigma(p) * 100).toFixed(2)}%/일
-        </Badge>
-      </CardHeader>
-      <CardBody className="space-y-4">
+  const inner = (
+    <>
+      {!embedded && (
         <StockSelector
           snaps={snaps}
           activeCode={snap.meta.code}
           onSelect={setActiveCode}
         />
+      )}
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <SummaryCard
@@ -312,7 +321,36 @@ export function PredictionPanel({
             </Section>
           </div>
         </details>
-      </CardBody>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-end">
+          <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
+            σ {(stdSigma(p) * 100).toFixed(2)}%/일
+          </Badge>
+        </div>
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex items-start justify-between gap-3">
+        <div>
+          <CardTitle>예측</CardTitle>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            최근 90일 변동성 기반
+          </p>
+        </div>
+        <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
+          σ {(stdSigma(p) * 100).toFixed(2)}%/일
+        </Badge>
+      </CardHeader>
+      <CardBody className="space-y-4">{inner}</CardBody>
     </Card>
   );
 }

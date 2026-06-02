@@ -375,6 +375,18 @@ export interface AnalystConsensus {
   domesticCount?: number;
   // domesticMean 기준 상승여력 — snapshot에서 매번 재계산
   domesticUpsidePercent?: number | null;
+
+  // ── 글로벌(외국 증권사) 컨센서스 — Yahoo quoteSummary 기반 ──────────
+  // 미국·EU broker 평균. 한국 종목엔 외국 broker가 별로 없어 종종 null.
+  // - 한국 종목: Yahoo가 주는 mean이 국내 분석가까지 섞여 있는 경우가 있지만
+  //   대부분 외국계라 globalMean으로 매핑한다. 데이터가 없으면 null.
+  // - 미국 종목: Yahoo의 mean이 곧 globalMean. domesticMean은 항상 null.
+  globalMean?: number | null;
+  globalHigh?: number | null;
+  globalLow?: number | null;
+  globalCount?: number;
+  // globalMean 기준 상승여력 — snapshot에서 매번 재계산
+  globalUpsidePercent?: number | null;
 }
 
 export interface Valuation {

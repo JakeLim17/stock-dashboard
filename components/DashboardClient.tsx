@@ -12,8 +12,11 @@ import { StockCard } from "./StockCard";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
 import { AnalysisBox } from "./AnalysisBox";
-import { ConsensusPanel } from "./ConsensusPanel";
-import { PredictionPanel } from "./PredictionPanel";
+import { PredictionHero } from "./PredictionHero";
+import {
+  StockDetailPanel,
+  type StockDetailPanelHandle,
+} from "./StockDetailPanel";
 import { PriceChart } from "./PriceChart";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeToggle } from "./ThemeToggle";
@@ -101,6 +104,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const bootedRef = useRef(false);
   const watchCodesRef = useRef(watchCodes);
   const overseasNightRef = useRef(useOverseasNight);
+  // PredictionHero 클릭 시 StockDetailPanel "예측" 탭으로 이동.
+  const detailRef = useRef<StockDetailPanelHandle>(null);
   useEffect(() => {
     watchCodesRef.current = watchCodes;
   }, [watchCodes]);
@@ -355,6 +360,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         maxWatch={MAX_WATCH}
       />
 
+      {/* 예측 Hero — 선택 종목 단기 예측을 큰 시각으로. 클릭하면 아래 상세 패널 "예측" 탭으로 이동. */}
+      <PredictionHero
+        snap={selectedSnap}
+        onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
+      />
+
       {/* 관심종목 한 줄 도구바 + 확장형 검색 + 카드 */}
       <section className="space-y-3">
         <div className="flex items-center flex-wrap gap-2">
@@ -512,11 +523,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
       </div>
 
-      {/* 컨센서스 · 밸류에이션 — 사이드 폭이 좁아 차트 아래 별도 행에 가로로 배치 */}
-      <ConsensusPanel snap={selectedSnap} />
-
-      {/* 예측 패널 — 내부에서 종목을 다시 선택해 비교 가능 */}
-      <PredictionPanel snaps={snap.primaries} selectedCode={selectedSnap?.meta.code} />
+      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
+      <StockDetailPanel
+        ref={detailRef}
+        snap={selectedSnap}
+        allNews={snap.news}
+      />
 
       {/* 뉴스 */}
       <NewsPanel

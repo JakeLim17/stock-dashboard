@@ -58,6 +58,11 @@ function inFlight(): Map<string, Promise<ConsensusBundle>> {
 // Yahoo + 네이버 결과 머지. 한국 종목은 네이버가 PER/PBR을 더 잘 줘서 네이버 우선,
 // 그 외 필드(애널 분포·targetHigh·targetLow)는 Yahoo만 줄 수 있어 Yahoo 우선.
 // 둘 다 있으면 source = "merged".
+//
+// 컨센서스 3-way 분리:
+//   - global*  ← Yahoo (외국계 broker)
+//   - domestic* ← wisereport (국내 증권사)
+//   - targetMean = global·domestic 카운트 가중평균 (둘 다 있을 때)
 function mergeBundle(
   yahoo: { consensus: AnalystConsensus | null; valuation: Valuation | null } | null,
   naver:
@@ -96,6 +101,20 @@ function mergeBundle(
     consensus = naver.consensus;
   }
 
+  // ── 글로벌(외국 broker) 컨센 = Yahoo의 mean/high/low/count.
+  //    한국 종목엔 외국 broker가 별로 없어 Yahoo가 targetMean을 못 줄 수도 있고,
+  //    이 경우 globalMean = null. 미국 종목은 Yahoo의 mean이 곧 globalMean.
+  if (consensus) {
+    const yc = yahoo?.consensus;
+    consensus = {
+      ...consensus,
+      globalMean: yc?.targetMean ?? null,
+      globalHigh: yc?.targetHigh ?? null,
+      globalLow: yc?.targetLow ?? null,
+      globalCount: yc?.analystCount ?? 0,
+    };
+  }
+
   // ── wisereport 증권사별 reports + 국내 평균 — 한국 종목에서만 채워진다.
   //    consensus 객체가 없는데 wise 만 있는 경우(Yahoo·네이버 둘 다 빈 경우)도
   //    domesticMean 으로 최소한의 컨센을 구성해 준다.
@@ -117,6 +136,10 @@ function mergeBundle(
         upsidePercent: null,
         source: "naver",
         asOf: Date.now(),
+        globalMean: null,
+        globalHigh: null,
+        globalLow: null,
+        globalCount: 0,
       };
     }
     if (consensus) {
@@ -128,6 +151,28 @@ function mergeBundle(
         domesticLow: wise.domesticLow,
         domesticCount: wise.domesticCount,
       };
+    }
+  }
+
+  // ── 통합(가중평균) targetMean 재계산.
+  //    domestic·global이 모두 있으면 카운트 가중평균, 한쪽만 있으면 그것 그대로.
+  //    한국 종목의 기존 targetMean(yahoo)는 외국계 broker만 반영한 값이라
+  //    국내 평균과 큰 차이가 날 수 있고, 통합 평균이 사용자 직관에 더 부합한다.
+  if (consensus) {
+    const dMean = consensus.domesticMean ?? null;
+    const dCount = consensus.domesticCount ?? 0;
+    const gMean = consensus.globalMean ?? null;
+    const gCount = consensus.globalCount ?? 0;
+    if (dMean != null && dCount > 0 && gMean != null && gCount > 0) {
+      const blended = (dMean * dCount + gMean * gCount) / (dCount + gCount);
+      consensus = {
+        ...consensus,
+        targetMean: blended,
+        analystCount: dCount + gCount,
+        source: "merged",
+      };
+    } else if (dMean != null && dCount > 0 && consensus.targetMean == null) {
+      consensus = { ...consensus, targetMean: dMean, analystCount: dCount };
     }
   }
 

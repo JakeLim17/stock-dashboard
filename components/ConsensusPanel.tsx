@@ -1,14 +1,13 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import type {
+  AnalystConsensus,
   AnalystReport,
-  SignalStatus,
   StockSnapshot,
 } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { SignalDetailBadges } from "./SignalDetailBadges";
-import { MarketAlertBadge } from "./MarketAlertBadge";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 import {
   Target,
@@ -18,32 +17,24 @@ import {
   TableProperties,
 } from "lucide-react";
 
-const LONG_SIGNAL_LABEL: Record<SignalStatus, string> = {
-  BUY: "신규 매수",
-  ADD: "분할 매수",
-  HOLD: "보유",
-  WATCH: "관망",
-  SELL: "비중 축소",
-};
-
-const LONG_SIGNAL_VARIANT: Record<
-  SignalStatus,
-  "buy" | "add" | "hold" | "watch" | "sell"
-> = {
-  BUY: "buy",
-  ADD: "add",
-  HOLD: "hold",
-  WATCH: "watch",
-  SELL: "sell",
-};
-
-// 선택된 종목의 컨센서스 / 밸류에이션 / 리서치 노트를 한 패널에 모은다.
-// 사이드 폭이 좁으면 정보가 빽빽해지므로, 차트 아래 별도 행에 가로로 길게 둔다.
+// 컨센서스 / 밸류에이션 / 리서치 / 증권사별 표 — 선택된 종목 1개의 펀더멘털 보조 데이터.
 //
-// 데이터 출처: Yahoo quoteSummary + 네이버 integration (6시간 캐시).
-//   - Yahoo: targetMean/High/Low, 애널 분포, 추천 키
-//   - 네이버: 한국 종목 PER/PBR/EPS/52주, 리서치 리포트
-export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
+// 3-way 토글 (KR / US / 통합) — 컨센서스 데이터 출처를 사용자가 직접 비교.
+//   - KR  : wisereport 국내 증권사 평균
+//   - US  : Yahoo quoteSummary 외국계 broker 평균
+//   - 통합: 두 평균의 카운트 가중평균
+// 디폴트는 한국 종목이면 KR, 미국 종목이면 US. 데이터 없는 view는 자동 비활성.
+//
+// 데이터 출처: Yahoo quoteSummary + wisereport + 네이버 integration (6시간 캐시).
+export function ConsensusPanel({
+  snap,
+  embedded = false,
+}: {
+  snap?: StockSnapshot | null;
+  // StockDetailPanel 내부에 임베드되어 있을 때 true. 헤더의 verdict 부분을 숨겨
+  // 부모 헤더와 중복을 피한다.
+  embedded?: boolean;
+}) {
   if (!snap) {
     return (
       <Card>
@@ -64,129 +55,18 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
   const researches = snap.researches ?? [];
   const price = snap.quote.price;
   const hasAnything = !!c || !!v || researches.length > 0;
-  const longSig = snap.analysis.longTerm;
-  const verdict = snap.analysis.verdict;
 
-  return (
-    <Card>
-      <CardHeader className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <CardTitle>컨센서스 · 밸류에이션 — {snap.meta.name}</CardTitle>
-            {/* 메인 결론 verdict — 사이드에서도 같은 결론을 확인 */}
-            <Badge variant={verdict.tone} size="md" className="shrink-0">
-              {verdict.label}
-            </Badge>
-            <Badge
-              variant={LONG_SIGNAL_VARIANT[longSig.signal]}
-              size="sm"
-              className="shrink-0"
-            >
-              장기 · {LONG_SIGNAL_LABEL[longSig.signal]}
-            </Badge>
-            {/* 한국거래소 시장경보 — 헤더에서도 즉시 식별되도록 */}
-            <MarketAlertBadge
-              alert={snap.quote.marketAlert}
-              size="sm"
-              className="shrink-0"
-            />
-          </div>
-          {/* 첫 줄 — verdict.headline (통합 결론) */}
-          <p className="text-sm font-semibold mt-1.5 leading-snug">
-            {verdict.headline}
-          </p>
-          {/* 단·장기 시그널 컬러 배지 (회색 detail 대체) + 장기 헤드라인·종합 점수 */}
-          <div className="mt-1 flex items-center gap-2 flex-wrap">
-            <SignalDetailBadges
-              short={snap.analysis.shortTerm.signal}
-              long={longSig.signal}
-              title={verdict.detail}
-            />
-            <span className="text-[11px] text-muted-foreground leading-snug">
-              장기 헤드라인: {longSig.headline}
-              <span className="ml-2 tabular">종합 {longSig.score}</span>
-            </span>
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            애널리스트 목표주가 · 분포 · 밸류 지표 · 최근 리서치 (6시간 캐시)
-          </p>
-        </div>
-        {c?.source && (
-          <Badge variant="neutral" size="sm" className="shrink-0">
-            출처 {c.source}
-          </Badge>
-        )}
-      </CardHeader>
-      <CardBody>
-        {!hasAnything ? (
-          <p className="text-sm text-muted-foreground">
-            컨센서스/밸류에이션 데이터를 불러오지 못했습니다. 일부 종목은 Yahoo·네이버에서 제공되지 않을 수 있습니다.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5">
-            {c && c.targetMean != null && (
-              <Section
-                title="컨센서스 목표주가"
-                icon={<Target className="h-3.5 w-3.5" />}
-              >
-                <ConsensusTargetBar
-                  currentPrice={price}
-                  low={c.targetLow}
-                  mean={c.targetMean}
-                  high={c.targetHigh}
-                />
-                <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
-                  <MiniMetric label="최저" value={fmtNumber(c.targetLow, 0)} />
-                  <MiniMetric
-                    label="평균"
-                    value={fmtNumber(c.targetMean, 0)}
-                    color={changeColor(c.upsidePercent)}
-                    sub={c.upsidePercent != null ? fmtPercent(c.upsidePercent, 1) : undefined}
-                  />
-                  <MiniMetric label="최고" value={fmtNumber(c.targetHigh, 0)} />
-                </div>
-                {c.domesticMean != null && (c.domesticCount ?? 0) > 0 && (
-                  <div className="mt-2 rounded-md bg-muted/30 px-2 py-1.5 text-[11px] flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      국내 {c.domesticCount}사 평균
-                    </span>
-                    <span className="font-medium tabular">
-                      <span>{fmtNumber(c.domesticMean, 0)}</span>
-                      {c.domesticUpsidePercent != null && (
-                        <span
-                          className={`ml-1.5 ${changeColor(c.domesticUpsidePercent)}`}
-                        >
-                          ({fmtPercent(c.domesticUpsidePercent, 1)})
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                )}
-                {c.analystCount != null && (
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    애널리스트 {c.analystCount}명
-                    {c.recommendationKey && (
-                      <>
-                        {" · "}
-                        <span className="font-medium text-foreground">
-                          {recommendationLabel(c.recommendationKey)}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                )}
-              </Section>
-            )}
+  const inner = (
+    <>
+      {!hasAnything ? (
+        <p className="text-sm text-muted-foreground">
+          컨센서스/밸류에이션 데이터를 불러오지 못했습니다. 일부 종목은 Yahoo·네이버에서 제공되지 않을 수 있습니다.
+        </p>
+      ) : (
+        <div className="space-y-5">
+          {c && <ConsensusThreeWaySection consensus={c} stockCode={snap.meta.code} price={price} />}
 
-            {c && (c.strongBuy + c.buy + c.hold + c.sell + c.strongSell) > 0 && (
-              <Section
-                title="애널리스트 분포"
-                icon={<Users className="h-3.5 w-3.5" />}
-              >
-                <AnalystDistributionBars consensus={c} />
-              </Section>
-            )}
-
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-5">
             {v && (
               <Section
                 title="밸류에이션"
@@ -248,6 +128,15 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
               </Section>
             )}
 
+            {c && (c.strongBuy + c.buy + c.hold + c.sell + c.strongSell) > 0 && (
+              <Section
+                title="애널리스트 분포 (Yahoo)"
+                icon={<Users className="h-3.5 w-3.5" />}
+              >
+                <AnalystDistributionBars consensus={c} />
+              </Section>
+            )}
+
             {researches.length > 0 && (
               <Section
                 title="최근 리서치 (네이버)"
@@ -272,21 +161,240 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
               </Section>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* 증권사별 목표주가 표 — 한국 종목에서만 채워진다 (wisereport 출처).
-            그리드 밖에 풀 폭으로 두어 가로 스크롤 없이 모든 컬럼이 보이게 한다. */}
-        {c?.reports && c.reports.length > 0 && (
-          <div className="mt-6">
-            <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-              <TableProperties className="h-3.5 w-3.5" />
-              증권사별 목표주가 (최근 {Math.min(c.reports.length, 12)}건)
-            </h4>
-            <BrokerReportTable reports={c.reports} currentPrice={price} />
-          </div>
+      {/* 증권사별 목표주가 표 — 한국 종목에서만 채워진다 (wisereport 출처).
+          그리드 밖에 풀 폭으로 두어 가로 스크롤 없이 모든 컬럼이 보이게 한다. */}
+      {c?.reports && c.reports.length > 0 && (
+        <div className="mt-6">
+          <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+            <TableProperties className="h-3.5 w-3.5" />
+            증권사별 목표주가 (최근 {Math.min(c.reports.length, 12)}건)
+          </h4>
+          <BrokerReportTable reports={c.reports} currentPrice={price} />
+        </div>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className="space-y-5">{inner}</div>;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CardTitle>컨센서스 · 밸류에이션 — {snap.meta.name}</CardTitle>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            애널리스트 목표주가 · 분포 · 밸류 지표 · 최근 리서치 (6시간 캐시)
+          </p>
+        </div>
+        {c?.source && (
+          <Badge variant="neutral" size="sm" className="shrink-0">
+            출처 {c.source}
+          </Badge>
         )}
-      </CardBody>
+      </CardHeader>
+      <CardBody>{inner}</CardBody>
     </Card>
+  );
+}
+
+// 3-way 컨센서스 뷰 (KR / US / 통합) — 사용자가 토글로 비교.
+//   - 디폴트: 한국 종목 → KR(있으면), 미국 종목 → US
+//   - 데이터 없는 탭은 disabled (tooltip: "데이터 없음")
+type ConsensusView = "domestic" | "global" | "merged";
+
+function ConsensusThreeWaySection({
+  consensus,
+  stockCode,
+  price,
+}: {
+  consensus: AnalystConsensus;
+  stockCode: string;
+  price: number;
+}) {
+  const isKr = /\.K[SQ]$/.test(stockCode);
+
+  const hasDomestic =
+    consensus.domesticMean != null && (consensus.domesticCount ?? 0) > 0;
+  const hasGlobal =
+    consensus.globalMean != null && (consensus.globalCount ?? 0) > 0;
+  const hasMerged = consensus.targetMean != null;
+
+  const defaultView: ConsensusView = useMemo(() => {
+    if (isKr) {
+      if (hasDomestic) return "domestic";
+      if (hasGlobal) return "global";
+      return "merged";
+    }
+    if (hasGlobal) return "global";
+    if (hasDomestic) return "domestic";
+    return "merged";
+  }, [isKr, hasDomestic, hasGlobal]);
+
+  const [view, setView] = useState<ConsensusView>(defaultView);
+
+  // 종목이 바뀌면 디폴트를 다시 적용. (선택 상태 누수 방지)
+  useEffect(() => {
+    setView(defaultView);
+  }, [defaultView, stockCode]);
+
+  const ensureAvailable = (v: ConsensusView): ConsensusView => {
+    if (v === "domestic" && !hasDomestic) return defaultView;
+    if (v === "global" && !hasGlobal) return defaultView;
+    if (v === "merged" && !hasMerged) return defaultView;
+    return v;
+  };
+  const activeView = ensureAvailable(view);
+
+  // view별 mean/high/low/count/upside 추출
+  const viewData = (() => {
+    switch (activeView) {
+      case "domestic":
+        return {
+          mean: consensus.domesticMean ?? null,
+          high: consensus.domesticHigh ?? null,
+          low: consensus.domesticLow ?? null,
+          count: consensus.domesticCount ?? 0,
+          upside: consensus.domesticUpsidePercent ?? null,
+          caption: "국내 증권사(wisereport) 평균",
+        };
+      case "global":
+        return {
+          mean: consensus.globalMean ?? null,
+          high: consensus.globalHigh ?? null,
+          low: consensus.globalLow ?? null,
+          count: consensus.globalCount ?? 0,
+          upside: consensus.globalUpsidePercent ?? null,
+          caption: "Yahoo 외국계 broker 평균",
+        };
+      case "merged":
+      default:
+        return {
+          mean: consensus.targetMean ?? null,
+          high: consensus.targetHigh ?? null,
+          low: consensus.targetLow ?? null,
+          count: consensus.analystCount ?? 0,
+          upside: consensus.upsidePercent ?? null,
+          caption:
+            hasDomestic && hasGlobal
+              ? "Yahoo + KR 카운트 가중평균"
+              : hasDomestic
+                ? "국내만(외국 broker 없음)"
+                : "외국만(국내 데이터 없음)",
+        };
+    }
+  })();
+
+  const tabs: Array<{
+    key: ConsensusView;
+    label: string;
+    enabled: boolean;
+    title: string;
+  }> = [
+    {
+      key: "domestic",
+      label: "KR",
+      enabled: hasDomestic,
+      title: hasDomestic
+        ? `국내 ${consensus.domesticCount}사`
+        : "국내 증권사 데이터 없음",
+    },
+    {
+      key: "global",
+      label: "US",
+      enabled: hasGlobal,
+      title: hasGlobal
+        ? `글로벌 ${consensus.globalCount}명`
+        : "외국 broker 데이터 없음",
+    },
+    {
+      key: "merged",
+      label: "통합",
+      enabled: hasMerged,
+      title: hasMerged ? "Yahoo + KR 가중평균" : "통합 데이터 없음",
+    },
+  ];
+
+  return (
+    <Section
+      title="컨센서스 목표주가"
+      icon={<Target className="h-3.5 w-3.5" />}
+    >
+      {/* 3-way 토글 */}
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              disabled={!t.enabled}
+              onClick={() => setView(t.key)}
+              title={t.title}
+              className={`text-xs px-3 py-1 rounded-md transition-colors ${
+                activeView === t.key
+                  ? "bg-foreground text-background font-medium"
+                  : t.enabled
+                    ? "text-muted-foreground hover:text-foreground"
+                    : "text-muted-foreground/40 cursor-not-allowed"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-muted-foreground">
+          {viewData.caption}
+        </span>
+      </div>
+
+      {viewData.mean != null ? (
+        <>
+          <ConsensusTargetBar
+            currentPrice={price}
+            low={viewData.low}
+            mean={viewData.mean}
+            high={viewData.high}
+          />
+          <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+            <MiniMetric label="최저" value={fmtNumber(viewData.low, 0)} />
+            <MiniMetric
+              label="평균"
+              value={fmtNumber(viewData.mean, 0)}
+              color={changeColor(viewData.upside)}
+              sub={
+                viewData.upside != null
+                  ? fmtPercent(viewData.upside, 1)
+                  : undefined
+              }
+            />
+            <MiniMetric label="최고" value={fmtNumber(viewData.high, 0)} />
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {activeView === "domestic"
+              ? `국내 ${viewData.count}사`
+              : activeView === "global"
+                ? `글로벌 ${viewData.count}명`
+                : `통합 ${viewData.count}명`}
+            {consensus.recommendationKey && activeView !== "domestic" && (
+              <>
+                {" · "}
+                <span className="font-medium text-foreground">
+                  {recommendationLabel(consensus.recommendationKey)}
+                </span>
+              </>
+            )}
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          이 view의 컨센서스 데이터가 없습니다.
+        </p>
+      )}
+    </Section>
   );
 }
 

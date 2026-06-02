@@ -230,11 +230,15 @@ function evaluateLongTermRules(input: {
     valuation?.forwardPer ?? quote.valuation?.forwardPer ?? null;
   const pbr = valuation?.pbr ?? quote.valuation?.pbr ?? null;
 
-  // 1) 컨센 평균 대비 상승여력 (가장 큰 신호)
-  //    한국 종목은 wisereport 의 국내 증권사 평균(domesticUpsidePercent)을 우선 사용한다.
+  // 1) 컨센 평균 대비 상승여력 (가장 큰 신호) — 3-way 우선순위
+  //
+  //    한국 종목: domesticUpsidePercent (count≥5) > globalUpsidePercent (count>0) > upsidePercent(통합)
+  //    미국·기타: domestic이 비어있으므로 자연스럽게 global → 통합 순으로 떨어진다.
+  //
   //    이유: 기존 targetMean(merged)는 Yahoo 외국인 평균까지 섞여 있어 한국 종목을
   //    과보수적으로 평가하던 문제 (예: 삼성전기 +35% 여력이 -22%로 잘못 표시).
-  //    국내 평균 데이터가 5건 이상이면 신뢰도 충분으로 보고 그걸 채택. 그 외/해외는 기존 targetMean 사용.
+  //    국내 평균 데이터가 5건 이상이면 신뢰도 충분으로 보고 그걸 채택.
+  //    국내 데이터가 부족한 한국 종목·미국 종목은 글로벌 broker 평균(global*)을 다음 후보로.
   let upsideUsed: number | null = null;
   let upsideSourceNote = "";
   if (
@@ -242,9 +246,16 @@ function evaluateLongTermRules(input: {
     (consensus.domesticCount ?? 0) >= 5
   ) {
     upsideUsed = consensus.domesticUpsidePercent;
-    upsideSourceNote = `국내 ${consensus.domesticCount}사 평균`;
+    upsideSourceNote = `국내 ${consensus.domesticCount}사`;
+  } else if (
+    consensus?.globalUpsidePercent != null &&
+    (consensus.globalCount ?? 0) > 0
+  ) {
+    upsideUsed = consensus.globalUpsidePercent;
+    upsideSourceNote = `글로벌 ${consensus.globalCount}명`;
   } else if (consensus?.upsidePercent != null) {
     upsideUsed = consensus.upsidePercent;
+    upsideSourceNote = "통합";
   }
   if (upsideUsed != null) {
     const up = upsideUsed;
@@ -267,17 +278,25 @@ function evaluateLongTermRules(input: {
 
   // 2) 컨센 최고가 보너스 — mean이 박살나도 high가 크면 강세 시나리오 존재.
   //    SK하이닉스 케이스(최고 +71%) 대응: 50~80% 구간을 두텁게 보정.
-  //    한국 종목은 domesticHigh(있으면) 우선, 그 외는 targetHigh.
+  //    high도 위 우선순위(domestic≥5 → global>0 → targetHigh)와 일관되게 사용.
   //    high와 mean의 격차가 큰 경우(분산 큼)는 outlier로 보고 가중치 절반.
   //    조건: (high - mean) / mean > 1.0 → 1배 이상 차이
-  const highUsed =
-    (consensus?.domesticCount ?? 0) >= 5 && consensus?.domesticHigh != null
-      ? consensus.domesticHigh
-      : consensus?.targetHigh ?? null;
-  const meanForOutlier =
-    (consensus?.domesticCount ?? 0) >= 5 && consensus?.domesticMean != null
-      ? consensus.domesticMean
-      : consensus?.targetMean ?? null;
+  const useDomesticForHigh =
+    (consensus?.domesticCount ?? 0) >= 5 && consensus?.domesticHigh != null;
+  const useGlobalForHigh =
+    !useDomesticForHigh &&
+    consensus?.globalHigh != null &&
+    (consensus?.globalCount ?? 0) > 0;
+  const highUsed = useDomesticForHigh
+    ? (consensus!.domesticHigh as number)
+    : useGlobalForHigh
+      ? (consensus!.globalHigh as number)
+      : (consensus?.targetHigh ?? null);
+  const meanForOutlier = useDomesticForHigh
+    ? (consensus!.domesticMean as number)
+    : useGlobalForHigh
+      ? (consensus!.globalMean as number)
+      : (consensus?.targetMean ?? null);
   if (highUsed != null && quote.price > 0) {
     const highUp = highUsed / quote.price - 1;
     let outlierFactor = 1;
