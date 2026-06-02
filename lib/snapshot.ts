@@ -139,12 +139,17 @@ export async function buildSnapshot(
 
       // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 오차가 누적된다.
       // 현재 시세 대비로 매번 재계산해 룰/UI가 같은 값을 본다.
+      // domesticUpsidePercent도 함께 재계산 — 한국 종목 verdict는 이걸 우선 사용.
       const consensus = bundle.consensus
         ? {
             ...bundle.consensus,
             upsidePercent:
               bundle.consensus.targetMean != null && quote.price > 0
                 ? bundle.consensus.targetMean / quote.price - 1
+                : null,
+            domesticUpsidePercent:
+              bundle.consensus.domesticMean != null && quote.price > 0
+                ? bundle.consensus.domesticMean / quote.price - 1
                 : null,
           }
         : null;

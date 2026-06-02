@@ -281,25 +281,48 @@ export function StockCard({ snap, onSelect, selected }: {
           );
         })()}
 
-        {/* 컨센서스 한 줄 — 평균 목표가, 상승여력, Strong Buy / Buy / Hold 분포 */}
+        {/* 컨센서스 한 줄 — 평균 목표가, 상승여력, Strong Buy / Buy / Hold 분포.
+            한국 종목인 경우 국내(국내 N사) 평균 + 통합 평균 두 줄로 분리 노출. */}
         {consensus && consensus.targetMean != null && (
-          <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular flex items-center justify-between gap-2">
-            <span className="text-muted-foreground shrink-0">컨센서스</span>
-            <span className="font-medium text-right">
-              <span>{fmtNumber(consensus.targetMean, 0)}</span>
-              {consensus.upsidePercent != null && (
-                <span
-                  className={`ml-1.5 ${changeColor(consensus.upsidePercent)}`}
-                >
-                  ({fmtPercent(consensus.upsidePercent, 1)})
-                </span>
+          <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
+            {consensus.domesticMean != null &&
+              (consensus.domesticCount ?? 0) > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground shrink-0">
+                    국내 {consensus.domesticCount}사 평균
+                  </span>
+                  <span className="font-medium text-right">
+                    <span>{fmtNumber(consensus.domesticMean, 0)}</span>
+                    {consensus.domesticUpsidePercent != null && (
+                      <span
+                        className={`ml-1.5 ${changeColor(consensus.domesticUpsidePercent)}`}
+                      >
+                        ({fmtPercent(consensus.domesticUpsidePercent, 1)})
+                      </span>
+                    )}
+                  </span>
+                </div>
               )}
-              {(consensus.strongBuy + consensus.buy + consensus.hold) > 0 && (
-                <span className="text-muted-foreground ml-1.5 text-[10px]">
-                  · SB {consensus.strongBuy}/{consensus.buy}/{consensus.hold}
-                </span>
-              )}
-            </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground shrink-0">
+                {consensus.domesticMean != null ? "통합 평균" : "컨센서스"}
+              </span>
+              <span className="font-medium text-right">
+                <span>{fmtNumber(consensus.targetMean, 0)}</span>
+                {consensus.upsidePercent != null && (
+                  <span
+                    className={`ml-1.5 ${changeColor(consensus.upsidePercent)}`}
+                  >
+                    ({fmtPercent(consensus.upsidePercent, 1)})
+                  </span>
+                )}
+                {(consensus.strongBuy + consensus.buy + consensus.hold) > 0 && (
+                  <span className="text-muted-foreground ml-1.5 text-[10px]">
+                    · SB {consensus.strongBuy}/{consensus.buy}/{consensus.hold}
+                  </span>
+                )}
+              </span>
+            </div>
           </div>
         )}
       </CardBody>

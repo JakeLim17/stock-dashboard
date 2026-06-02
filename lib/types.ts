@@ -311,6 +311,26 @@ export interface Predictions {
   };
 }
 
+// 분석가(증권사)별 개별 리포트.
+// 한국 종목은 wisereport에서 증권사별 목표가 표를 파싱해 채운다 (UI 노출 + 국내 평균 산정).
+// 해외 종목은 현재 미수집(Yahoo는 분포만 줌).
+export interface AnalystReport {
+  // 증권사명. wisereport 표 그대로(예: "미래에셋", "신한투자", "메리츠")
+  brokerName: string;
+  // 목표가 (원, 통화 단위는 원본 그대로)
+  targetPrice: number;
+  // 투자의견. wisereport 원문 ("BUY" / "Buy" / "매수" / "Hold" 등)
+  opinion?: string;
+  // 발행/최종 일자 (epoch ms)
+  publishDate?: number;
+  // 직전 목표가 — 상향/하향 여부 판단용
+  previousTarget?: number | null;
+  // 직전 투자의견
+  previousOpinion?: string | null;
+  // 한국 증권사 여부 — 화이트리스트 매칭. 모르면 wisereport 출처라 true 기본.
+  isDomestic: boolean;
+}
+
 // 컨센서스 / 밸류에이션 / 리서치 노트 — 펀더멘털 보조 데이터.
 // 매 5~15초 시세 갱신과 별개로 6시간 TTL 캐시에서 끌어 쓴다.
 export interface AnalystConsensus {
@@ -341,6 +361,20 @@ export interface AnalystConsensus {
   upsidePercent: number | null;
   source: "yahoo" | "naver" | "merged";
   asOf: number; // epoch ms
+
+  // ── 증권사별 detail / 국내 평균 (한국 종목 한정) ──────────────────
+  // wisereport 제공처별 표를 파싱한 raw 리스트. 최근 발행 순으로 정렬.
+  // 외국 종목은 빈 배열 또는 undefined.
+  reports?: AnalystReport[];
+  // 국내(한국) 증권사만 모은 평균/최고/최저/카운트.
+  // targetMean(merged)에는 외국인 분석가 평균까지 섞여 있어 한국 종목 verdict가 과보수적으로
+  // 기우는 문제를 보정. 룰은 한국 종목인 경우 domesticMean 우선 사용.
+  domesticMean?: number | null;
+  domesticHigh?: number | null;
+  domesticLow?: number | null;
+  domesticCount?: number;
+  // domesticMean 기준 상승여력 — snapshot에서 매번 재계산
+  domesticUpsidePercent?: number | null;
 }
 
 export interface Valuation {

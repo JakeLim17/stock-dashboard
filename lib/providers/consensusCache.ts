@@ -2,8 +2,10 @@ import "server-only";
 import { fetchAnalystAndValuation } from "./yahoo";
 import { fetchNaverIntegration } from "./naver";
 import { isKrStock } from "./naver";
+import { fetchWisereportAnalystReports } from "./wisereport";
 import type {
   AnalystConsensus,
+  AnalystReport,
   ResearchNote,
   Valuation,
 } from "../types";
@@ -64,6 +66,17 @@ function mergeBundle(
         valuation: Valuation | null;
         researches: ResearchNote[];
       }
+    | null,
+  // wisereport 의 증권사별 표 — 한국 종목 한정.
+  // reports 자체와 국내 평균 통계를 함께 들고온다.
+  wise:
+    | {
+        reports: AnalystReport[];
+        domesticMean: number | null;
+        domesticHigh: number | null;
+        domesticLow: number | null;
+        domesticCount: number;
+      }
     | null
 ): ConsensusBundle {
   // ── 컨센서스: Yahoo가 있으면 Yahoo를 베이스로 하고 targetMean이 비어있을 때만 네이버 채움.
@@ -81,6 +94,41 @@ function mergeBundle(
     consensus = yahoo.consensus;
   } else if (naver?.consensus) {
     consensus = naver.consensus;
+  }
+
+  // ── wisereport 증권사별 reports + 국내 평균 — 한국 종목에서만 채워진다.
+  //    consensus 객체가 없는데 wise 만 있는 경우(Yahoo·네이버 둘 다 빈 경우)도
+  //    domesticMean 으로 최소한의 컨센을 구성해 준다.
+  if (wise) {
+    if (!consensus && wise.domesticMean != null) {
+      consensus = {
+        targetMean: wise.domesticMean,
+        targetMedian: null,
+        targetHigh: wise.domesticHigh,
+        targetLow: wise.domesticLow,
+        analystCount: wise.domesticCount || null,
+        recommendationKey: null,
+        recommendationMean: null,
+        strongBuy: 0,
+        buy: 0,
+        hold: 0,
+        sell: 0,
+        strongSell: 0,
+        upsidePercent: null,
+        source: "naver",
+        asOf: Date.now(),
+      };
+    }
+    if (consensus) {
+      consensus = {
+        ...consensus,
+        reports: wise.reports,
+        domesticMean: wise.domesticMean,
+        domesticHigh: wise.domesticHigh,
+        domesticLow: wise.domesticLow,
+        domesticCount: wise.domesticCount,
+      };
+    }
   }
 
   // ── 밸류에이션: 네이버가 한국 종목 PER/PBR을 더 잘 줘서 우선. Yahoo는 52주가/배당으로 보강.
@@ -136,14 +184,16 @@ export async function getConsensusBundle(
   const inProgress = flight.get(code);
   if (inProgress) return inProgress;
 
-  // 한국 종목은 Yahoo+Naver 병렬, 해외는 Yahoo만.
+  // 한국 종목은 Yahoo+Naver+Wisereport 병렬, 해외는 Yahoo만.
   const promise = (async () => {
-    const [yahooResult, naverResult] = await Promise.all([
+    const isKr = isKrStock(code);
+    const [yahooResult, naverResult, wiseResult] = await Promise.all([
       fetchAnalystAndValuation(code).catch(() => null),
-      isKrStock(code) ? fetchNaverIntegration(code).catch(() => null) : Promise.resolve(null),
+      isKr ? fetchNaverIntegration(code).catch(() => null) : Promise.resolve(null),
+      isKr ? fetchWisereportAnalystReports(code).catch(() => null) : Promise.resolve(null),
     ]);
 
-    const merged = mergeBundle(yahooResult, naverResult);
+    const merged = mergeBundle(yahooResult, naverResult, wiseResult);
     c.set(code, { data: merged, expiresAt: Date.now() + TTL_MS });
     return merged;
   })().finally(() => {

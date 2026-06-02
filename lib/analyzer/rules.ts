@@ -231,36 +231,61 @@ function evaluateLongTermRules(input: {
   const pbr = valuation?.pbr ?? quote.valuation?.pbr ?? null;
 
   // 1) 컨센 평균 대비 상승여력 (가장 큰 신호)
-  if (consensus?.upsidePercent != null) {
-    const up = consensus.upsidePercent;
+  //    한국 종목은 wisereport 의 국내 증권사 평균(domesticUpsidePercent)을 우선 사용한다.
+  //    이유: 기존 targetMean(merged)는 Yahoo 외국인 평균까지 섞여 있어 한국 종목을
+  //    과보수적으로 평가하던 문제 (예: 삼성전기 +35% 여력이 -22%로 잘못 표시).
+  //    국내 평균 데이터가 5건 이상이면 신뢰도 충분으로 보고 그걸 채택. 그 외/해외는 기존 targetMean 사용.
+  let upsideUsed: number | null = null;
+  let upsideSourceNote = "";
+  if (
+    consensus?.domesticUpsidePercent != null &&
+    (consensus.domesticCount ?? 0) >= 5
+  ) {
+    upsideUsed = consensus.domesticUpsidePercent;
+    upsideSourceNote = `국내 ${consensus.domesticCount}사 평균`;
+  } else if (consensus?.upsidePercent != null) {
+    upsideUsed = consensus.upsidePercent;
+  }
+  if (upsideUsed != null) {
+    const up = upsideUsed;
     const upPct = (up * 100).toFixed(0);
+    const tag = upsideSourceNote ? `${upsideSourceNote} ` : "컨센서스 ";
     if (up >= 0.25)
-      hits.push({ label: `컨센서스 평균 +${upPct}% 상승여력 — 큰 폭`, score: 25, good: true });
+      hits.push({ label: `${tag}+${upPct}% 상승여력 — 큰 폭`, score: 25, good: true });
     else if (up >= 0.15)
-      hits.push({ label: `컨센서스 평균 +${upPct}% 상승여력`, score: 18, good: true });
+      hits.push({ label: `${tag}+${upPct}% 상승여력`, score: 18, good: true });
     else if (up >= 0.05)
-      hits.push({ label: `컨센서스 평균 +${upPct}% 여력`, score: 10, good: true });
+      hits.push({ label: `${tag}+${upPct}% 여력`, score: 10, good: true });
     else if (up > -0.05)
-      hits.push({ label: `컨센서스 평균 ±${upPct}% — 적정 구간`, score: 0, good: true });
+      hits.push({ label: `${tag}±${upPct}% — 적정 구간`, score: 0, good: true });
     else if (up > -0.15)
-      hits.push({ label: `컨센서스 평균 ${upPct}% — 여력 제한`, score: -10, good: false });
+      hits.push({ label: `${tag}${upPct}% — 여력 제한`, score: -10, good: false });
     else if (up > -0.25)
-      hits.push({ label: `컨센서스 평균 ${upPct}% — 목표가 초과`, score: -20, good: false });
-    else hits.push({ label: `컨센서스 평균 ${upPct}% — 25% 이상 고평가`, score: -30, good: false });
+      hits.push({ label: `${tag}${upPct}% — 목표가 초과`, score: -20, good: false });
+    else hits.push({ label: `${tag}${upPct}% — 25% 이상 고평가`, score: -30, good: false });
   }
 
   // 2) 컨센 최고가 보너스 — mean이 박살나도 high가 크면 강세 시나리오 존재.
   //    SK하이닉스 케이스(최고 +71%) 대응: 50~80% 구간을 두텁게 보정.
-  //    targetHigh와 targetMean의 격차가 큰 경우(분산 큼)는 outlier로 보고 가중치 절반.
-  //    조건: (targetHigh - targetMean) / targetMean > 1.0 → 1배 이상 차이
-  if (consensus?.targetHigh != null && quote.price > 0) {
-    const highUp = consensus.targetHigh / quote.price - 1;
+  //    한국 종목은 domesticHigh(있으면) 우선, 그 외는 targetHigh.
+  //    high와 mean의 격차가 큰 경우(분산 큼)는 outlier로 보고 가중치 절반.
+  //    조건: (high - mean) / mean > 1.0 → 1배 이상 차이
+  const highUsed =
+    (consensus?.domesticCount ?? 0) >= 5 && consensus?.domesticHigh != null
+      ? consensus.domesticHigh
+      : consensus?.targetHigh ?? null;
+  const meanForOutlier =
+    (consensus?.domesticCount ?? 0) >= 5 && consensus?.domesticMean != null
+      ? consensus.domesticMean
+      : consensus?.targetMean ?? null;
+  if (highUsed != null && quote.price > 0) {
+    const highUp = highUsed / quote.price - 1;
     let outlierFactor = 1;
     let outlierNote = "";
     if (
-      consensus.targetMean != null &&
-      consensus.targetMean > 0 &&
-      (consensus.targetHigh - consensus.targetMean) / consensus.targetMean > 1.0
+      meanForOutlier != null &&
+      meanForOutlier > 0 &&
+      (highUsed - meanForOutlier) / meanForOutlier > 1.0
     ) {
       outlierFactor = 0.5;
       outlierNote = " · 최고치는 outlier(다수 의견과 격차 큼)";

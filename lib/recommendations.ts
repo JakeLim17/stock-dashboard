@@ -337,13 +337,17 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
       }
       const quote = { ...quoteRes.quote, marketAlert };
 
-      // 컨센서스 upsidePercent 는 현재가 기준으로 재계산
+      // 컨센서스 upsidePercent / domesticUpsidePercent 는 현재가 기준으로 재계산
       const consensus = bundle.consensus
         ? {
             ...bundle.consensus,
             upsidePercent:
               bundle.consensus.targetMean != null && quote.price > 0
                 ? bundle.consensus.targetMean / quote.price - 1
+                : null,
+            domesticUpsidePercent:
+              bundle.consensus.domesticMean != null && quote.price > 0
+                ? bundle.consensus.domesticMean / quote.price - 1
                 : null,
           }
         : null;

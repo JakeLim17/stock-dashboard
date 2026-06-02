@@ -1,12 +1,22 @@
 "use client";
 
-import type { SignalStatus, StockSnapshot } from "@/lib/types";
+import type {
+  AnalystReport,
+  SignalStatus,
+  StockSnapshot,
+} from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
-import { Target, Users, ScrollText, Building2 } from "lucide-react";
+import {
+  Target,
+  Users,
+  ScrollText,
+  Building2,
+  TableProperties,
+} from "lucide-react";
 
 const LONG_SIGNAL_LABEL: Record<SignalStatus, string> = {
   BUY: "신규 매수",
@@ -135,6 +145,23 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
                   />
                   <MiniMetric label="최고" value={fmtNumber(c.targetHigh, 0)} />
                 </div>
+                {c.domesticMean != null && (c.domesticCount ?? 0) > 0 && (
+                  <div className="mt-2 rounded-md bg-muted/30 px-2 py-1.5 text-[11px] flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      국내 {c.domesticCount}사 평균
+                    </span>
+                    <span className="font-medium tabular">
+                      <span>{fmtNumber(c.domesticMean, 0)}</span>
+                      {c.domesticUpsidePercent != null && (
+                        <span
+                          className={`ml-1.5 ${changeColor(c.domesticUpsidePercent)}`}
+                        >
+                          ({fmtPercent(c.domesticUpsidePercent, 1)})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
                 {c.analystCount != null && (
                   <p className="mt-2 text-[11px] text-muted-foreground">
                     애널리스트 {c.analystCount}명
@@ -246,8 +273,103 @@ export function ConsensusPanel({ snap }: { snap?: StockSnapshot | null }) {
             )}
           </div>
         )}
+
+        {/* 증권사별 목표주가 표 — 한국 종목에서만 채워진다 (wisereport 출처).
+            그리드 밖에 풀 폭으로 두어 가로 스크롤 없이 모든 컬럼이 보이게 한다. */}
+        {c?.reports && c.reports.length > 0 && (
+          <div className="mt-6">
+            <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+              <TableProperties className="h-3.5 w-3.5" />
+              증권사별 목표주가 (최근 {Math.min(c.reports.length, 12)}건)
+            </h4>
+            <BrokerReportTable reports={c.reports} currentPrice={price} />
+          </div>
+        )}
       </CardBody>
     </Card>
+  );
+}
+
+// 증권사별 투자의견·목표가 표.
+//   - 컬럼: 증권사 / 목표가 / vs현재가 / 의견 / 발행일 / 직전대비
+//   - KR 배지로 국내 증권사 식별. 외국인 행은 "Global" 배지.
+//   - 정렬은 발행일 최신순(이미 reports에서 정렬되어 들어옴)
+function BrokerReportTable({
+  reports,
+  currentPrice,
+}: {
+  reports: AnalystReport[];
+  currentPrice: number;
+}) {
+  const rows = reports.slice(0, 12);
+  return (
+    <div className="overflow-x-auto rounded-md border border-border/60">
+      <table className="w-full text-[11px] tabular">
+        <thead className="bg-muted/40 text-muted-foreground">
+          <tr>
+            <th className="text-left px-2 py-1.5 font-medium">증권사</th>
+            <th className="text-right px-2 py-1.5 font-medium">목표가</th>
+            <th className="text-right px-2 py-1.5 font-medium">vs 현재가</th>
+            <th className="text-left px-2 py-1.5 font-medium">의견</th>
+            <th className="text-left px-2 py-1.5 font-medium">발행일</th>
+            <th className="text-right px-2 py-1.5 font-medium">직전대비</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, idx) => {
+            const upside =
+              currentPrice > 0 ? r.targetPrice / currentPrice - 1 : null;
+            const dateLabel = r.publishDate
+              ? new Date(r.publishDate).toISOString().slice(2, 10).replace(/-/g, ".")
+              : "—";
+            const prevDelta =
+              r.previousTarget != null && r.previousTarget > 0
+                ? r.targetPrice / r.previousTarget - 1
+                : null;
+            return (
+              <tr
+                key={`${r.brokerName}-${r.publishDate ?? idx}`}
+                className="border-t border-border/50"
+              >
+                <td className="px-2 py-1.5">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium">{r.brokerName}</span>
+                    <Badge
+                      variant={r.isDomestic ? "neutral" : "watch"}
+                      size="sm"
+                      className="text-[9px] py-0 px-1"
+                    >
+                      {r.isDomestic ? "KR" : "Global"}
+                    </Badge>
+                  </span>
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  {fmtNumber(r.targetPrice, 0)}
+                </td>
+                <td
+                  className={`px-2 py-1.5 text-right ${changeColor(upside)}`}
+                >
+                  {upside != null ? fmtPercent(upside, 1) : "—"}
+                </td>
+                <td className="px-2 py-1.5 text-muted-foreground">
+                  {r.opinion || "—"}
+                </td>
+                <td className="px-2 py-1.5 text-muted-foreground">
+                  {dateLabel}
+                </td>
+                <td
+                  className={`px-2 py-1.5 text-right ${changeColor(prevDelta)}`}
+                >
+                  {prevDelta != null && prevDelta !== 0
+                    ? fmtPercent(prevDelta, 1)
+                    : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
