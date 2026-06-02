@@ -115,15 +115,24 @@ export function PredictionPanel({
         />
       )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <SummaryCard
-            label={primaryRange ? `${primaryRange.horizonLabel} 예상 범위` : "예상 범위"}
-            value={
-              primaryRange
-                ? `${fmtNumber(primaryRange.low)} ~ ${fmtNumber(primaryRange.high)}`
-                : "—"
-            }
-          />
+        {/* embedded(StockDetailPanel)에서는 Hero와 중복되는 카드 3개(예상 범위/강도/손절·목표1)를 숨기고 Hero에 없는 카드만 노출 */}
+        <div
+          className={
+            embedded
+              ? "grid grid-cols-2 gap-3"
+              : "grid grid-cols-2 lg:grid-cols-5 gap-3"
+          }
+        >
+          {!embedded && (
+            <SummaryCard
+              label={primaryRange ? `${primaryRange.horizonLabel} 예상 범위` : "예상 범위"}
+              value={
+                primaryRange
+                  ? `${fmtNumber(primaryRange.low)} ~ ${fmtNumber(primaryRange.high)}`
+                  : "—"
+              }
+            />
+          )}
           <SummaryCard
             label="해외 환산"
             value={
@@ -138,18 +147,22 @@ export function PredictionPanel({
             value={p.valuation ? `${p.valuation.label} ${p.valuation.riskScore}` : "—"}
             color={valuationRiskColor(p.valuation?.riskScore)}
           />
-          <SummaryCard
-            label="매수 / 매도 강도"
-            value={`${p.strength.buy} / ${p.strength.sell}`}
-          />
-          <SummaryCard
-            label="손절 / 목표1"
-            value={
-              p.targets
-                ? `${fmtNumber(p.targets.stopLoss)} / ${fmtNumber(p.targets.takeProfit1)}`
-                : "—"
-            }
-          />
+          {!embedded && (
+            <SummaryCard
+              label="매수 / 매도 강도"
+              value={`${p.strength.buy} / ${p.strength.sell}`}
+            />
+          )}
+          {!embedded && (
+            <SummaryCard
+              label="손절 / 목표1"
+              value={
+                p.targets
+                  ? `${fmtNumber(p.targets.stopLoss)} / ${fmtNumber(p.targets.takeProfit1)}`
+                  : "—"
+              }
+            />
+          )}
         </div>
 
         {p.nightSignal && <NightValuationCard signal={p.nightSignal} />}

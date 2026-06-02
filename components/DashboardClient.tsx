@@ -366,6 +366,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
       />
 
+      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
+      <StockDetailPanel
+        ref={detailRef}
+        snap={selectedSnap}
+        allNews={snap.news}
+      />
+
       {/* 관심종목 한 줄 도구바 + 확장형 검색 + 카드 */}
       <section className="space-y-3">
         <div className="flex items-center flex-wrap gap-2">
@@ -522,13 +529,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           <MarketPanel indicators={snap.indicators} />
         </div>
       </div>
-
-      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
-      <StockDetailPanel
-        ref={detailRef}
-        snap={selectedSnap}
-        allNews={snap.news}
-      />
 
       {/* 뉴스 */}
       <NewsPanel
