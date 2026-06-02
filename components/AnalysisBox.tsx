@@ -3,6 +3,7 @@ import { Card, CardBody } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
+import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 
 // 종목 카드 그리드 위에 가로로 길게 띄우는 컴팩트 분석 바.
@@ -37,6 +38,10 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
                 long={a.longTerm.signal}
                 title={verdict.detail}
               />
+              <OpportunityBadge
+                assessment={a.externalOpportunity}
+                size="md"
+              />
               <RiskBadge assessment={a.externalRisk} size="md" />
               <MarketAlertBadge alert={snap.quote.marketAlert} size="md" />
             </div>
@@ -53,7 +58,7 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
             />
           </div>
 
-          {/* 우: 단기 근거 (최대 3개) + 장기 헤드라인 한 줄 */}
+          {/* 우: 단기 근거 (최대 3개) + 장기 헤드라인 + 호재 driver 한 줄 */}
           <div className="lg:w-72 lg:shrink-0 lg:border-l lg:border-border lg:pl-4 space-y-2">
             <ul className="text-xs text-muted-foreground space-y-0.5">
               {a.shortTerm.reasons.slice(0, 3).map((r) => (
@@ -66,6 +71,17 @@ export function AnalysisBox({ snap }: { snap: StockSnapshot }) {
               <span className="text-foreground/80 font-medium">장기</span>{" "}
               {a.longTerm.headline}
             </p>
+            {a.externalOpportunity &&
+              a.externalOpportunity.level !== "low" &&
+              a.externalOpportunity.drivers.length > 0 && (
+                <p className="text-[11px] leading-snug text-up/90">
+                  <span className="font-medium">호재</span>{" "}
+                  {a.externalOpportunity.drivers
+                    .slice(0, 3)
+                    .map((d) => d.label)
+                    .join(" · ")}
+                </p>
+              )}
           </div>
         </div>
       </CardBody>

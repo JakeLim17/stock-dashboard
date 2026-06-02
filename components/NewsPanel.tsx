@@ -7,6 +7,7 @@ import { fmtRelative } from "@/lib/utils";
 import { ExternalLink } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { RISK_KEYWORDS } from "@/lib/news/keywords";
+import { POSITIVE_KEYWORDS } from "@/lib/news/positiveKeywords";
 
 type FreshFilter = "24h" | "3d" | "7d" | "all";
 type SentimentFilter = "all" | "positive" | "negative";
@@ -21,41 +22,59 @@ const FRESH_MS: Record<FreshFilter, number> = {
   all: Number.POSITIVE_INFINITY,
 };
 
-// 헤드라인 내 리스크 키워드를 빨강 하이라이트.
-// 겹치는 매칭은 가중치(weight) 큰 것을 우선, 안 겹치게 누적.
-function highlightRiskKeywords(title: string): ReactNode {
-  const matches: Array<{ start: number; end: number; weight: number }> = [];
-  for (const kw of RISK_KEYWORDS) {
-    const flags = kw.pattern.flags.includes("g")
-      ? kw.pattern.flags
-      : kw.pattern.flags + "g";
-    const re = new RegExp(kw.pattern.source, flags);
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(title)) !== null) {
-      if (m[0].length === 0) {
-        re.lastIndex++;
-        continue;
+// 헤드라인 내 호재/악재 키워드를 색상 하이라이트.
+//   - 악재(RISK): 빨강 (text-down)
+//   - 호재(POSITIVE): 초록 (text-up)
+// 같은 헤드라인에 둘 다 잡히면 각자 분리 매칭 (위치가 겹치면 weight 큰 쪽 우선).
+function highlightKeywords(title: string): ReactNode {
+  const matches: Array<{
+    start: number;
+    end: number;
+    weight: number;
+    kind: "risk" | "opp";
+  }> = [];
+
+  const collect = (
+    sources: Array<{ pattern: RegExp; weight: number }>,
+    kind: "risk" | "opp"
+  ) => {
+    for (const kw of sources) {
+      const flags = kw.pattern.flags.includes("g")
+        ? kw.pattern.flags
+        : kw.pattern.flags + "g";
+      const re = new RegExp(kw.pattern.source, flags);
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(title)) !== null) {
+        if (m[0].length === 0) {
+          re.lastIndex++;
+          continue;
+        }
+        matches.push({
+          start: m.index,
+          end: m.index + m[0].length,
+          weight: kw.weight,
+          kind,
+        });
       }
-      matches.push({
-        start: m.index,
-        end: m.index + m[0].length,
-        weight: kw.weight,
-      });
     }
-  }
+  };
+  collect(RISK_KEYWORDS, "risk");
+  collect(POSITIVE_KEYWORDS, "opp");
+
   if (matches.length === 0) return title;
 
   // start 오름차순 → 같은 시작이면 weight 큰 것 우선 → 그 다음 end 큰 것
   matches.sort(
-    (a, b) =>
-      a.start - b.start || b.weight - a.weight || b.end - a.end
+    (a, b) => a.start - b.start || b.weight - a.weight || b.end - a.end
   );
 
-  const filtered: Array<{ start: number; end: number }> = [];
+  // 겹치는 매칭은 먼저 채택된 것 유지 (weight 우선이라 자연스럽게 무거운 쪽이 남음).
+  const filtered: Array<{ start: number; end: number; kind: "risk" | "opp" }> =
+    [];
   let lastEnd = 0;
   for (const m of matches) {
     if (m.start < lastEnd) continue;
-    filtered.push(m);
+    filtered.push({ start: m.start, end: m.end, kind: m.kind });
     lastEnd = m.end;
   }
 
@@ -63,11 +82,12 @@ function highlightRiskKeywords(title: string): ReactNode {
   let cursor = 0;
   filtered.forEach((m, idx) => {
     if (cursor < m.start) parts.push(title.slice(cursor, m.start));
+    const cls =
+      m.kind === "risk"
+        ? "bg-down/15 text-down rounded px-0.5 mx-0.5"
+        : "bg-up/15 text-up rounded px-0.5 mx-0.5";
     parts.push(
-      <mark
-        key={`r${idx}-${m.start}`}
-        className="bg-down/15 text-down rounded px-0.5 mx-0.5"
-      >
+      <mark key={`${m.kind}${idx}-${m.start}`} className={cls}>
         {title.slice(m.start, m.end)}
       </mark>
     );
@@ -205,7 +225,7 @@ export function NewsPanel({
                       className="group flex items-start gap-2"
                     >
                       <span className="flex-1 text-sm leading-snug group-hover:underline">
-                        {highlightRiskKeywords(n.title)}
+                        {highlightKeywords(n.title)}
                       </span>
                       <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
                     </a>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   AnalystConsensus,
   AnalystReport,
+  NaverResearchReport,
   StockSnapshot,
 } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
@@ -15,6 +16,8 @@ import {
   ScrollText,
   Building2,
   TableProperties,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 
 // 컨센서스 / 밸류에이션 / 리서치 / 증권사별 표 — 선택된 종목 1개의 펀더멘털 보조 데이터.
@@ -173,6 +176,19 @@ export function ConsensusPanel({
             증권사별 목표주가 (최근 {Math.min(c.reports.length, 12)}건)
           </h4>
           <BrokerReportTable reports={c.reports} currentPrice={price} />
+        </div>
+      )}
+
+      {/* 최근 리서치 (네이버 research) — 제목 + PDF 직링크.
+          wisereport 표(증권사·목표가)와 달리 "오늘 어떤 리포트가 나왔나"를 한눈에 본다.
+          한국 종목에만 채워진다. */}
+      {c?.recentReports && c.recentReports.length > 0 && (
+        <div className="mt-6">
+          <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+            <FileText className="h-3.5 w-3.5" />
+            📑 최근 리서치 (네이버, 최근 {c.recentReports.length}건)
+          </h4>
+          <RecentResearchList reports={c.recentReports} />
         </div>
       )}
     </>
@@ -477,6 +493,84 @@ function BrokerReportTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// 최근 리서치 리포트 리스트.
+//   - 기본 5개, "더 보기"로 최대 10개 노출
+//   - 각 행: [증권사] 제목 (날짜) + PDF 아이콘 (있을 때만 새 탭으로 열림)
+//   - 제목 클릭 = 네이버 리포트 상세 페이지 / PDF 아이콘 클릭 = PDF 직접 다운로드
+function RecentResearchList({ reports }: { reports: NaverResearchReport[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const initial = 5;
+  const maxExpanded = 10;
+  const visible = expanded
+    ? reports.slice(0, maxExpanded)
+    : reports.slice(0, initial);
+  const canExpand = reports.length > initial;
+
+  const dateLabel = (ts: number): string =>
+    new Date(ts).toISOString().slice(2, 10).replace(/-/g, ".");
+
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/10">
+      <ul className="divide-y divide-border/40">
+        {visible.map((r, idx) => (
+          <li
+            key={`${r.reportUrl ?? r.title}-${idx}`}
+            className="px-3 py-2 flex items-start gap-2"
+          >
+            <Badge
+              variant="neutral"
+              size="sm"
+              className="shrink-0 text-[10px] py-0 px-1.5"
+            >
+              {r.brokerName}
+            </Badge>
+            <div className="flex-1 min-w-0">
+              {r.reportUrl ? (
+                <a
+                  href={r.reportUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[13px] leading-snug hover:underline"
+                >
+                  {r.title}
+                </a>
+              ) : (
+                <span className="text-[13px] leading-snug">{r.title}</span>
+              )}
+              <div className="text-[10px] tabular text-muted-foreground mt-0.5">
+                {dateLabel(r.publishDate)}
+              </div>
+            </div>
+            {r.pdfUrl && (
+              <a
+                href={r.pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="PDF 새 탭으로 열기"
+                className="shrink-0 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+      {canExpand && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-[11px] py-1.5 text-muted-foreground hover:text-foreground border-t border-border/40 transition-colors"
+        >
+          {expanded
+            ? "접기 ▴"
+            : `더 보기 (${Math.min(reports.length, maxExpanded) - initial}건) ▾`}
+        </button>
+      )}
     </div>
   );
 }

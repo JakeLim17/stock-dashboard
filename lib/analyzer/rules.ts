@@ -8,6 +8,7 @@ import type {
   MarketAlertLevel,
   MarketIndicator,
   NewsRiskAssessment,
+  OpportunityAssessment,
   Quote,
   SignalDetail,
   SignalStatus,
@@ -26,6 +27,9 @@ export interface AnalyzeInput {
   valuation?: Valuation | null;
   // 외부 이벤트 리스크 (트럼프 주둥이·관세·지정학 등). 없으면 low로 처리.
   externalRisk?: NewsRiskAssessment | null;
+  // 외부 호재 점수 — 수주·실적호조·목표상향 등. verdict shift는 안전장치 부족으로 X.
+  // reasons에 첨부되고 결과에 그대로 노출만 됨.
+  externalOpportunity?: OpportunityAssessment | null;
   // 시장 컨텍스트 (반도체 강세 여부 등 평가용)
   context: {
     semiHeat: number; // 0~100, 반도체 섹터 과열도
@@ -824,6 +828,18 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     .map((h) => `${h.good ? "+ " : "− "}${h.label}`);
   if (longReasons.length === 0) longReasons.push("컨센·밸류 데이터 부족");
 
+  // 외부 호재(opportunity) — 의미 있는 medium/high일 때 단기 reasons에 한 줄 prepend.
+  // verdict shift는 하지 않고 표시만. high면 대표 driver 라벨, medium은 매칭 수 정도.
+  const opportunity = input.externalOpportunity ?? null;
+  if (opportunity && opportunity.level !== "low") {
+    const top = opportunity.drivers[0]?.label;
+    const opLabel =
+      opportunity.level === "high"
+        ? `호재 ↑ (${top ?? `${opportunity.matchCount}건`})`
+        : `호재 주목 (${top ?? `${opportunity.matchCount}건`})`;
+    shortReasons.unshift(`+ ${opLabel}`);
+  }
+
   // 단기 종합 점수 — 매수우위 - 과열 + 50 (0~100 정규화)
   const shortScore = clamp(50 + Math.round((buy - heat) / 2));
 
@@ -864,6 +880,7 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     shortTerm,
     longTerm,
     externalRisk,
+    externalOpportunity: opportunity ?? undefined,
     verdict,
     // 백워드 호환 미러 — headline은 verdict 메시지로 노출
     signal: shortTerm.signal,

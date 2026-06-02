@@ -3,9 +3,11 @@ import { fetchAnalystAndValuation } from "./yahoo";
 import { fetchNaverIntegration } from "./naver";
 import { isKrStock } from "./naver";
 import { fetchWisereportAnalystReports } from "./wisereport";
+import { fetchNaverResearchReports } from "./naverResearch";
 import type {
   AnalystConsensus,
   AnalystReport,
+  NaverResearchReport,
   ResearchNote,
   Valuation,
 } from "../types";
@@ -82,7 +84,10 @@ function mergeBundle(
         domesticLow: number | null;
         domesticCount: number;
       }
-    | null
+    | null,
+  // 네이버 리서치(finance.naver.com/research) 최근 리포트 — 한국 종목 한정.
+  // 제목·증권사·작성일·PDF 직링크. 비어있을 수 있음(외국 종목/실패).
+  naverResearch: NaverResearchReport[]
 ): ConsensusBundle {
   // ── 컨센서스: Yahoo가 있으면 Yahoo를 베이스로 하고 targetMean이 비어있을 때만 네이버 채움.
   let consensus: AnalystConsensus | null = null;
@@ -176,6 +181,12 @@ function mergeBundle(
     }
   }
 
+  // ── 네이버 리서치 최근 리포트 (한국 종목 한정) — consensus 객체에 부착.
+  //    consensus가 아예 없는 종목(외국주 등)은 리서치도 없거나 의미 없어 건너뛴다.
+  if (consensus && naverResearch.length > 0) {
+    consensus = { ...consensus, recentReports: naverResearch };
+  }
+
   // ── 밸류에이션: 네이버가 한국 종목 PER/PBR을 더 잘 줘서 우선. Yahoo는 52주가/배당으로 보강.
   let valuation: Valuation | null = null;
   if (yahoo?.valuation && naver?.valuation) {
@@ -229,16 +240,29 @@ export async function getConsensusBundle(
   const inProgress = flight.get(code);
   if (inProgress) return inProgress;
 
-  // 한국 종목은 Yahoo+Naver+Wisereport 병렬, 해외는 Yahoo만.
+  // 한국 종목은 Yahoo+Naver+Wisereport+NaverResearch 병렬, 해외는 Yahoo만.
   const promise = (async () => {
     const isKr = isKrStock(code);
-    const [yahooResult, naverResult, wiseResult] = await Promise.all([
-      fetchAnalystAndValuation(code).catch(() => null),
-      isKr ? fetchNaverIntegration(code).catch(() => null) : Promise.resolve(null),
-      isKr ? fetchWisereportAnalystReports(code).catch(() => null) : Promise.resolve(null),
-    ]);
+    const [yahooResult, naverResult, wiseResult, researchResult] =
+      await Promise.all([
+        fetchAnalystAndValuation(code).catch(() => null),
+        isKr
+          ? fetchNaverIntegration(code).catch(() => null)
+          : Promise.resolve(null),
+        isKr
+          ? fetchWisereportAnalystReports(code).catch(() => null)
+          : Promise.resolve(null),
+        isKr
+          ? fetchNaverResearchReports(code).catch(() => [])
+          : Promise.resolve([] as NaverResearchReport[]),
+      ]);
 
-    const merged = mergeBundle(yahooResult, naverResult, wiseResult);
+    const merged = mergeBundle(
+      yahooResult,
+      naverResult,
+      wiseResult,
+      researchResult
+    );
     c.set(code, { data: merged, expiresAt: Date.now() + TTL_MS });
     return merged;
   })().finally(() => {

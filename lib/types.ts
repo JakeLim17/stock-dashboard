@@ -226,12 +226,49 @@ export interface NewsRiskAssessment {
   matchCount: number;
 }
 
+// 호재 점수 — Risk와 대칭 구조. 수주·실적·목표상향·신제품 등 긍정 이벤트.
+//
+// verdict shift에는 안전장치 부족으로 영향 주지 않고 (잘못된 매칭/펌프 위험),
+// AnalysisResult.externalOpportunity 로 노출만 한다. UI는 OpportunityBadge·
+// AnalysisBox·NewsPanel에서 활용.
+export type NewsOpportunityLevel = "low" | "medium" | "high";
+
+export interface NewsOpportunityDriver {
+  label: string;
+  category: string;
+  headline: string;
+  date: number;
+  weight: number;
+  contribution: number;
+}
+
+export interface OpportunityAssessment {
+  level: NewsOpportunityLevel;
+  score: number;
+  drivers: NewsOpportunityDriver[];
+  matchCount: number;
+}
+
+// 네이버 finance.naver.com/research 의 종목별 리서치 리포트 목록.
+// wisereport(증권사별 목표가 표)와 다르게 "오늘 발표된 리포트 제목 + PDF 직링크"가 핵심.
+// 사용자는 컨센서스 탭에서 최근 N개 리포트를 한눈에 보고 PDF 새 탭으로 열어보면 된다.
+export interface NaverResearchReport {
+  title: string;
+  brokerName: string;
+  publishDate: number; // epoch ms
+  reportUrl?: string;  // 네이버 리포트 상세 페이지 링크
+  pdfUrl?: string;     // PDF 직접 다운로드 링크 (있을 때만)
+}
+
 export interface AnalysisResult {
   // 새 구조 — 단기/장기 분리
   shortTerm: SignalDetail;
   longTerm: SignalDetail;
   // 외부 이벤트 리스크 (트럼프·관세·지정학·정책 등). low/medium/high.
   externalRisk: NewsRiskAssessment;
+  // 외부 호재 점수 — 수주·실적호조·목표상향·신제품 등.
+  // verdict shift에는 영향 없고 (안전장치 부족), 표시·근거 전용.
+  externalOpportunity?: OpportunityAssessment;
   // 통합 액션 (메인 결론) — 단·장기 조합 매트릭스에서 도출 + 외부 리스크 시프트 적용
   verdict: ActionVerdict;
   // 백워드 호환 — 기존 컴포넌트/DB는 아래 필드를 그대로 읽고 있어 단기 값을 미러링.
@@ -395,6 +432,12 @@ export interface AnalystConsensus {
   globalCount?: number;
   // globalMean 기준 상승여력 — snapshot에서 매번 재계산
   globalUpsidePercent?: number | null;
+
+  // ── 네이버 리서치 리포트 목록 (한국 종목 한정) ─────────────────────
+  // wisereport reports[]는 "증권사별 목표가 표"라 제목·PDF 직링크가 없다.
+  // 별도로 finance.naver.com/research 에서 최근 N건의 리서치 제목·PDF를 끌어와 노출.
+  // 사용자가 컨센서스 탭 하단에서 한 번 보고 PDF를 새 탭으로 열 수 있게 한다.
+  recentReports?: NaverResearchReport[];
 }
 
 export interface Valuation {

@@ -13,6 +13,7 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { analyze, marketMoodLabel, predict } from "./analyzer";
 import { assessNewsRisk } from "./news/riskScore";
+import { assessOpportunity } from "./news/opportunityScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import {
   PRIMARY_SYMBOLS,
@@ -183,6 +184,13 @@ export async function buildSnapshot(
           n.symbol == null
       );
       const externalRisk = assessNewsRisk(relatedNews);
+      // 호재(opportunity)는 종목명 매칭이 엄격해야 펌프 방지 → assessOpportunity 내부에서
+      // 시장 전반 뉴스는 자동 제외한다. (newsAll 통째로 넘겨도 안전.)
+      const externalOpportunity = assessOpportunity(
+        newsAll,
+        meta.code,
+        meta.name
+      );
 
       const analysis = analyze({
         quote,
@@ -191,6 +199,7 @@ export async function buildSnapshot(
         consensus,
         valuation: consensusValuation,
         externalRisk,
+        externalOpportunity,
         context: {
           ...context,
           overseasNightRate: overseasNight?.changeRate ?? null,

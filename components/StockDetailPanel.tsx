@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
+import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
@@ -91,6 +92,7 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
                 long={a.longTerm.signal}
                 title={verdict.detail}
               />
+              <OpportunityBadge assessment={a.externalOpportunity} size="sm" />
               <RiskBadge assessment={a.externalRisk} size="sm" />
               <MarketAlertBadge alert={snap.quote.marketAlert} size="sm" />
             </div>

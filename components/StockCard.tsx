@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
+import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 import {
   changeColor,
@@ -185,6 +186,7 @@ export function StockCard({ snap, onSelect, selected }: {
               long={analysis.longTerm.signal}
               title={analysis.verdict.detail}
             />
+            <OpportunityBadge assessment={analysis.externalOpportunity} />
             <RiskBadge assessment={analysis.externalRisk} />
             <MarketAlertBadge alert={quote.marketAlert} />
           </div>
