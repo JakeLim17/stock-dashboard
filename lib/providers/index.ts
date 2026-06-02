@@ -48,7 +48,7 @@ export async function fetchFlowOrMock(
     const naverFlow = await fetchNaverFlow(code, currentPrice);
     if (naverFlow && (naverFlow.foreignNet != null || naverFlow.institutionNet != null)) {
       return {
-        flow: { ...naverFlow, source: "kis" as const },
+        flow: { ...naverFlow, source: "naver" as const },
         source: "naver",
       };
     }

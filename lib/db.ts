@@ -65,8 +65,10 @@ function init(db: Database.Database) {
       symbol            TEXT    NOT NULL,
       foreign_net       REAL,
       institution_net   REAL,
+      individual_net    REAL,
       foreign_net_5d    REAL,
       institution_net_5d REAL,
+      individual_net_5d REAL,
       PRIMARY KEY (symbol, ts)
     );
 
@@ -106,6 +108,16 @@ function init(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_news_ts ON news(ts DESC);
     CREATE INDEX IF NOT EXISTS idx_news_symbol ON news(symbol);
   `);
+
+  // 기존 DB 호환 — flows 테이블에 individual_net / individual_net_5d 컬럼이 없으면 추가.
+  // SQLite는 ADD COLUMN IF NOT EXISTS가 없으므로 try/catch.
+  for (const col of ["individual_net", "individual_net_5d"]) {
+    try {
+      db.exec(`ALTER TABLE flows ADD COLUMN ${col} REAL`);
+    } catch {
+      /* 이미 존재하면 무시 */
+    }
+  }
 }
 
 export function getDb(): Database.Database {
@@ -141,16 +153,20 @@ export function saveQuote(q: Quote) {
 export function saveFlow(symbol: string, ts: number, f: FlowData) {
   getDb()
     .prepare(
-      `INSERT OR REPLACE INTO flows (ts, symbol, foreign_net, institution_net, foreign_net_5d, institution_net_5d)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO flows
+         (ts, symbol, foreign_net, institution_net, individual_net,
+          foreign_net_5d, institution_net_5d, individual_net_5d)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       ts,
       symbol,
       f.foreignNet,
       f.institutionNet,
+      f.individualNet ?? null,
       f.foreignNet5d ?? null,
-      f.institutionNet5d ?? null
+      f.institutionNet5d ?? null,
+      f.individualNet5d ?? null
     );
 }
 

@@ -158,21 +158,15 @@ export function StockCard({ snap, onSelect, selected }: {
           </div>
         )}
 
-        {/* 핵심 지표 그리드 */}
+        {/* 핵심 지표 그리드 — 거래량/RSI는 2열 유지 */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-border pt-3">
           <Row label="거래량" value={fmtNumber(quote.volume)} />
           <Row label="RSI(14)" value={tech.rsi14 != null ? tech.rsi14.toFixed(0) : "—"} />
-          <Row
-            label="외인 순매수"
-            value={flowLabel(flow.foreignNet)}
-            color={flow.foreignNet != null ? changeColor(flow.foreignNet) : undefined}
-          />
-          <Row
-            label="기관 순매수"
-            value={flowLabel(flow.institutionNet)}
-            color={flow.institutionNet != null ? changeColor(flow.institutionNet) : undefined}
-          />
         </div>
+
+        {/* 수급 — 외인/기관/개인 3열 (당일) + 5일 누적 한 줄. 단위·기간을 라벨에 명시. */}
+        <FlowSection flow={flow} />
+        
 
         {/* 분석 — 메인 결론(verdict)을 위로 크게, 단기/장기 상세는 접힘으로 정리.
             "사라는 건지 말라는 건지" 피드백에 맞춰 1초 안에 행동을 정하도록 통합. */}
@@ -322,11 +316,81 @@ function Row({ label, value, color }: { label: React.ReactNode; value: string; c
   );
 }
 
-function flowLabel(v: number | null): string {
+function flowLabel(v: number | null | undefined): string {
   if (v == null) return "—";
   const eok = v / 1e8;
   const sign = eok > 0 ? "+" : "";
   return `${sign}${eok.toFixed(0)}억`;
+}
+
+// 5일 누적은 거래일 5일치 합이라 단위가 커서 콤마 표기, 부호도 명시.
+function flowLabel5d(v: number | null | undefined): string {
+  if (v == null) return "—";
+  const eok = Math.round(v / 1e8);
+  const sign = eok > 0 ? "+" : "";
+  return `${sign}${eok.toLocaleString("ko-KR")}`;
+}
+
+// 수급 섹션 — 외인/기관/개인을 같은 위계로 보여주고 "당일/5일" 기간을 라벨에 명시.
+//   당일: 색상 칠해진 3열 카드 (양수=상승색, 음수=하락색)
+//   5일 : 작은 글씨 한 줄 secondary 색 — 추세 가늠용
+function FlowSection({ flow }: { flow: import("@/lib/types").FlowData }) {
+  const cells: Array<{
+    label: string;
+    value: number | null | undefined;
+  }> = [
+    { label: "외인", value: flow.foreignNet },
+    { label: "기관", value: flow.institutionNet },
+    { label: "개인", value: flow.individualNet },
+  ];
+  const has5d =
+    flow.foreignNet5d != null ||
+    flow.institutionNet5d != null ||
+    flow.individualNet5d != null;
+
+  return (
+    <div className="border-t border-border pt-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          수급 (당일, 억)
+        </span>
+        {flow.source && (
+          <span className="text-[10px] text-muted-foreground">
+            {flow.source === "naver"
+              ? "네이버"
+              : flow.source === "kis"
+                ? "KIS"
+                : "mock"}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-sm">
+        {cells.map((c) => (
+          <div
+            key={c.label}
+            className="rounded-md bg-muted/40 px-2 py-1.5 text-center"
+          >
+            <div className="text-[10px] text-muted-foreground">{c.label}</div>
+            <div
+              className={`tabular font-semibold ${
+                c.value != null ? changeColor(c.value) : ""
+              }`}
+            >
+              {flowLabel(c.value)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {has5d && (
+        <div className="text-[11px] text-muted-foreground tabular leading-snug">
+          <span className="mr-1">5일:</span>
+          외인 {flowLabel5d(flow.foreignNet5d)} / 기관{" "}
+          {flowLabel5d(flow.institutionNet5d)} / 개인{" "}
+          {flowLabel5d(flow.individualNet5d)} 억
+        </div>
+      )}
+    </div>
+  );
 }
 
 // 단기 / 장기 한 줄 — 배지 + 헤드라인 + 작은 점수 칩.

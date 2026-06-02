@@ -26,24 +26,32 @@ export async function fetchFlow(code: string): Promise<FlowData> {
     return {
       foreignNet: null,
       institutionNet: null,
+      individualNet: null,
       foreignNet5d: null,
       institutionNet5d: null,
+      individualNet5d: null,
       source: undefined,
     };
   }
 
   const sixDigit = toKisCode(code);
   if (!sixDigit) {
-    return { foreignNet: null, institutionNet: null };
+    return {
+      foreignNet: null,
+      institutionNet: null,
+      individualNet: null,
+    };
   }
 
-  // TODO: KIS OAuth 토큰 발급 + 외인/기관 순매수 시세 조회
+  // TODO: KIS OAuth 토큰 발급 + 외인/기관/개인 순매수 시세 조회
   // 엔드포인트 예: /uapi/domestic-stock/v1/quotations/inquire-investor
   // 응답 파싱 후 아래 형식으로 매핑하고 source: "kis"를 채울 것.
   return {
     foreignNet: null,
     institutionNet: null,
+    individualNet: null,
     foreignNet5d: null,
     institutionNet5d: null,
+    individualNet5d: null,
   };
 }

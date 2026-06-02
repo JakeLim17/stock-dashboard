@@ -311,8 +311,10 @@ export function isKrStock(code: string): boolean {
 export interface NaverFlowResult {
   foreignNet: number | null;
   institutionNet: number | null;
+  individualNet: number | null;
   foreignNet5d: number | null;
   institutionNet5d: number | null;
+  individualNet5d: number | null;
 }
 
 interface DealTrendInfo {
@@ -612,24 +614,36 @@ export async function fetchNaverFlow(
     const today = deals[0];
     const foreignShares = parseSignedNumber(today.foreignerPureBuyQuant);
     const organShares = parseSignedNumber(today.organPureBuyQuant);
+    const individualShares = parseSignedNumber(today.individualPureBuyQuant);
 
-    let foreign5dShares = 0;
-    let organ5dShares = 0;
+    // 5일 누적: 각 거래일 종가 × 해당일 수량으로 합산해야 정확.
+    //   기존 구현은 모든 일자에 currentPrice를 곱해 단기 급등 종목에서 ~5-6% 오차가 발생.
+    //   각 일자 closePrice가 없으면 currentPrice로 폴백.
+    let foreign5dKrw = 0;
+    let organ5dKrw = 0;
+    let individual5dKrw = 0;
     const days = Math.min(deals.length, 5);
     for (let i = 0; i < days; i++) {
+      const dayClose = parseSignedNumber(deals[i].closePrice) ?? currentPrice ?? 0;
       const f = parseSignedNumber(deals[i].foreignerPureBuyQuant) ?? 0;
       const o = parseSignedNumber(deals[i].organPureBuyQuant) ?? 0;
-      foreign5dShares += f;
-      organ5dShares += o;
+      const ind = parseSignedNumber(deals[i].individualPureBuyQuant) ?? 0;
+      foreign5dKrw += f * dayClose;
+      organ5dKrw += o * dayClose;
+      individual5dKrw += ind * dayClose;
     }
 
-    const price = currentPrice || 1;
+    // 당일은 가장 최근 영업일 종가로 환산 (currentPrice가 시간외에 흔들려도 안정).
+    //   시간외/장중 0이면 currentPrice로 폴백.
+    const todayClose = parseSignedNumber(today.closePrice) ?? currentPrice ?? 0;
 
     return {
-      foreignNet: foreignShares != null ? foreignShares * price : null,
-      institutionNet: organShares != null ? organShares * price : null,
-      foreignNet5d: foreign5dShares * price,
-      institutionNet5d: organ5dShares * price,
+      foreignNet: foreignShares != null ? foreignShares * todayClose : null,
+      institutionNet: organShares != null ? organShares * todayClose : null,
+      individualNet: individualShares != null ? individualShares * todayClose : null,
+      foreignNet5d: foreign5dKrw,
+      institutionNet5d: organ5dKrw,
+      individualNet5d: individual5dKrw,
     };
   } catch {
     return null;

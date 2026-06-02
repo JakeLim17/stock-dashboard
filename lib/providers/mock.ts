@@ -12,11 +12,18 @@ export function mockFlow(code: string): FlowData {
 
   // 단위: 원. 대략 -500억 ~ +500억 범위
   const scale = 5e10;
+  const foreignNet = Math.round((r1 - 0.5) * scale);
+  const institutionNet = Math.round((r2 - 0.5) * scale);
+  const foreignNet5d = Math.round((r3 - 0.5) * scale * 3);
+  const institutionNet5d = Math.round((r4 - 0.5) * scale * 3);
+  // 실제 시장과 비슷하게 개인은 외인+기관의 반대 흐름으로 근사.
   return {
-    foreignNet: Math.round((r1 - 0.5) * scale),
-    institutionNet: Math.round((r2 - 0.5) * scale),
-    foreignNet5d: Math.round((r3 - 0.5) * scale * 3),
-    institutionNet5d: Math.round((r4 - 0.5) * scale * 3),
+    foreignNet,
+    institutionNet,
+    individualNet: -(foreignNet + institutionNet),
+    foreignNet5d,
+    institutionNet5d,
+    individualNet5d: -(foreignNet5d + institutionNet5d),
     source: "mock",
   };
 }

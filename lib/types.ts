@@ -137,14 +137,17 @@ export interface ValuationMetrics {
 }
 
 export interface FlowData {
-  // 외국인 / 기관 순매수 (원). KIS provider가 채움. 없으면 null.
+  // 외국인 / 기관 / 개인 순매수 (원). Naver dealTrendInfos(일 단위) × 종가로 환산.
+  // 없으면 null. 개인은 외인·기관의 거울(symmetry) 값이라 분석엔 안 쓰지만 UI 노출용으로 보관.
   foreignNet: number | null;
   institutionNet: number | null;
-  // 5일 누적 외인/기관 순매수
+  individualNet?: number | null;
+  // 5일 누적 — 각 거래일 종가 × 해당일 순매수 수량의 합.
   foreignNet5d?: number | null;
   institutionNet5d?: number | null;
+  individualNet5d?: number | null;
   // 데이터 출처 — UI에 mock 표시용
-  source?: "kis" | "mock";
+  source?: "naver" | "kis" | "mock";
 }
 
 export interface TechIndicators {
