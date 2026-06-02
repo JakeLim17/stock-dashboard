@@ -220,17 +220,18 @@ export async function fetchNaverQuote(
       prevClose,
       price
     );
-    const activeExtended =
-      extendedHours?.active === true ? extendedHours : null;
     const livePriceInfo = pollingData?.integratedPriceInfo;
 
+    // quote.price 는 항상 정규장 종가. 시간외 단일가는 quote.extendedHours 에만 노출하고
+    // 메인/부연 위치 스왑은 pickPrimaryQuote 가 책임진다. 여기서 ext.price 로 덮어쓰면
+    // pickPrimaryQuote 의 secondary("정규장 종가") 가 시간외 가격으로 오염된다.
     return {
       code,
       name,
-      price: activeExtended?.price ?? price,
+      price,
       prevClose,
-      changeAbs: activeExtended?.changeAbs ?? absChange,
-      changeRate: activeExtended?.changeRate ?? changeRate,
+      changeAbs: absChange,
+      changeRate,
       volume:
         parseNaverNumber(livePriceInfo?.accumulatedTradingVolume) ??
         parseNaverNumber(infoMap.get("accumulatedTradingVolume")),
@@ -245,7 +246,7 @@ export async function fetchNaverQuote(
       valuation: extractValuation(infoMap),
       fetchedAt: Date.now(),
       marketState,
-      priceTime: activeExtended?.time ?? priceTime,
+      priceTime,
       extendedHours,
     };
   } catch {
