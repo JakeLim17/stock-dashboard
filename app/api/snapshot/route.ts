@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildSnapshot } from "@/lib/snapshot";
+import { invalidateConsensusCache } from "@/lib/providers/consensusCache";
+import { invalidateMarketAlertCache } from "@/lib/providers/marketAlertCache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,6 +16,23 @@ export async function GET(req: Request) {
       .filter(Boolean)
       .slice(0, 8);
     const includeOverseasNight = url.searchParams.get("night") === "1";
+
+    // ?refresh=1 또는 ?refresh=true → 해당 종목들의 컨센서스/시장경보 캐시를 비우고 새로 fetch.
+    // (시세·뉴스는 항상 fresh 호출이라 캐시 무관. 캐시 대상은 consensus + marketAlert 두 in-memory 맵.)
+    // symbols가 비어있으면 전체 캐시를 비운다 (수동 강제 갱신).
+    const refreshParam = url.searchParams.get("refresh");
+    const forceRefresh = refreshParam === "1" || refreshParam === "true";
+    if (forceRefresh) {
+      if (symbols.length > 0) {
+        for (const code of symbols) {
+          invalidateConsensusCache(code);
+          invalidateMarketAlertCache(code);
+        }
+      } else {
+        invalidateConsensusCache();
+        invalidateMarketAlertCache();
+      }
+    }
 
     const snap = await buildSnapshot(symbols, { includeOverseasNight });
     return NextResponse.json(snap, {

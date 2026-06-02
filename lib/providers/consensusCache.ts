@@ -12,9 +12,9 @@ import type {
   Valuation,
 } from "../types";
 
-// 컨센서스/밸류에이션은 하루 1회 갱신이면 충분하다.
-// 매 5~15초 시세 갱신마다 Yahoo + 네이버를 종목당 추가로 때리면 비용·차단 위험이 폭증.
-// → 종목당 6시간 메모리 캐시.
+// 컨센서스/밸류에이션은 시세만큼 자주 갱신될 필요는 없지만,
+// 6h는 너무 길어 장중 신선도(특히 시간외/속보 직후)와 사용자 체감이 어긋난다.
+// → 종목당 30분 메모리 캐시. 강제 갱신은 invalidateConsensusCache로.
 //
 // Vercel은 함수 인스턴스마다 메모리가 분리되므로 cold start 때 다시 채워지지만 그 자체로 OK.
 // (Naver/Yahoo 둘 다 anonymous 호출이라 토큰 비용은 없음.)
@@ -22,7 +22,7 @@ import type {
 // 향후 영구 보관이 필요하면 lib/db.ts에 consensus_cache 테이블을 만들어 같은 인터페이스로
 // 갈아끼우면 된다. 우선 현 단계에서는 메모리 Map만으로 충분.
 
-const TTL_MS = 6 * 60 * 60 * 1000; // 6h
+const TTL_MS = 30 * 60 * 1000; // 30min
 
 export interface ConsensusBundle {
   consensus: AnalystConsensus | null;
@@ -272,8 +272,17 @@ export async function getConsensusBundle(
   return promise;
 }
 
-// 테스트/관리자용 — 현재 캐시 무효화
-export function invalidateConsensusCache(code?: string) {
-  if (code) cache().delete(code);
-  else cache().clear();
+// 강제 갱신용 — 현재 캐시 + in-flight Promise 모두 비움.
+// code 주면 해당 entry만, 안 주면 전체.
+// in-flight도 비워 "비운 직후 새 호출"이 새 fetch를 시작하도록 보장.
+// (남아있는 in-flight는 자기 finally에서 자체 cleanup을 하지만, 그 결과를
+//  next caller가 재사용하지 않도록 inFlight 맵에서 빼두는 것이 force-refresh 의도와 맞다.)
+export function invalidateConsensusCache(code?: string): void {
+  if (code) {
+    cache().delete(code);
+    inFlight().delete(code);
+  } else {
+    cache().clear();
+    inFlight().clear();
+  }
 }

@@ -65,7 +65,9 @@ declare global {
     | undefined;
 }
 
-const TTL_MS = 60 * 60 * 1000; // 1h
+// 시세·뉴스 신선도와 보조를 맞추기 위해 1h → 30min.
+// 첫 빌드는 30~50초 무거우니 더 짧추면 비용이 폭증 — 30min이 균형.
+const TTL_MS = 30 * 60 * 1000; // 30min
 
 export function getCachedRecommendations(): RecommendationsResponse | null {
   const hit = global.__recommendationsCache;

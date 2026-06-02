@@ -32,7 +32,7 @@ async function logout() {
   window.location.replace("/login");
 }
 
-const REGULAR_REFRESH_MS = 10_000; // 정규장 OPEN: 10초
+const REGULAR_REFRESH_MS = 5_000; // 정규장 OPEN: 5초 (네이버 시세 권장 폴링 내 안전 범위)
 const EXTENDED_REFRESH_MS = 15_000; // 시간외/프리/애프터 OPEN: 15초 (네이버 polling 권장 7초의 여유분)
 const OVERSEAS_NIGHT_REFRESH_MS = 30_000; // 해외 GDR 장중: 소스 지연을 고려해 30초 조회
 const OFF_HOURS_REFRESH_MS = 120_000; // 모두 마감: 120초
@@ -115,40 +115,52 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const refreshMs = resolveRefreshMs(snap);
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
-  const refresh = useCallback(async (codes?: string[], nightMode?: boolean) => {
-    const target = codes ?? watchCodesRef.current;
-    const query = encodeURIComponent(target.join(","));
-    const includeNight = nightMode ?? overseasNightRef.current;
-    const requestKey = `${query}:${includeNight ? "night" : "regular"}`;
-    lastQueryRef.current = requestKey;
+  // force=true 면 서버 in-memory 캐시(컨센서스/시장경보)도 비우고 새로 fetch — 사용자 새로고침 버튼 전용.
+  // 자동 폴링은 force=false (기본) — 30분 TTL이라 자연 만료로도 충분히 신선하고,
+  // 매 폴링마다 force=true면 Yahoo/Naver 호출량이 폭증한다.
+  const refresh = useCallback(
+    async (codes?: string[], nightMode?: boolean, force = false) => {
+      const target = codes ?? watchCodesRef.current;
+      const query = encodeURIComponent(target.join(","));
+      const includeNight = nightMode ?? overseasNightRef.current;
+      const requestKey = `${query}:${includeNight ? "night" : "regular"}:${
+        force ? "force" : "soft"
+      }`;
+      lastQueryRef.current = requestKey;
 
-    // 진행 중인 요청이 있으면 취소하고 새 요청만 살림
-    if (abortRef.current) abortRef.current.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
 
-    setRefreshing(true);
-    setError(null);
-    try {
-      const r = await fetch(`/api/snapshot?symbols=${query}${includeNight ? "&night=1" : ""}`, {
-        cache: "no-store",
-        signal: ctrl.signal,
-      });
-      if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
-      const j = (await r.json()) as DashboardSnapshot;
-      if (lastQueryRef.current === requestKey) {
-        setSnap(j);
+      setRefreshing(true);
+      setError(null);
+      try {
+        const r = await fetch(
+          `/api/snapshot?symbols=${query}${includeNight ? "&night=1" : ""}${
+            force ? "&refresh=1" : ""
+          }`,
+          {
+            cache: "no-store",
+            signal: ctrl.signal,
+          }
+        );
+        if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
+        const j = (await r.json()) as DashboardSnapshot;
+        if (lastQueryRef.current === requestKey) {
+          setSnap(j);
+        }
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (abortRef.current === ctrl) {
+          abortRef.current = null;
+          setRefreshing(false);
+        }
       }
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (abortRef.current === ctrl) {
-        abortRef.current = null;
-        setRefreshing(false);
-      }
-    }
-  }, []);
+    },
+    []
+  );
 
   const toggleOverseasNight = useCallback(() => {
     const next = !overseasNightRef.current;
@@ -326,10 +338,11 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           <button
             type="button"
             onClick={() => {
-              void refresh();
+              // 사용자가 직접 누른 새로고침 → 서버 캐시(컨센서스/시장경보)도 비우고 새 fetch.
+              void refresh(undefined, undefined, true);
             }}
             disabled={refreshing}
-            title="새로고침"
+            title="새로고침 (캐시 비우고 새로 조회)"
             aria-label="새로고침"
             className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
           >
