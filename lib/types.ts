@@ -269,6 +269,14 @@ export interface ScenarioRow {
   expected: number; // 예상 변화율 (0.008 = +0.8%)
   beta: number; // 회귀 계수
   baselineLabel: string; // "NQ=F 60일 베타"
+  // 회귀 적합도(R²) — 시장 지수가 종목 수익률을 얼마나 설명하는지. 0~1.
+  // 옛 스냅샷 호환 위해 optional. 신규 응답엔 항상 채움.
+  r2?: number;
+  // R² 기반 신뢰도 등급 — UI에서 배지/회색 처리 분기에 사용.
+  //   high   : R² ≥ 0.6
+  //   medium : 0.3 ≤ R² < 0.6
+  //   low    : R² < 0.3 → 시나리오 자체 신뢰도 낮음 (회색/주석)
+  confidence?: "high" | "medium" | "low";
 }
 
 export interface Predictions {

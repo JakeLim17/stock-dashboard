@@ -49,10 +49,26 @@ function covariance(xs: number[], ys: number[]): number {
 }
 
 // 단순 회귀의 베타 = Cov(stock, market) / Var(market)
-function regressionBeta(stockReturns: number[], marketReturns: number[]): number {
-  const v = stddev(marketReturns) ** 2;
-  if (v === 0) return 0;
-  return covariance(stockReturns, marketReturns) / v;
+// R² = corr(stock, market)² — 회귀 적합도(설명력). 0.6 이상이면 시장 방향이 종목 수익률을
+// 잘 설명한다고 본다. 낮으면 시나리오 자체의 신뢰도가 낮아 UI에서 회색/숨김 처리.
+function regressionStats(
+  stockReturns: number[],
+  marketReturns: number[]
+): { beta: number; r2: number } {
+  const sM = stddev(marketReturns);
+  const sS = stddev(stockReturns);
+  if (sM === 0 || sS === 0) return { beta: 0, r2: 0 };
+  const cov = covariance(stockReturns, marketReturns);
+  const beta = cov / (sM * sM);
+  const corr = cov / (sM * sS);
+  const r2 = clamp(corr * corr, 0, 1);
+  return { beta, r2 };
+}
+
+function confidenceFromR2(r2: number): "high" | "medium" | "low" {
+  if (r2 >= 0.6) return "high";
+  if (r2 >= 0.3) return "medium";
+  return "low";
 }
 
 // ─── 일자별 inner join 회귀 베타 ───────────────────────────
@@ -252,14 +268,21 @@ export function predict(input: PredictorInput): Predictions {
     }
   }
 
-  // B. 진입 / 손절 / 목표 (ATR 기반)
-  //    - 진입: 현재가
-  //    - 손절: max(최근 20일 저점, 현재가 - 2·ATR)
-  //    - 목표1: 현재가 + 2·ATR
-  //    - 목표2: min(최근 20일 고점, 현재가 + 4·ATR)
-  //    신고가 갱신 종목은 resistance가 entry보다 낮을 수 있어 TP2 < entry 케이스가
-  //    발생할 수 있다. 이 경우 TP2를 entry × 1.02 또는 takeProfit1로 floor 처리.
-  //    또한 stopLoss > entry(손절선이 진입가 위)는 역방향 추세 신호이므로 entry로 클램프.
+  // B. 진입 / 손절 / 목표 (ATR 기반, 비대칭 multiplier)
+  //    multiplier 비대칭화 — RR이 항상 ≈1로 고정되던 문제 해결.
+  //      SL  = 1.5·ATR   (손절 폭 좁게)
+  //      TP1 = 2.0·ATR   (1차 목표)
+  //      TP2 = 3.5·ATR   (2차 목표)
+  //    → RR1 ≈ 1.33, RR2 ≈ 2.33 으로 자연 차별화. 종목 변동성에 따라 절대 폭은 달라진다.
+  //
+  //    가드:
+  //      - 손절: max(최근 20일 저점, 현재가 - 1.5·ATR), 다만 entry 이상이면 entry - 1.5·ATR로 강제(역추세 방어).
+  //      - TP1 ≤ entry 가드 (이론상 ATR>0 이면 발생 불가하나 방어적).
+  //      - TP2: min(저항, price + 3.5·ATR) 후 TP1보다 작거나 같으면 max(TP1 × 1.02, entry × 1.02)로 floor.
+  //        (resistance가 entry 근처거나 TP1 미만일 때 TP2 < TP1 발생하던 SK하이닉스 케이스 방지.)
+  const SL_ATR_MULT = 1.5;
+  const TP1_ATR_MULT = 2.0;
+  const TP2_ATR_MULT = 3.5;
   let targets: PriceTargets | null = null;
   if (history.length >= 20 && price > 0) {
     const recent20 = history.slice(-20);
@@ -268,19 +291,15 @@ export function predict(input: PredictorInput): Predictions {
     const atr = averageTrueRange(history, 14);
     if (atr > 0) {
       const entry = price;
-      // stopLoss > entry 가드 — 손절은 항상 진입가 미만이어야 함
-      const rawStop = Math.max(support, price - 2 * atr);
-      const stopLoss = rawStop >= entry ? entry - 2 * atr : rawStop;
+      const rawStop = Math.max(support, price - SL_ATR_MULT * atr);
+      const stopLoss = rawStop >= entry ? entry - SL_ATR_MULT * atr : rawStop;
 
-      const takeProfit1 = price + 2 * atr;
-      // TP2 floor — 신고가 갱신 종목에서 resistance가 entry 미만일 때 보정.
-      //   1) min(resistance, price + 4·ATR) 계산
-      //   2) entry 미만이면 max(takeProfit1, entry × 1.02)로 floor
-      const rawTP2 = Math.min(resistance, price + 4 * atr);
-      const takeProfit2 =
-        rawTP2 >= entry
-          ? rawTP2
-          : Math.max(takeProfit1, entry * 1.02);
+      const rawTP1 = price + TP1_ATR_MULT * atr;
+      const takeProfit1 = rawTP1 > entry ? rawTP1 : entry * 1.01;
+
+      const rawTP2 = Math.min(resistance, price + TP2_ATR_MULT * atr);
+      const tp2Floor = Math.max(takeProfit1 * 1.02, entry * 1.02);
+      const takeProfit2 = rawTP2 > takeProfit1 ? rawTP2 : tp2Floor;
 
       // Risk-Reward — entry === stopLoss 면 분모 0이라 null로 노출.
       // 산식: (TP1 - entry) / (entry - SL).
@@ -313,19 +332,24 @@ export function predict(input: PredictorInput): Predictions {
       sRet.length >= MIN_SCENARIO_SAMPLES &&
       nqRet.length === sRet.length
     ) {
-      const beta = regressionBeta(sRet, nqRet);
+      const { beta, r2 } = regressionStats(sRet, nqRet);
       if (Math.abs(beta) > 0.05) {
+        const confidence = confidenceFromR2(r2);
         scenarios.push({
           label: "나스닥 +1% 시",
           expected: beta * 0.01,
           beta,
           baselineLabel: "NQ=F 60일",
+          r2,
+          confidence,
         });
         scenarios.push({
           label: "나스닥 -1% 시",
           expected: -beta * 0.01,
           beta,
           baselineLabel: "NQ=F 60일",
+          r2,
+          confidence,
         });
       }
     }
@@ -339,13 +363,15 @@ export function predict(input: PredictorInput): Predictions {
       sRet.length >= MIN_SCENARIO_SAMPLES &&
       fxRet.length === sRet.length
     ) {
-      const beta = regressionBeta(sRet, fxRet);
+      const { beta, r2 } = regressionStats(sRet, fxRet);
       if (Math.abs(beta) > 0.1) {
         scenarios.push({
           label: "환율 +1% (원화 약세) 시",
           expected: beta * 0.01,
           beta,
           baselineLabel: "KRW=X 60일",
+          r2,
+          confidence: confidenceFromR2(r2),
         });
       }
     }

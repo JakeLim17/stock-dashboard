@@ -252,22 +252,59 @@ export function PredictionPanel({
                 icon={<TrendingUp className="h-3.5 w-3.5" />}
               >
                 <ul className="space-y-1.5 text-sm">
-                  {p.scenarios.map((s, i) => (
-                    <li
-                      key={`${s.label}-${i}`}
-                      className="flex items-center justify-between"
-                    >
-                      <span className="text-muted-foreground">{s.label}</span>
-                      <span
-                        className={`tabular font-medium ${changeColor(s.expected)}`}
+                  {p.scenarios.map((s, i) => {
+                    const conf = s.confidence;
+                    const isLow = conf === "low";
+                    const confLabel =
+                      conf === "high"
+                        ? "높음"
+                        : conf === "medium"
+                          ? "보통"
+                          : conf === "low"
+                            ? "낮음"
+                            : null;
+                    const confTone =
+                      conf === "high"
+                        ? "text-up"
+                        : conf === "medium"
+                          ? "text-muted-foreground"
+                          : "text-down";
+                    return (
+                      <li
+                        key={`${s.label}-${i}`}
+                        className={`flex items-center justify-between ${
+                          isLow ? "opacity-60" : ""
+                        }`}
+                        title={
+                          s.r2 != null
+                            ? `회귀 적합도 R²=${s.r2.toFixed(2)} (시장이 종목을 ${(s.r2 * 100).toFixed(0)}% 설명)`
+                            : undefined
+                        }
                       >
-                        {fmtPercent(s.expected)}
-                        <span className="text-[11px] text-muted-foreground ml-1.5 tabular">
-                          β {s.beta.toFixed(2)}
+                        <span className="text-muted-foreground">{s.label}</span>
+                        <span
+                          className={`tabular font-medium ${changeColor(s.expected)}`}
+                        >
+                          {fmtPercent(s.expected)}
+                          <span className="text-[11px] text-muted-foreground ml-1.5 tabular">
+                            β {s.beta.toFixed(2)}
+                          </span>
+                          {confLabel && (
+                            <span
+                              className={`text-[10px] ml-1.5 px-1.5 py-0.5 rounded border border-border ${confTone}`}
+                            >
+                              신뢰 {confLabel}
+                              {s.r2 != null && (
+                                <span className="ml-1 tabular">
+                                  R² {s.r2.toFixed(2)}
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </span>
-                      </span>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               </Section>
             )}
