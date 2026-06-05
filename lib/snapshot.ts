@@ -63,6 +63,8 @@ export async function buildSnapshot(
       changeRate: q.changeRate,
       status: indicatorStatus(meta.code, q.changeRate, q.price),
       hint: indicatorHint(meta.code, q.changeRate),
+      priceTime: q.priceTime ?? null,
+      marketState: q.marketState,
     });
   }
 

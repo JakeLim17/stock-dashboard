@@ -102,6 +102,34 @@ export function priceTimeLabel(priceTime?: number | null): string {
   return `${d.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} ${d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+// 가격 데이터 신선도 — 표시용 라벨 + stale 플래그.
+//   stale 기준: 5분 이상 갱신이 없으면 매매 판단에 영향이 큼.
+//   야후 미국 종목은 정규장 마감 + 시간외 데이터 없는 시점부터 stale로 보임.
+//   지수(^IXIC/^SOX/^VIX)는 정규장 마감 후엔 데이터 한계로 stale 불가피 → 라벨로 사용자에게 명시.
+export function priceFreshness(epochMs?: number | null): {
+  label: string;
+  stale: boolean;
+  ageMinutes: number;
+} | null {
+  if (!epochMs) return null;
+  const diffMs = Date.now() - epochMs;
+  if (diffMs < 0) return { label: "방금", stale: false, ageMinutes: 0 };
+  const min = Math.floor(diffMs / 60000);
+  let label: string;
+  if (min < 1) label = "방금";
+  else if (min < 60) label = `${min}분 전`;
+  else {
+    const hr = Math.floor(min / 60);
+    const remMin = min % 60;
+    label = remMin > 0 ? `${hr}시간 ${remMin}분 전` : `${hr}시간 전`;
+  }
+  return {
+    label,
+    stale: min >= 5,
+    ageMinutes: min,
+  };
+}
+
 // 시간외/프리/애프터마켓 세션 라벨
 export function extendedSessionLabel(session: string): string {
   switch (session) {

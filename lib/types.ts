@@ -488,6 +488,12 @@ export interface MarketIndicator {
   changeRate: number;
   status: "up" | "down" | "flat" | "warn";
   hint?: string;
+  // 야후 마지막 갱신 시각(epoch ms). 시장 마감 후엔 종가 시각에 박혀 있어
+  // UI에서 stale 라벨(N분 전) 표시에 사용 — 매매 판단에 직접 영향.
+  priceTime?: number | null;
+  // 시장 상태(REGULAR/POSTPOST/CLOSED 등). stale 라벨 톤 결정과
+  // "정규장 종가" 같은 안내 문구에 사용.
+  marketState?: string;
 }
 
 export interface DashboardSnapshot {

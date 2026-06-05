@@ -15,6 +15,7 @@ import {
   fmtTime,
   marketDisplayLabel,
   pickPrimaryQuote,
+  priceFreshness,
   priceTimeLabel,
 } from "@/lib/utils";
 import { TrendingDown, TrendingUp, Minus } from "lucide-react";
@@ -89,7 +90,7 @@ export function StockCard({ snap, onSelect, selected }: {
               {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
             </div>
             {primary.isExtended && primary.isLive ? (
-              <div className="text-[11px] mt-1 tabular flex items-center gap-1.5">
+              <div className="text-[11px] mt-1 tabular flex items-center gap-1.5 flex-wrap">
                 <span
                   className="inline-block h-1.5 w-1.5 rounded-full bg-up animate-pulse"
                   aria-hidden
@@ -99,12 +100,38 @@ export function StockCard({ snap, onSelect, selected }: {
                   · {primary.sessionLabel}
                   {primary.time ? ` · ${fmtTime(primary.time)}` : ""}
                 </span>
+                {(() => {
+                  const f = priceFreshness(primary.time);
+                  if (!f) return null;
+                  return (
+                    <span className={f.stale ? "text-warn" : "text-muted-foreground"}>
+                      · {f.label}
+                    </span>
+                  );
+                })()}
               </div>
             ) : primary.time ? (
-              <div className="text-[11px] text-muted-foreground mt-1 tabular">
-                {primary.isLive ? "기준 " : `${primary.sessionLabel} · `}
-                {priceTimeLabel(primary.time)}
-              </div>
+              (() => {
+                const f = priceFreshness(primary.time);
+                const isStale = !!f?.stale;
+                return (
+                  <div
+                    className={`text-[11px] mt-1 tabular flex items-center gap-1.5 flex-wrap ${
+                      isStale ? "text-warn" : "text-muted-foreground"
+                    }`}
+                  >
+                    <span>
+                      {primary.isLive ? "기준 " : `${primary.sessionLabel} · `}
+                      {priceTimeLabel(primary.time)}
+                    </span>
+                    {f && (
+                      <span className={isStale ? "" : "text-muted-foreground"}>
+                        · {f.label}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()
             ) : null}
           </div>
           <div className="text-right text-xs text-muted-foreground space-y-1">

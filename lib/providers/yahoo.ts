@@ -41,7 +41,7 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
   const priceTime = toEpochMs(q.regularMarketTime);
 
   const marketState = str(q.marketState);
-  const extendedHours = extractExtended(q, marketState, price);
+  const extendedHours = extractExtended(q, marketState, price, priceTime);
 
   return {
     code,
@@ -70,10 +70,19 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
 
 // Yahoo 응답에서 프리/애프터마켓 가격을 ExtendedHoursQuote로 정규화.
 // 기준값은 항상 정규장 종가(regularMarketPrice). Yahoo가 주는 changePercent는 % 단위.
+//
+// 신선도 기반 active 판정:
+//   Yahoo가 marketState를 PRE/POST → PREPRE/POSTPOST로 옮긴 뒤에도
+//   preMarketPrice/postMarketPrice의 timestamp가 regularMarketTime보다 신선한 경우가 잦다
+//   (한국 시각 새벽~오전, 미국 애프터마켓 진행 중일 때 흔함).
+//   상태 라벨만 보고 active=false로 두면 정규장 종가(수 시간 전)가 카드 메인 가격으로
+//   잡혀 사용자가 stale한 가격으로 매매를 판단하게 된다.
+//   → state가 PRE/POST가 아니더라도, 시간외 timestamp가 정규장보다 신선하면 active=true.
 function extractExtended(
   q: RawRecord,
   marketState: string | undefined,
-  regularPrice: number
+  regularPrice: number,
+  regularTime: number | null
 ): ExtendedHoursQuote | null {
   const state = (marketState ?? "").toUpperCase();
 
@@ -83,13 +92,16 @@ function extractExtended(
     const abs = num(q.preMarketChange) ?? price - regularPrice;
     const ratePct = num(q.preMarketChangePercent);
     const rate = ratePct != null ? ratePct / 100 : regularPrice ? abs / regularPrice : 0;
+    const time = toEpochMs(q.preMarketTime);
+    const fresher = time != null && regularTime != null ? time > regularTime : false;
     return {
       session: "pre",
       price,
       changeAbs: abs,
       changeRate: rate,
-      time: toEpochMs(q.preMarketTime),
-      active: state === "PRE",
+      time,
+      active: state === "PRE" || fresher,
+      regularClose: regularPrice,
     };
   }
 
@@ -99,13 +111,16 @@ function extractExtended(
     const abs = num(q.postMarketChange) ?? price - regularPrice;
     const ratePct = num(q.postMarketChangePercent);
     const rate = ratePct != null ? ratePct / 100 : regularPrice ? abs / regularPrice : 0;
+    const time = toEpochMs(q.postMarketTime);
+    const fresher = time != null && regularTime != null ? time > regularTime : false;
     return {
       session: "post",
       price,
       changeAbs: abs,
       changeRate: rate,
-      time: toEpochMs(q.postMarketTime),
-      active: state === "POST",
+      time,
+      active: state === "POST" || fresher,
+      regularClose: regularPrice,
     };
   }
 
