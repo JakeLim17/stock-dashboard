@@ -20,6 +20,23 @@ import {
   Hourglass,
 } from "lucide-react";
 import { changeColor, fmtPercent, fmtRelative } from "@/lib/utils";
+import { SectorLeaderBadge } from "./SectorLeaderBadge";
+import { WATCHLIST_CANDIDATES, MARKET_INDICATORS } from "@/lib/symbols";
+
+// 분야 대장주 메타 조회용 맵 — code → leader meta. RecommendationsPanel 카드에서 배지 렌더링에 사용.
+// Recommendation 객체에 leader 정보가 없어 client-side에서 lookup.
+const LEADER_META_BY_CODE = new Map<
+  string,
+  { isSectorLeader: true; sectorLeaderLabel?: string }
+>();
+for (const m of [...WATCHLIST_CANDIDATES, ...MARKET_INDICATORS]) {
+  if (m.isSectorLeader) {
+    LEADER_META_BY_CODE.set(m.code, {
+      isSectorLeader: true,
+      sectorLeaderLabel: m.sectorLeaderLabel,
+    });
+  }
+}
 
 interface Props {
   // 부모에서 관리하는 watchlist (관심종목 추가 시 중복 차단·이미 있음 표시에 사용)
@@ -431,6 +448,11 @@ function RecommendationCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-semibold truncate">{rec.name}</span>
+            {/* 분야 대장주 배지 — 작은 카드라 xs 사이즈 */}
+            <SectorLeaderBadge
+              meta={LEADER_META_BY_CODE.get(rec.code)}
+              size="xs"
+            />
             <Badge variant={rec.verdict.tone} size="sm">
               {rec.verdict.label}
             </Badge>

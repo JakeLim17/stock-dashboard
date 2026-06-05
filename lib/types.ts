@@ -36,6 +36,13 @@ export interface SymbolMeta {
   // 섹터 태그 — 추천/스크리닝에서 필터·보너스 계산에 사용.
   // PRIMARY_SYMBOLS·MARKET_INDICATORS·해외 프록시처럼 분류가 불필요한 항목은 비워둔다.
   sector?: SectorTag;
+  // ─── 분야 "대장주" 마크 (재미 요소) ─────────────────────────────────────
+  // 시총·시장 영향력 기준 분야 1위 종목에만 true. 너무 많이 붙으면 의미가 퇴색하므로
+  // 분야 내 명백한 절대 1위에만 마킹한다 (2·3위는 마킹 X).
+  isSectorLeader?: boolean;
+  // 배지에 표시되는 한국어 짧은 라벨. 예: "반도체 대장", "MLCC 대장", "AI 반도체 대장".
+  // isSectorLeader가 true일 때만 의미가 있다.
+  sectorLeaderLabel?: string;
 }
 
 export interface OverseasNightIndicator {

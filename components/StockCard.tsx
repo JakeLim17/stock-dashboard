@@ -8,6 +8,7 @@ import { RiskBadge } from "./RiskBadge";
 import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 import { VolatilityBadge } from "./VolatilityBadge";
+import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import {
   changeColor,
   fmtNumber,
@@ -66,7 +67,11 @@ export function StockCard({ snap, onSelect, selected }: {
     >
       <CardHeader className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="text-base font-semibold">{meta.name}</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="text-base font-semibold">{meta.name}</div>
+            {/* 분야 대장주 배지 (재미 요소) — 종목명 옆 amber 톤 👑 */}
+            <SectorLeaderBadge meta={meta} size="sm" />
+          </div>
           <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span>{meta.code}</span>
             <Badge variant={market.variant}>{market.label}</Badge>
