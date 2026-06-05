@@ -20,6 +20,7 @@ import { PriceChart } from "./PriceChart";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
+import { EventCalendar } from "./EventCalendar";
 import { fmtRelative } from "@/lib/utils";
 import { LogOut, MoonStar, RefreshCw, Search, Plus, X } from "lucide-react";
 
@@ -545,6 +546,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </div>
         <div className="space-y-4">
           <MarketPanel indicators={snap.indicators} />
+          {/* 이벤트 캘린더 — 실적·배당·FOMC·KOSPI 만기·휴장 D-N. 마켓 패널 아래 같은 우측 컬럼. */}
+          <EventCalendar snapshot={snap} />
         </div>
       </div>
 

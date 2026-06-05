@@ -13,6 +13,10 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import {
+  fetchEventsForSymbol,
+  getMacroEventsCached,
+} from "./providers/eventCalendar";
+import {
   analyze,
   marketMoodLabel,
   predict,
@@ -129,7 +133,7 @@ export async function buildSnapshot(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, bundle, marketAlert] = await Promise.all([
+      const [quoteRes, hist, bundle, marketAlert, upcomingEvents] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
         // 컨센서스/밸류에이션은 종목당 6시간 캐시. miss일 때만 Yahoo+Naver 호출.
@@ -143,6 +147,8 @@ export async function buildSnapshot(
         isKrStock(meta.code)
           ? getMarketAlertCached(meta.code).catch(() => null)
           : Promise.resolve(null),
+        // 다가올 가격 이벤트(실적/배당) — 24h 캐시. 한국 종목은 야후가 종종 비워두지만 안전 실패.
+        fetchEventsForSymbol(meta).catch(() => []),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
@@ -287,6 +293,7 @@ export async function buildSnapshot(
         consensusValuation,
         researches,
         signalMarks,
+        upcomingEvents,
       };
     })
   );
@@ -308,6 +315,11 @@ export async function buildSnapshot(
     riskKeywords: riskKeywords(newsAll),
   };
 
+  // 매크로 이벤트 (FOMC·KOSPI 만기·KRX 휴장) — 24h 메모리 캐시. 종목과 무관하게 한 번만.
+  const macroEvents = getMacroEventsCached().filter(
+    (e) => e.date >= Date.now() - 86_400_000 && e.date <= Date.now() + 60 * 86_400_000
+  );
+
   return {
     generatedAt: Date.now(),
     primaries,
@@ -315,6 +327,7 @@ export async function buildSnapshot(
     marketMood,
     news: newsAll,
     errors,
+    macroEvents,
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { StockSnapshot } from "@/lib/types";
+import type { EventItem, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { SignalDetailBadges } from "./SignalDetailBadges";
@@ -10,6 +10,7 @@ import { MarketAlertBadge } from "./MarketAlertBadge";
 import { VolatilityBadge } from "./VolatilityBadge";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
+import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
   fmtNumber,
@@ -80,6 +81,8 @@ export function StockCard({ snap, onSelect, selected }: {
             <MarketAlertBadge alert={quote.marketAlert} />
             {/* 시그널 마크 — 신고가/거래량폭발/외인픽 등 한눈에 보이는 신호. 자리가 좁으면 wrap. */}
             <SignalMarkBadges marks={snap.signalMarks} size="sm" />
+            {/* 7일 이내 가격 이벤트(실적/배당) D-N — 임박 알림용. 7일 초과는 EventCalendar에서만. */}
+            <UpcomingEventBadges events={snap.upcomingEvents} />
           </div>
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}
@@ -532,6 +535,39 @@ function SignalRow({
         </div>
       )}
     </div>
+  );
+}
+
+// 카드 헤더용 — 다가올 가격 이벤트(실적/배당) 중 7일 이내인 것만 D-N 배지로.
+// EventItem.kind 가 종목 관련(earnings/dividend)이라는 전제. 매크로는 EventCalendar 에서만.
+function UpcomingEventBadges({ events }: { events: EventItem[] | undefined }) {
+  if (!events || events.length === 0) return null;
+  const now = Date.now();
+  const cutoff = now + 7 * 86_400_000;
+  const within = events
+    .filter((e) => e.kind === "earnings" || e.kind === "dividend")
+    .filter((e) => e.date >= now - 86_400_000 && e.date <= cutoff)
+    .slice(0, 2);
+  if (within.length === 0) return null;
+  return (
+    <>
+      {within.map((e) => {
+        const dn = Math.round((e.date - now) / 86_400_000);
+        const isUrgent = dn <= 1;
+        const emoji = e.kind === "earnings" ? "📊" : "💰";
+        const kindShort = e.kind === "earnings" ? "실적" : "배당";
+        return (
+          <Badge
+            key={`${e.kind}-${e.date}`}
+            variant={isUrgent ? "warn" : "neutral"}
+            size="sm"
+            title={e.label + (e.detail ? ` · ${e.detail}` : "")}
+          >
+            {emoji} {kindShort} {dnLabel(dn)}
+          </Badge>
+        );
+      })}
+    </>
   );
 }
 

@@ -558,6 +558,38 @@ export interface StockSnapshot {
   // evaluateSignalMarks(quote, history, flow)로 매번 재계산되며, 데이터 부족 시
   // 빈 배열 또는 undefined.
   signalMarks?: SignalMark[];
+  // 이 종목과 관련된 다가올 가격 이벤트 (실적·배당). 다음 60일 이내, 날짜 오름차순.
+  // 매크로 이벤트(FOMC/KOSPI 만기/휴장)는 DashboardSnapshot.macroEvents에만 노출한다.
+  upcomingEvents?: EventItem[];
+}
+
+// ─── 이벤트 캘린더 ───────────────────────────────────────────────────────────
+// 실적 발표·배당 기준일·FOMC·KOSPI 옵션 만기·휴장 등 "가격 이벤트"를
+// 카드/대시보드에 D-N 형태로 노출한다.
+//
+// 데이터 소스:
+//   earnings/dividend  : 야후 calendarEvents (미국·일부 한국 종목)
+//   fomc              : 2026 hardcoded 일정 (Federal Reserve 공식)
+//   kospi_expiry      : 매월 두 번째 목요일 (계산)
+//   holiday           : KRX 휴장일 hardcoded
+export type EventKind =
+  | "earnings"
+  | "dividend"
+  | "fomc"
+  | "kospi_expiry"
+  | "holiday";
+
+export interface EventItem {
+  kind: EventKind;
+  // 종목별 이벤트면 코드. 매크로면 undefined.
+  symbolCode?: string;
+  // 카드/리스트에 노출되는 한국어 짧은 라벨 (예: "삼성전자 실적 발표")
+  label: string;
+  // KST 자정 epoch ms
+  date: number;
+  importance: "high" | "medium" | "low";
+  // 호버/툴팁용 부연
+  detail?: string;
 }
 
 export interface MarketIndicator {
@@ -586,6 +618,10 @@ export interface DashboardSnapshot {
   };
   news: NewsItem[];
   errors: Record<string, string>; // provider 별 에러 메시지
+  // 매크로 이벤트 (FOMC, KOSPI 옵션 만기, KRX 휴장일).
+  // 종목별 이벤트(실적/배당)는 StockSnapshot.upcomingEvents 에 있다.
+  // EventCalendar UI가 둘을 합쳐서 한 리스트로 노출.
+  macroEvents?: EventItem[];
 }
 
 // ----------------------------------------------------------------------------

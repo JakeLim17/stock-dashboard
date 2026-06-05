@@ -1,0 +1,315 @@
+import "server-only";
+import YahooFinance from "yahoo-finance2";
+import type { EventItem, SymbolMeta } from "../types";
+import { isKrStock } from "./naver";
+
+// 이벤트 캘린더 — 실적·배당·FOMC·KOSPI 옵션 만기·KRX 휴장일을 통합해 EventItem[] 으로 반환.
+//
+// 데이터 소스:
+//   - earnings / dividend  : yahoo-finance2 quoteSummary.calendarEvents
+//   - fomc                 : 2026·2027 일부 hardcoded (Fed 공식 발표)
+//   - kospi_expiry         : 매월 두 번째 목요일 (계산)
+//   - holiday              : 2026 KRX 휴장일 hardcoded
+//
+// 캐시: 종목별 24h TTL (실적·배당은 자주 안 바뀜).
+// Vercel 함수 인스턴스마다 메모리 분리 — cold start 시 다시 채워지면 OK.
+
+const yahooFinance = new YahooFinance({
+  suppressNotices: ["yahooSurvey", "ripHistorical"],
+});
+
+const EVENT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+interface CacheEntry {
+  data: EventItem[];
+  expiresAt: number;
+}
+
+declare global {
+  // 핫 리로드/모듈 재평가 시 캐시 유실 방지
+  // eslint-disable-next-line no-var
+  var __eventCalendarCache: Map<string, CacheEntry> | undefined;
+}
+
+function cache(): Map<string, CacheEntry> {
+  if (!global.__eventCalendarCache) {
+    global.__eventCalendarCache = new Map();
+  }
+  return global.__eventCalendarCache;
+}
+
+// ── KST 자정 epoch ms 유틸 ─────────────────────────────────────────────────
+// 모든 EventItem.date 는 KST(UTC+9) 자정 기준으로 정규화한다.
+// 표시는 D-N 계산에 사용되므로 시(時)는 의미 없음.
+function kstMidnight(year: number, month1: number, day: number): number {
+  // month1 = 1~12, KST = UTC+9 → UTC 기준 전날 15:00 이 KST 자정
+  return Date.UTC(year, month1 - 1, day) - 9 * 3600 * 1000;
+}
+
+// Date → KST 자정 epoch ms (Date 객체 자체는 UTC 기반)
+function toKstMidnight(d: Date): number {
+  // KST로 본 연/월/일을 뽑아 UTC 자정으로 재구성
+  const kstMs = d.getTime() + 9 * 3600 * 1000;
+  const kst = new Date(kstMs);
+  return kstMidnight(
+    kst.getUTCFullYear(),
+    kst.getUTCMonth() + 1,
+    kst.getUTCDate()
+  );
+}
+
+// ── 야후 calendarEvents (실적·배당) ────────────────────────────────────────
+// 미국 종목은 거의 다 채워지고, 한국 종목은 일부만 채워진다.
+// 실패 시 빈 배열 반환 (snapshot 전체를 막지 않음).
+async function fetchYahooEvents(meta: SymbolMeta): Promise<EventItem[]> {
+  type CalRaw = {
+    earnings?: {
+      earningsDate?: Array<Date | string | number>;
+      isEarningsDateEstimate?: boolean;
+    };
+    exDividendDate?: Date | string | number;
+    dividendDate?: Date | string | number;
+  };
+
+  try {
+    const r = (await yahooFinance.quoteSummary(meta.code, {
+      modules: ["calendarEvents"],
+    })) as unknown as { calendarEvents?: CalRaw } | null;
+    const cal = r?.calendarEvents;
+    if (!cal) return [];
+
+    const items: EventItem[] = [];
+
+    // 실적 발표일 — earningsDate 배열의 가장 가까운 미래 일자.
+    // 야후는 보통 range로 [from, to] 두 일자를 주는데 첫 값을 D-day로 사용.
+    const earningsRaw = cal.earnings?.earningsDate;
+    if (Array.isArray(earningsRaw) && earningsRaw.length > 0) {
+      const first = toEpoch(earningsRaw[0]);
+      if (first != null) {
+        const date = toKstMidnight(new Date(first));
+        const estimate = cal.earnings?.isEarningsDateEstimate === true;
+        items.push({
+          kind: "earnings",
+          symbolCode: meta.code,
+          label: `${meta.name} 실적 발표${estimate ? " (예정)" : ""}`,
+          date,
+          importance: "high",
+          detail: estimate
+            ? "야후 추정 — 실제 발표일과 다를 수 있음"
+            : undefined,
+        });
+      }
+    }
+
+    // 배당 — exDividendDate (배당락일). 한국 종목은 야후가 종종 비워둠.
+    const exDiv = toEpoch(cal.exDividendDate);
+    if (exDiv != null) {
+      items.push({
+        kind: "dividend",
+        symbolCode: meta.code,
+        label: `${meta.name} 배당락`,
+        date: toKstMidnight(new Date(exDiv)),
+        importance: "medium",
+        detail: "이 날 이후 매수하면 다음 배당 제외",
+      });
+    }
+
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+function toEpoch(v: unknown): number | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return v > 1e12 ? v : v * 1000;
+  }
+  if (typeof v === "string") {
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+}
+
+// ── 종목별 캐시 entrypoint ────────────────────────────────────────────────
+export async function getEventsForSymbolCached(
+  meta: SymbolMeta
+): Promise<EventItem[]> {
+  const now = Date.now();
+  const c = cache();
+  const hit = c.get(meta.code);
+  if (hit && hit.expiresAt > now) return hit.data;
+
+  const events = await fetchYahooEvents(meta).catch(() => [] as EventItem[]);
+  // 미래 + 어제까지 7일 이내(배당락 직전 안내 등)만 유지. 너무 먼 미래(>180일)도 잘라낸다.
+  const filtered = filterUpcoming(events, 180);
+  c.set(meta.code, { data: filtered, expiresAt: now + EVENT_TTL_MS });
+  return filtered;
+}
+
+// 어제 ~ N일 후 범위만 남기고, 날짜 오름차순 정렬.
+function filterUpcoming(items: EventItem[], days: number): EventItem[] {
+  const now = Date.now();
+  const lower = now - 1 * 86_400_000; // 어제까지는 유지 (당일 D-0 표시)
+  const upper = now + days * 86_400_000;
+  return items
+    .filter((e) => e.date >= lower && e.date <= upper)
+    .sort((a, b) => a.date - b.date);
+}
+
+// ── 매크로 이벤트 ───────────────────────────────────────────────────────────
+// FOMC 정책결정 발표일(2일차) — 2026·2027 일부.
+// 출처: federalreserve.gov 2024-08-09 발표 (tentative 2025·2026 schedule)
+// 시각은 한국 시각 새벽 ~ 오전이라 KST 날짜로 +1일 보정.
+//   미 동부 14:00 (정책성명) ≈ KST 새벽 03:00~04:00 → 회의 2일차 다음 날 새벽이 한국 사용자에게는
+//   "이 날 새벽에 발표" 로 인식되지만, 시장 영향이 가장 큰 것은 한국 정규장 당일.
+//   사용자 직관에 맞춰 발표일을 그대로 사용 (회의 2일차 미국 날짜).
+const FOMC_DATES_2026: Array<[number, number, number]> = [
+  // [YYYY, M, D] - 미국 시각 회의 2일차 = 정책성명 발표일
+  [2026, 1, 28],
+  [2026, 3, 18],
+  [2026, 4, 29],
+  [2026, 6, 17],
+  [2026, 7, 29],
+  [2026, 9, 16],
+  [2026, 10, 28],
+  [2026, 12, 9],
+];
+
+// 2027년 1월까지 (연말~연초 사용자 노출용)
+const FOMC_DATES_2027: Array<[number, number, number]> = [[2027, 1, 27]];
+
+// ── KRX 2026 휴장일 (정규장 휴장) ──────────────────────────────────────────
+// 출처: krx.co.kr 휴장일 공시 + 한국 공휴일 정상 추정.
+// 휴장일 = 공휴일 + 대체공휴일 + 12월 31일 연말 휴장.
+// 추후 갱신은 별도 commit으로 (12월에 다음 해 일정 추가).
+const KRX_HOLIDAYS_2026: Array<{
+  date: [number, number, number];
+  label: string;
+}> = [
+  { date: [2026, 1, 1], label: "신정" },
+  { date: [2026, 2, 16], label: "설 연휴" },
+  { date: [2026, 2, 17], label: "설날" },
+  { date: [2026, 2, 18], label: "설 연휴" },
+  { date: [2026, 3, 2], label: "삼일절 대체" },
+  { date: [2026, 5, 5], label: "어린이날" },
+  { date: [2026, 5, 25], label: "부처님오신날 대체" },
+  { date: [2026, 8, 17], label: "광복절 대체" },
+  { date: [2026, 9, 24], label: "추석 연휴" },
+  { date: [2026, 9, 25], label: "추석" },
+  { date: [2026, 10, 5], label: "추석 대체" },
+  { date: [2026, 10, 9], label: "한글날" },
+  { date: [2026, 12, 25], label: "성탄절" },
+  { date: [2026, 12, 31], label: "연말 휴장" },
+];
+
+// KOSPI200 옵션·선물 만기일 = 매월 두 번째 목요일.
+// 만기일 ±1~2일은 주가 변동성 확대 (롤오버·청산) → 사용자에게 알려줄 가치 있음.
+// 휴장일과 겹치면 직전 거래일로 이동하지만, 단순화를 위해 두 번째 목요일을 그대로 사용한다.
+// 휴장과 충돌하는 경우는 KRX 공식 일정과 일치하지 않을 수 있음 — UI 라벨에 "예정"으로 표기.
+function kospiSecondThursday(year: number, month1: number): number {
+  // month1 = 1~12. UTC 기준으로 1일의 요일을 본 뒤 첫 목요일을 찾고 +7
+  const first = new Date(Date.UTC(year, month1 - 1, 1));
+  const dow = first.getUTCDay(); // 0=일, 4=목
+  const offsetToFirstThu = (4 - dow + 7) % 7;
+  const firstThuDay = 1 + offsetToFirstThu;
+  const secondThuDay = firstThuDay + 7;
+  return kstMidnight(year, month1, secondThuDay);
+}
+
+function buildMacroEvents(): EventItem[] {
+  const items: EventItem[] = [];
+
+  // FOMC
+  for (const [y, m, d] of [...FOMC_DATES_2026, ...FOMC_DATES_2027]) {
+    items.push({
+      kind: "fomc",
+      label: `FOMC 정책 발표`,
+      date: kstMidnight(y, m, d),
+      importance: "high",
+      detail: "미 연준 정책금리·점도표 — 한국 정규장 당일 변동성 확대",
+    });
+  }
+
+  // KOSPI200 옵션·선물 만기 — 오늘 이후 12개월치 계산
+  const now = new Date();
+  const baseYear = now.getUTCFullYear();
+  for (let i = 0; i < 14; i++) {
+    const y = baseYear + Math.floor((now.getUTCMonth() + i) / 12);
+    const m = ((now.getUTCMonth() + i) % 12) + 1;
+    const date = kospiSecondThursday(y, m);
+    // 분기말(3·6·9·12월)은 선물·옵션 동시만기 → importance high
+    const isTriple = m === 3 || m === 6 || m === 9 || m === 12;
+    items.push({
+      kind: "kospi_expiry",
+      label: isTriple
+        ? "KOSPI200 선물·옵션 동시만기"
+        : "KOSPI200 옵션 만기",
+      date,
+      importance: isTriple ? "high" : "low",
+      detail: isTriple
+        ? "분기 동시만기 — 프로그램 매매 청산·롤오버로 변동성 확대"
+        : "두 번째 목요일 (휴장 시 직전 영업일로 이동 가능)",
+    });
+  }
+
+  // KRX 휴장일
+  for (const h of KRX_HOLIDAYS_2026) {
+    const [y, m, d] = h.date;
+    items.push({
+      kind: "holiday",
+      label: `KRX 휴장 — ${h.label}`,
+      date: kstMidnight(y, m, d),
+      importance: "low",
+      detail: "한국 정규장 휴장 — 미국 시장은 정상",
+    });
+  }
+
+  return items;
+}
+
+// 매크로는 빌드 결과를 한 번만 만들고 메모리에 캐싱. 24h마다 재빌드(자정 경과 시 D-N 갱신).
+declare global {
+  // eslint-disable-next-line no-var
+  var __macroEventsCache: { data: EventItem[]; expiresAt: number } | undefined;
+}
+
+export function getMacroEventsCached(): EventItem[] {
+  const now = Date.now();
+  if (
+    global.__macroEventsCache &&
+    global.__macroEventsCache.expiresAt > now
+  ) {
+    return global.__macroEventsCache.data;
+  }
+  const built = filterUpcoming(buildMacroEvents(), 180);
+  global.__macroEventsCache = { data: built, expiresAt: now + EVENT_TTL_MS };
+  return built;
+}
+
+// 강제 갱신 — 사용자 새로고침(refresh=1)에서 사용 가능
+export function invalidateEventCalendarCache(code?: string): void {
+  if (code) {
+    cache().delete(code);
+  } else {
+    cache().clear();
+    global.__macroEventsCache = undefined;
+  }
+}
+
+// ── 외부에서 한 번에 호출하는 헬퍼 ────────────────────────────────────────
+// snapshot.ts 에서 종목별로 호출 — kr/us 모두 동일하게 야후 호출.
+// 한국 종목은 야후가 종종 비워두지만 실패 안전 — 빈 배열 반환.
+export async function fetchEventsForSymbol(meta: SymbolMeta): Promise<EventItem[]> {
+  const events = await getEventsForSymbolCached(meta);
+  // 다음 60일 이내만 카드용으로 반환. 더 먼 미래(컨센서스용)는 캐시에 둠.
+  return events.filter(
+    (e) => e.date >= Date.now() - 86_400_000 && e.date <= Date.now() + 60 * 86_400_000
+  );
+}
+
+// 한국 종목 여부는 macro 이벤트 노출 정책에 사용될 수 있음 (예: KOSPI 만기는 한국 종목 카드에만).
+// 현재는 모든 카드에서 다 보여주지만 향후 분기 가능하도록 export.
+export { isKrStock };
