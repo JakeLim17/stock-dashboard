@@ -108,6 +108,14 @@ export function NewsPanel({
   const [fresh, setFresh] = useState<FreshFilter>("7d");
   const [onlySelected, setOnlySelected] = useState(false);
 
+  // 선택 종목과 매칭되는 뉴스(헤드라인에 종목명 또는 symbol 일치)는 상단으로 끌어올리고
+  // 좌측에 accent 보더로 시각 강조한다. matchSelected가 true인 항목이 우선 정렬 키.
+  const isSelectedMatch = (n: NewsItem): boolean => {
+    if (!selectedSymbol) return false;
+    if (n.symbol === selectedSymbol.code) return true;
+    return (n.title || "").includes(selectedSymbol.name);
+  };
+
   const filtered = useMemo(() => {
     const now = Date.now();
     const span = FRESH_MS[fresh];
@@ -124,7 +132,11 @@ export function NewsPanel({
       })
       .slice()
       .sort((a, b) => {
-        // 24h 이내 뉴스를 항상 위로
+        // 1순위: 선택 종목 매칭 뉴스를 맨 위로
+        const aMatch = isSelectedMatch(a);
+        const bMatch = isSelectedMatch(b);
+        if (aMatch !== bMatch) return aMatch ? -1 : 1;
+        // 2순위: 24h 이내 뉴스 우선
         const aRecent = now - a.publishedAt < 24 * H;
         const bRecent = now - b.publishedAt < 24 * H;
         if (aRecent !== bRecent) return aRecent ? -1 : 1;
@@ -205,10 +217,15 @@ export function NewsPanel({
           <ul className="space-y-3">
             {filtered.map((n) => {
               const isRecent = now - n.publishedAt < 24 * H;
+              const isMatch = isSelectedMatch(n);
               return (
                 <li
                   key={n.id}
-                  className="border-b border-border pb-3 last:border-0 flex items-start gap-2"
+                  className={`border-b border-border pb-3 last:border-0 flex items-start gap-2 ${
+                    isMatch
+                      ? "border-l-2 border-l-accent bg-accent/5 pl-2 -ml-2 rounded-r"
+                      : ""
+                  }`}
                 >
                   {/* 24h 이내 빨강 점 마커 */}
                   <span

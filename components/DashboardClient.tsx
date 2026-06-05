@@ -11,7 +11,6 @@ import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
-import { AnalysisBox } from "./AnalysisBox";
 import { PredictionHero } from "./PredictionHero";
 import {
   StockDetailPanel,
@@ -366,27 +365,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       {/* 요약 바 */}
       <SummaryBar snapshot={snap} lastUpdatedLabel={lastUpdated} />
 
-      {/* 종목 추천 — 펼침 패널 (기본 접힘). 펼치면 watchlist 후보 전체를 분석해 카테고리·섹터별로 노출 */}
-      <RecommendationsPanel
-        watchlist={watchCodes}
-        onAddToWatchlist={handleAddFromRecommendation}
-        maxWatch={MAX_WATCH}
-      />
-
-      {/* 예측 Hero — 선택 종목 단기 예측을 큰 시각으로. 클릭하면 아래 상세 패널 "예측" 탭으로 이동. */}
-      <PredictionHero
-        snap={selectedSnap}
-        onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
-      />
-
-      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
-      <StockDetailPanel
-        ref={detailRef}
-        snap={selectedSnap}
-        allNews={snap.news}
-      />
-
-      {/* 관심종목 한 줄 도구바 + 확장형 검색 + 카드 */}
+      {/* 관심종목 한 줄 도구바 + 확장형 검색 — 종목 선택을 먼저 한 뒤 아래 결과를 보는 자연 순서 */}
       <section className="space-y-3">
         <div className="flex items-center flex-wrap gap-2">
           <span className="text-xs uppercase tracking-wider text-muted-foreground mr-1">
@@ -503,27 +482,44 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             </div>
           </div>
         )}
-
-        {/* 선택된 종목의 분석 결과 — 카드 grid 바로 위에 가로로 길게 */}
-        {selectedSnap && <AnalysisBox snap={selectedSnap} />}
-
-        {/* 종목 카드 grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {snap.primaries.map((p) => (
-            <StockCard
-              key={p.meta.code}
-              snap={p}
-              selected={p.meta.code === selected}
-              onSelect={setSelected}
-            />
-          ))}
-          {snap.primaries.length === 0 && (
-            <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
-              종목 데이터를 불러오지 못했습니다.
-            </div>
-          )}
-        </div>
       </section>
+
+      {/* 종목 추천 — 펼침 패널 (기본 접힘). 펼치면 watchlist 후보 전체를 분석해 카테고리·섹터별로 노출 */}
+      <RecommendationsPanel
+        watchlist={watchCodes}
+        onAddToWatchlist={handleAddFromRecommendation}
+        maxWatch={MAX_WATCH}
+      />
+
+      {/* 예측 Hero — 선택 종목 단기 예측을 큰 시각으로. 클릭하면 아래 상세 패널 "예측" 탭으로 이동. */}
+      <PredictionHero
+        snap={selectedSnap}
+        onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
+      />
+
+      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
+      <StockDetailPanel
+        ref={detailRef}
+        snap={selectedSnap}
+        allNews={snap.news}
+      />
+
+      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {snap.primaries.map((p) => (
+          <StockCard
+            key={p.meta.code}
+            snap={p}
+            selected={p.meta.code === selected}
+            onSelect={setSelected}
+          />
+        ))}
+        {snap.primaries.length === 0 && (
+          <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
+            종목 데이터를 불러오지 못했습니다.
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="rounded-xl border border-down/30 bg-down/10 text-down text-sm px-4 py-3">

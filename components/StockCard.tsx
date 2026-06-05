@@ -203,11 +203,9 @@ export function StockCard({ snap, onSelect, selected }: {
             분석
           </div>
 
-          {/* 메인 verdict 배지 + 단·장기 시그널 컬러 배지 + 외부 리스크 + 시장경보 */}
+          {/* 단·장기 시그널 컬러 배지 + 외부 기회/리스크.
+              verdict 메인 배지·시장경보는 헤더에서 노출하므로 여기선 생략(중복 제거). */}
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant={analysis.verdict.tone} size="lg">
-              {analysis.verdict.label}
-            </Badge>
             <SignalDetailBadges
               short={analysis.shortTerm.signal}
               long={analysis.longTerm.signal}
@@ -215,7 +213,6 @@ export function StockCard({ snap, onSelect, selected }: {
             />
             <OpportunityBadge assessment={analysis.externalOpportunity} />
             <RiskBadge assessment={analysis.externalRisk} />
-            <MarketAlertBadge alert={quote.marketAlert} />
           </div>
           <p className="text-sm font-semibold leading-snug">
             {analysis.verdict.headline}
