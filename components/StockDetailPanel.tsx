@@ -8,6 +8,7 @@ import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
 import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
+import { VolatilityBadge } from "./VolatilityBadge";
 import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { changeColor, fmtNumber, fmtRelative } from "@/lib/utils";
@@ -92,6 +93,7 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
                 long={a.longTerm.signal}
                 title={verdict.detail}
               />
+              <VolatilityBadge assessment={a.volatility} size="sm" />
               <OpportunityBadge assessment={a.externalOpportunity} size="sm" />
               <RiskBadge assessment={a.externalRisk} size="sm" />
               <MarketAlertBadge alert={snap.quote.marketAlert} size="sm" />
@@ -173,7 +175,12 @@ function FlowNewsTab({
       {/* 수급 */}
       <section>
         <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          수급 (단위: 억원)
+          수급 (당일 누적 · 종일치, 단위: 억원)
+          {flow.fetchedAt && (
+            <span className="ml-2 text-[10px] normal-case tracking-normal">
+              {detailFreshnessLabel(flow.fetchedAt)}
+            </span>
+          )}
           {flow.source && (
             <span className="ml-auto text-[10px] normal-case tracking-normal">
               {flow.source === "naver"
@@ -203,6 +210,11 @@ function FlowNewsTab({
               ]}
             />
           )}
+          {/* 한계 명시 — 사용자가 "분 단위 외인이 살아있다" 환상에 빠지지 않게.
+              진정한 실시간 외인·프로그램 매매는 KIS API 도입이 필요. */}
+          <p className="text-[11px] text-muted-foreground/90 leading-snug pt-1 border-t border-border/40">
+            ※ 일별 누적 데이터입니다. 실시간 외인·프로그램 매매는 KIS API가 필요합니다.
+          </p>
         </div>
       </section>
 
@@ -300,4 +312,15 @@ function flowEokLabel(v: number | null | undefined): string {
   }
   const sign = eok > 0 ? "+" : "";
   return `${sign}${eok.toFixed(0)}억`;
+}
+
+// 수급 fetchedAt → "조회 N분 전" 라벨. StockDetailPanel 헤더에 노출.
+function detailFreshnessLabel(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 0) return "방금 전";
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "방금 전";
+  if (min < 60) return `· 조회 ${min}분 전`;
+  const hr = Math.round(min / 60);
+  return `· 조회 ${hr}시간 전`;
 }

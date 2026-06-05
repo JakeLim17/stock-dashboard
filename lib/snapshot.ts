@@ -11,7 +11,14 @@ import {
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
-import { analyze, marketMoodLabel, predict } from "./analyzer";
+import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
+import {
+  analyze,
+  marketMoodLabel,
+  predict,
+  assessVolatility,
+  computeIntradayMetrics,
+} from "./analyzer";
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
@@ -175,7 +182,21 @@ export async function buildSnapshot(
 
       const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
-      const flow = flowRes.flow;
+      // flow의 신선도 라벨용 — 최초엔 quote.fetchedAt에 동기화 (이후 KIS 도입 시
+      // KIS 자체 timestamp로 교체 가능). 네이버 일별 누적은 사실상 일 단위라 분 단위
+      // 정확도가 없지만, "조회한 시점"을 표시함으로써 사용자가 stale 여부를 가늠할 수 있다.
+      const flow = { ...flowRes.flow, fetchedAt: quote.fetchedAt };
+
+      // 한국 종목 + 정규장 진행 중일 때만 1분봉 호출 (TTL 60s 캐시).
+      // 미국·지수·환율은 호출 자체를 스킵해 네트워크 낭비 방지.
+      // intraday는 변동성 점수 + 진폭 예측 정밀화에만 사용.
+      const intradayBars =
+        isKrStock(meta.code) && isKrMarketOpen()
+          ? await fetchIntradayBars(meta.code).catch(() => null)
+          : null;
+      const intradayMetrics = intradayBars
+        ? computeIntradayMetrics(intradayBars)
+        : null;
 
       // 종목 관련 뉴스 + 시장 전반(symbol 미지정) 뉴스를 합쳐 외부 리스크 평가.
       // 시장 전반 뉴스(예: "트럼프, 중국 반도체에 100% 관세")는 모든 watchlist에 영향.
@@ -207,6 +228,29 @@ export async function buildSnapshot(
           overseasNightRate: overseasNight?.changeRate ?? null,
         },
       });
+      // 변동성("사팔사팔") 점수 — 일봉 + 수급 + (한국+장중) 분봉 가중.
+      // verdict shift는 하지 않고 analysis.volatility 로만 노출 (안전장치 유지).
+      const volatility = assessVolatility({
+        history: hist,
+        flow,
+        todayChangeRate: quote.changeRate,
+        intraday: intradayMetrics,
+      });
+      analysis.volatility = volatility;
+      // 도박장 등급이면 단기 reasons 첫 줄에 한 줄 prepend.
+      // verdict 자체는 안 흔들고 사용자에게 시각적으로 강조하는 용도.
+      if (volatility.level === "gambling" || volatility.level === "high") {
+        const top = volatility.drivers[0]?.label;
+        const tag =
+          volatility.level === "gambling"
+            ? `도박장 ⚠ 변동성 ${volatility.score}`
+            : `고변동 변동성 ${volatility.score}`;
+        analysis.shortTerm.reasons = [
+          `· ${tag}${top ? ` · ${top}` : ""}`,
+          ...analysis.shortTerm.reasons,
+        ].slice(0, 3);
+        analysis.reasons = analysis.shortTerm.reasons;
+      }
       const predictions = predict({
         quote,
         history: hist,
@@ -215,6 +259,7 @@ export async function buildSnapshot(
         buyScore: analysis.buyScore,
         heatScore: analysis.heatScore,
         overseasNight,
+        intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
       });
 
       saveQuote(quote);

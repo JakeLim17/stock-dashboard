@@ -7,6 +7,7 @@ import { SignalDetailBadges } from "./SignalDetailBadges";
 import { RiskBadge } from "./RiskBadge";
 import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
+import { VolatilityBadge } from "./VolatilityBadge";
 import {
   changeColor,
   fmtNumber,
@@ -203,7 +204,7 @@ export function StockCard({ snap, onSelect, selected }: {
             분석
           </div>
 
-          {/* 단·장기 시그널 컬러 배지 + 외부 기회/리스크.
+          {/* 단·장기 시그널 컬러 배지 + 외부 기회/리스크 + 변동성("사팔사팔") 배지.
               verdict 메인 배지·시장경보는 헤더에서 노출하므로 여기선 생략(중복 제거). */}
           <div className="flex items-center gap-2 flex-wrap">
             <SignalDetailBadges
@@ -211,6 +212,7 @@ export function StockCard({ snap, onSelect, selected }: {
               long={analysis.longTerm.signal}
               title={analysis.verdict.detail}
             />
+            <VolatilityBadge assessment={analysis.volatility} />
             <OpportunityBadge assessment={analysis.externalOpportunity} />
             <RiskBadge assessment={analysis.externalRisk} />
           </div>
@@ -261,16 +263,25 @@ export function StockCard({ snap, onSelect, selected }: {
           </details>
         </div>
 
-        {/* 예상 변동 범위 — 1일/1주 horizon을 stack으로 노출. 카드만 보고도 즉시 판단 가능. */}
+        {/* 예상 변동 범위 — 1일/1주 horizon을 stack으로 노출. 카드만 보고도 즉시 판단 가능.
+            오늘(1일) 진폭은 ATR/분봉 가중 intradayRange를 우선 사용해 더 현실에 가깝게. */}
         {(() => {
           const ranges = snap.predictions?.ranges;
+          const intradayRange = snap.predictions?.intradayRange;
           if (!ranges || quote.price <= 0) return null;
           const oneDay = ranges.find((r) => r.horizonDays === 1);
           const oneWeek = ranges.find((r) => r.horizonDays === 5);
-          // 1주가 없으면 박스 자체 숨김 (기존 정책 유지)
           if (!oneWeek) return null;
-          const rows: { label: string; low: number; high: number }[] = [];
-          if (oneDay) {
+          const rows: { label: string; low: number; high: number; suffix?: string }[] = [];
+          if (intradayRange && intradayRange.expectedRangePct > 0) {
+            rows.push({
+              label: "오늘",
+              low: intradayRange.expectedLow / quote.price - 1,
+              high: intradayRange.expectedHigh / quote.price - 1,
+              suffix:
+                intradayRange.source === "intraday-blend" ? "분봉" : "ATR",
+            });
+          } else if (oneDay) {
             rows.push({
               label: "1일",
               low: oneDay.low / quote.price - 1,
@@ -294,7 +305,14 @@ export function StockCard({ snap, onSelect, selected }: {
                     key={r.label}
                     className="flex items-center justify-between"
                   >
-                    <span className="text-muted-foreground">{r.label}</span>
+                    <span className="text-muted-foreground">
+                      {r.label}
+                      {r.suffix && (
+                        <span className="ml-1 text-[9px] opacity-70">
+                          · {r.suffix}
+                        </span>
+                      )}
+                    </span>
                     <span className="font-medium">
                       <span className="text-down">{fmtPercent(r.low, 1)}</span>
                       {" ~ "}
@@ -380,9 +398,12 @@ function flowLabel5d(v: number | null | undefined): string {
   return `${sign}${eok.toLocaleString("ko-KR")}`;
 }
 
-// 수급 섹션 — 외인/기관/개인을 같은 위계로 보여주고 "당일/5일" 기간을 라벨에 명시.
+// 수급 섹션 — 외인/기관/개인을 같은 위계로 보여주고 "당일 누적/5일" 기간을 라벨에 명시.
 //   당일: 색상 칠해진 3열 카드 (양수=상승색, 음수=하락색)
 //   5일 : 작은 글씨 한 줄 secondary 색 — 추세 가늠용
+//
+//   네이버 dealTrendInfos는 "일별 누적"이라 분 단위 실시간 변동을 표현하지 못한다.
+//   라벨에 그 사실을 명시해 사용자가 "분 단위 외인 매매" 환상에 빠지지 않게.
 function FlowSection({ flow }: { flow: import("@/lib/types").FlowData }) {
   const cells: Array<{
     label: string;
@@ -396,22 +417,28 @@ function FlowSection({ flow }: { flow: import("@/lib/types").FlowData }) {
     flow.foreignNet5d != null ||
     flow.institutionNet5d != null ||
     flow.individualNet5d != null;
+  const fresh = flow.fetchedAt
+    ? freshnessLabel(flow.fetchedAt)
+    : null;
 
   return (
     <div className="border-t border-border pt-3 space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
-          수급 (당일, 억)
+          수급 (당일 누적 · 종일치, 억)
         </span>
-        {flow.source && (
-          <span className="text-[10px] text-muted-foreground">
-            {flow.source === "naver"
-              ? "네이버"
-              : flow.source === "kis"
-                ? "KIS"
-                : "mock"}
-          </span>
-        )}
+        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1.5">
+          {fresh && <span>{fresh}</span>}
+          {flow.source && (
+            <span>
+              {flow.source === "naver"
+                ? "네이버"
+                : flow.source === "kis"
+                  ? "KIS"
+                  : "mock"}
+            </span>
+          )}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-sm">
         {cells.map((c) => (
@@ -438,8 +465,24 @@ function FlowSection({ flow }: { flow: import("@/lib/types").FlowData }) {
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
+      {/* 사용자 페인 포인트: 분 단위 외인이 살아있다는 환상에 대한 명시적 한계 안내.
+          진짜 실시간 외인·프로그램 매매는 KIS API가 필요. */}
+      <div className="text-[10px] text-muted-foreground/80 leading-snug">
+        ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
+      </div>
     </div>
   );
+}
+
+// 수급 fetchedAt → "조회 N분 전" 한국어 라벨. 60분 미만은 분, 60+는 시간.
+function freshnessLabel(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 0) return "방금 전";
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "방금 전";
+  if (min < 60) return `조회 ${min}분 전`;
+  const hr = Math.round(min / 60);
+  return `조회 ${hr}시간 전`;
 }
 
 // 단기 / 장기 한 줄 — 배지 + 헤드라인 + 작은 점수 칩.

@@ -139,6 +139,9 @@ export interface ValuationMetrics {
 export interface FlowData {
   // 외국인 / 기관 / 개인 순매수 (원). Naver dealTrendInfos(일 단위) × 종가로 환산.
   // 없으면 null. 개인은 외인·기관의 거울(symmetry) 값이라 분석엔 안 쓰지만 UI 노출용으로 보관.
+  //
+  // 주의: 네이버 dealTrendInfos는 "일별 누적"이라 분 단위 실시간 변동을 표현하지 못한다.
+  // 진짜 실시간 외인/프로그램 매매는 KIS API가 필요하다 — UI에 그 한계를 명시한다.
   foreignNet: number | null;
   institutionNet: number | null;
   individualNet?: number | null;
@@ -148,6 +151,8 @@ export interface FlowData {
   individualNet5d?: number | null;
   // 데이터 출처 — UI에 mock 표시용
   source?: "naver" | "kis" | "mock";
+  // 수급 데이터를 받아온 시각 (epoch ms). UI 신선도 라벨용. 최초엔 quote.fetchedAt에 동기화.
+  fetchedAt?: number;
 }
 
 export interface TechIndicators {
@@ -249,6 +254,29 @@ export interface OpportunityAssessment {
   matchCount: number;
 }
 
+// ─── 변동성("사팔사팔") 점수 ────────────────────────────────────────────────
+// 외인/기관/개인이 단시간에 사고팔며 가격이 위아래로 흔들리는 종목을
+// 정량화·시각화해서 매매 의사결정에 활용하기 위한 점수.
+//   stable    : 0~30   — 안정 (배지 미노출)
+//   moderate  : 30~60  — 변동성 보통 (회색)
+//   high      : 60~80  — 고변동
+//   gambling  : 80~100 — 도박장 (강한 warn)
+// drivers는 점수에 기여한 raw signal 라벨 + 기여 점수. UI 툴팁/근거 표시용.
+export type VolatilityLevel = "stable" | "moderate" | "high" | "gambling";
+
+export interface VolatilityDriver {
+  label: string;
+  contribution: number; // 가중 합산 후 실제 점수 기여(소수점 첫째자리 반올림)
+}
+
+export interface VolatilityAssessment {
+  score: number; // 0~100
+  level: VolatilityLevel;
+  drivers: VolatilityDriver[];
+  // 분봉 신호가 합산에 들어갔으면 true (장중 한국 종목만). UI 안내에 사용.
+  intradayUsed?: boolean;
+}
+
 // 네이버 finance.naver.com/research 의 종목별 리서치 리포트 목록.
 // wisereport(증권사별 목표가 표)와 다르게 "오늘 발표된 리포트 제목 + PDF 직링크"가 핵심.
 // 사용자는 컨센서스 탭에서 최근 N개 리포트를 한눈에 보고 PDF 새 탭으로 열어보면 된다.
@@ -269,6 +297,9 @@ export interface AnalysisResult {
   // 외부 호재 점수 — 수주·실적호조·목표상향·신제품 등.
   // verdict shift에는 영향 없고 (안전장치 부족), 표시·근거 전용.
   externalOpportunity?: OpportunityAssessment;
+  // 변동성("사팔사팔") 점수 — 0~100, 도박장 등급 분류.
+  // verdict shift에는 영향을 주지 않고(안전장치 유지), 배지·reasons에서만 표시.
+  volatility?: VolatilityAssessment;
   // 통합 액션 (메인 결론) — 단·장기 조합 매트릭스에서 도출 + 외부 리스크 시프트 적용
   verdict: ActionVerdict;
   // 백워드 호환 — 기존 컴포넌트/DB는 아래 필드를 그대로 읽고 있어 단기 값을 미러링.
@@ -354,6 +385,17 @@ export interface Predictions {
     buy: number;
     sell: number;
   };
+  // 1일(오늘) 진폭 예측 — ATR(14) 또는 GBM σ 기반의 예상 high/low 밴드.
+  // PredictionHero 한 줄 노출, StockCard "예상 변동 범위" 박스에 사용.
+  // 분봉 어댑터가 살아 있고 장중이면 intraday Parkinson vol을 가중해 정밀화한다.
+  intradayRange?: {
+    expectedHigh: number;
+    expectedLow: number;
+    // (high - low) / 2 / price. 0.018 = ±1.8%
+    expectedRangePct: number;
+    // "atr" | "sigma" | "intraday-blend" — 디버그/디스플레이용 출처 라벨
+    source?: "atr" | "sigma" | "intraday-blend";
+  } | null;
 }
 
 // 분석가(증권사)별 개별 리포트.

@@ -37,6 +37,8 @@ export function PredictionHero({
   const buyStrength = p?.strength.buy ?? snap.analysis.buyScore;
   const sellStrength = p?.strength.sell ?? snap.analysis.heatScore;
   const rr = p?.targets?.riskReward ?? null;
+  const intradayRange = p?.intradayRange ?? null;
+  const volatility = snap.analysis.volatility ?? null;
 
   const handleClick = () => {
     onJumpToPrediction?.();
@@ -130,6 +132,42 @@ export function PredictionHero({
             <div className="text-sm font-semibold leading-snug pt-1 border-t border-border/60">
               {verdict.headline}
             </div>
+            {/* 오늘 진폭 + 변동성 점수 한 줄 — 도박장 등급은 톤 강조. */}
+            {(intradayRange || volatility) && (
+              <div className="flex items-center gap-3 flex-wrap text-[12px] tabular pt-0.5">
+                {intradayRange && intradayRange.expectedRangePct > 0 && (
+                  <span className="text-muted-foreground">
+                    오늘 진폭{" "}
+                    <span className="font-semibold text-foreground">
+                      ±{(intradayRange.expectedRangePct * 100).toFixed(1)}%
+                    </span>
+                    {intradayRange.source === "intraday-blend" && (
+                      <span className="ml-1 text-[10px] opacity-70">
+                        · 분봉
+                      </span>
+                    )}
+                  </span>
+                )}
+                {volatility && volatility.level !== "stable" && (
+                  <span
+                    className={`font-medium ${
+                      volatility.level === "gambling"
+                        ? "text-down"
+                        : volatility.level === "high"
+                          ? "text-warn"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    변동성 점수{" "}
+                    <span className="tabular font-semibold">
+                      {volatility.score}
+                    </span>
+                    {volatility.level === "gambling" && " · 도박장 ⚠"}
+                    {volatility.level === "high" && " · 고변동"}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 우 — 매수/매도 강도 + RR */}

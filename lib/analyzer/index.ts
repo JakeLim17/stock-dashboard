@@ -2,3 +2,7 @@ export { analyze, marketMoodLabel } from "./rules";
 export type { AnalyzeInput } from "./rules";
 export { predict } from "./predictor";
 export type { PredictorInput } from "./predictor";
+export { assessVolatility } from "./volatilityScore";
+export type { VolatilityInput } from "./volatilityScore";
+export { computeIntradayMetrics } from "./intradayMetrics";
+export type { IntradayMetrics } from "./intradayMetrics";

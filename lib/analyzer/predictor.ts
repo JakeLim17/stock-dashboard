@@ -217,6 +217,8 @@ export interface PredictorInput {
   buyScore: number;
   heatScore: number;
   overseasNight?: OverseasNightIndicator | null;
+  // 한국 종목 + 장중일 때만 채워지는 1분봉 기반 vol. intradayRange 정밀화에 사용.
+  intradayDailyVol?: number | null;
 }
 
 export function predict(input: PredictorInput): Predictions {
@@ -228,6 +230,7 @@ export function predict(input: PredictorInput): Predictions {
     buyScore,
     heatScore,
     overseasNight,
+    intradayDailyVol,
   } = input;
 
   const closes = history.map((h) => h.close).filter((c) => Number.isFinite(c) && c > 0);
@@ -383,6 +386,43 @@ export function predict(input: PredictorInput): Predictions {
   const buyStrength = clamp(buyScore);
   const sellStrength = clamp((100 - buyScore) * 0.4 + heatScore * 0.6);
 
+  // F. 1일 진폭 예측 — 오늘(또는 다음 거래일)의 high/low 밴드.
+  //   기본은 ATR(14)를 ±1배로 사용 (ATR 자체가 평균 진폭이라 1배 ≈ "평소만큼 흔들릴 때").
+  //   ATR이 너무 작으면 GBM σ·√1 = sigma 로 폴백.
+  //   장중 분봉 Parkinson 1일 vol(intradayDailyVol)이 살아 있으면 ATR 비율과 50:50 블렌드해
+  //   오늘의 진폭 분위기를 더 잘 반영하도록 정밀화.
+  let intradayRange: Predictions["intradayRange"] = null;
+  if (price > 0) {
+    const atr = history.length >= 15 ? averageTrueRange(history, 14) : 0;
+    const atrPct = atr > 0 ? atr / price : 0;
+    const sigmaPct = sigma > 0 ? sigma : 0;
+    let basePct = atrPct > 0 ? atrPct : sigmaPct;
+    let source: "atr" | "sigma" | "intraday-blend" = atrPct > 0 ? "atr" : "sigma";
+
+    if (intradayDailyVol != null && intradayDailyVol > 0 && basePct > 0) {
+      basePct = basePct * 0.5 + intradayDailyVol * 0.5;
+      source = "intraday-blend";
+    } else if (
+      intradayDailyVol != null &&
+      intradayDailyVol > 0 &&
+      basePct === 0
+    ) {
+      basePct = intradayDailyVol;
+      source = "intraday-blend";
+    }
+
+    if (basePct > 0) {
+      const expectedHigh = price * (1 + basePct);
+      const expectedLow = price * (1 - basePct);
+      intradayRange = {
+        expectedHigh,
+        expectedLow,
+        expectedRangePct: basePct,
+        source,
+      };
+    }
+  }
+
   return {
     ranges,
     targets,
@@ -411,5 +451,6 @@ export function predict(input: PredictorInput): Predictions {
       buy: Math.round(buyStrength),
       sell: Math.round(sellStrength),
     },
+    intradayRange,
   };
 }
