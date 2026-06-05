@@ -9,6 +9,7 @@ import { OpportunityBadge } from "./OpportunityBadge";
 import { MarketAlertBadge } from "./MarketAlertBadge";
 import { VolatilityBadge } from "./VolatilityBadge";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
+import { SignalMarkBadges } from "./SignalMarkBadges";
 import {
   changeColor,
   fmtNumber,
@@ -77,6 +78,8 @@ export function StockCard({ snap, onSelect, selected }: {
             <Badge variant={market.variant}>{market.label}</Badge>
             {/* 한국거래소 시장경보 — 헤더에서 한눈에 보이도록 시장 상태 배지 옆에 노출 */}
             <MarketAlertBadge alert={quote.marketAlert} />
+            {/* 시그널 마크 — 신고가/거래량폭발/외인픽 등 한눈에 보이는 신호. 자리가 좁으면 wrap. */}
+            <SignalMarkBadges marks={snap.signalMarks} size="sm" />
           </div>
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}

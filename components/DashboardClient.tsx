@@ -18,6 +18,7 @@ import {
 } from "./StockDetailPanel";
 import { PriceChart } from "./PriceChart";
 import { RecommendationsPanel } from "./RecommendationsPanel";
+import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { fmtRelative } from "@/lib/utils";
 import { LogOut, MoonStar, RefreshCw, Search, Plus, X } from "lucide-react";
@@ -486,6 +487,14 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
 
       {/* 종목 추천 — 펼침 패널 (기본 접힘). 펼치면 watchlist 후보 전체를 분석해 카테고리·섹터별로 노출 */}
       <RecommendationsPanel
+        watchlist={watchCodes}
+        onAddToWatchlist={handleAddFromRecommendation}
+        maxWatch={MAX_WATCH}
+      />
+
+      {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
+      <ThemeGroupView
+        indicators={snap.indicators}
         watchlist={watchCodes}
         onAddToWatchlist={handleAddFromRecommendation}
         maxWatch={MAX_WATCH}

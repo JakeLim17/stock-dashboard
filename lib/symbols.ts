@@ -89,6 +89,148 @@ export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "^VIX", name: "VIX 변동성", kind: "index" },
 ];
 
+// ─── 테마 그룹 ────────────────────────────────────────────────────────────
+// 섹터(sector)는 분야 1차 분류, 테마(theme)는 시장 narrative 단위 묶음.
+// 예: "AI 반도체" 테마에는 반도체 + NVDA(미국)을 묶고, "배터리" 테마에는
+// 화학 섹터인 LG화학도 같이 묶는 식.
+//
+// codes는 WATCHLIST_CANDIDATES 또는 MARKET_INDICATORS에 실제 존재하는 것만 적는다.
+// resolveThemes() 가 누락된 코드는 자동으로 제외하고 반환한다.
+export type ThemeTag =
+  | "ai_semi"
+  | "battery"
+  | "defense"
+  | "auto"
+  | "internet_game"
+  | "shipping_aviation"
+  | "nuclear_power"
+  | "biotech"
+  | "shipbuilding"
+  | "finance";
+
+export interface ThemeDefinition {
+  id: ThemeTag;
+  label: string;
+  emoji: string;
+  // 짧은 설명 — 헤더 hover/툴팁용
+  description?: string;
+  codes: string[];
+}
+
+export const THEMES: ThemeDefinition[] = [
+  {
+    id: "ai_semi",
+    label: "AI 반도체",
+    emoji: "🧠",
+    description: "AI 학습·추론용 메모리·로직 반도체",
+    codes: ["005930.KS", "000660.KS", "042700.KS", "NVDA"],
+  },
+  {
+    id: "battery",
+    label: "배터리",
+    emoji: "🔋",
+    description: "2차전지 셀·소재",
+    codes: [
+      "373220.KS",
+      "006400.KS",
+      "247540.KQ",
+      "086520.KQ",
+      "051910.KS",
+    ],
+  },
+  {
+    id: "defense",
+    label: "방산",
+    emoji: "🛡️",
+    description: "방산·항공우주·지정학 수혜",
+    codes: ["012450.KS", "047810.KS", "064350.KS"],
+  },
+  {
+    id: "auto",
+    label: "완성차",
+    emoji: "🚗",
+    description: "현대·기아·부품",
+    codes: ["005380.KS", "000270.KS", "012330.KS"],
+  },
+  {
+    id: "internet_game",
+    label: "인터넷·게임",
+    emoji: "💻",
+    description: "플랫폼·콘텐츠 — 나스닥 연동 강함",
+    codes: [
+      "035420.KS",
+      "035720.KS",
+      "036570.KS",
+      "251270.KS",
+      "259960.KS",
+      "293490.KQ",
+    ],
+  },
+  {
+    id: "shipping_aviation",
+    label: "항공·해운",
+    emoji: "✈️",
+    description: "운임·환율 민감",
+    codes: ["003490.KS", "011200.KS"],
+  },
+  {
+    id: "nuclear_power",
+    label: "원전·전력",
+    emoji: "⚛️",
+    description: "원전·송배전·전력기기",
+    codes: ["034020.KS", "267260.KS", "015760.KS"],
+  },
+  {
+    id: "biotech",
+    label: "바이오",
+    emoji: "💊",
+    description: "바이오·제약·CDMO",
+    codes: ["207940.KS", "068270.KS", "196170.KQ"],
+  },
+  {
+    id: "shipbuilding",
+    label: "조선",
+    emoji: "⚓",
+    description: "선가 사이클 + 친환경 선박",
+    codes: ["329180.KS", "010140.KS", "042660.KS"],
+  },
+  {
+    id: "finance",
+    label: "금융",
+    emoji: "🏦",
+    description: "은행·보험·인터넷은행",
+    codes: [
+      "105560.KS",
+      "055550.KS",
+      "086790.KS",
+      "032830.KS",
+      "323410.KS",
+    ],
+  },
+];
+
+// 테마 정의 + 코드 카탈로그(WATCHLIST + MARKET_INDICATORS)를 매칭해
+// 실제 존재하는 종목만 남긴 형태로 반환. 매칭 안 된 테마(전체 codes 0개)는 제외.
+export interface ResolvedTheme extends ThemeDefinition {
+  members: SymbolMeta[];
+}
+
+export function resolveThemes(): ResolvedTheme[] {
+  const catalog = new Map<string, SymbolMeta>();
+  for (const m of WATCHLIST_CANDIDATES) catalog.set(m.code, m);
+  for (const m of MARKET_INDICATORS) {
+    if (!catalog.has(m.code)) catalog.set(m.code, m);
+  }
+  const out: ResolvedTheme[] = [];
+  for (const t of THEMES) {
+    const members = t.codes
+      .map((c) => catalog.get(c))
+      .filter((v): v is SymbolMeta => !!v);
+    if (members.length > 0) out.push({ ...t, members });
+  }
+  return out;
+}
+
 type OverseasNightProxy = Pick<
   OverseasNightIndicator,
   "baseCode" | "proxyCode" | "name" | "exchange" | "sharesPerReceipt"

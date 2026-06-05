@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { changeColor, fmtPercent, fmtRelative } from "@/lib/utils";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
+import { SignalMarkBadges } from "./SignalMarkBadges";
 import { WATCHLIST_CANDIDATES, MARKET_INDICATORS } from "@/lib/symbols";
 
 // 분야 대장주 메타 조회용 맵 — code → leader meta. RecommendationsPanel 카드에서 배지 렌더링에 사용.
@@ -460,6 +461,14 @@ function RecommendationCard({
           <div className="text-[10px] text-muted-foreground tabular mt-0.5">
             {rec.code} · {rec.sector}
           </div>
+          {/* 시그널 마크 — 신고가/거래량폭발/외인픽 등 한눈에 보이는 신호 (작은 카드라 xs) */}
+          {rec.signalMarks && rec.signalMarks.length > 0 && (
+            <SignalMarkBadges
+              marks={rec.signalMarks}
+              size="xs"
+              className="mt-1"
+            />
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="text-sm font-semibold tabular">

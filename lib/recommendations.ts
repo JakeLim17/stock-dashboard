@@ -9,7 +9,7 @@ import {
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
-import { analyze } from "./analyzer";
+import { analyze, evaluateSignalMarks, pickTopSignalMarks } from "./analyzer";
 import { assessNewsRisk, emptyRiskAssessment } from "./news/riskScore";
 import { MARKET_INDICATORS, WATCHLIST_CANDIDATES } from "./symbols";
 import type {
@@ -391,6 +391,12 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
       const category = CATEGORY_BY_ACTION[analysis.verdict.action];
       const subCategory = SUBCATEGORY_BY_ACTION[analysis.verdict.action];
 
+      // 시그널 마크 — 추천 카드 헤더에도 같이 노출. 작은 카드라 3개로 컷.
+      const signalMarks = pickTopSignalMarks(
+        evaluateSignalMarks({ quote, history: hist, flow }),
+        3
+      );
+
       const rec: Recommendation = {
         code: meta.code,
         name: meta.name,
@@ -412,6 +418,7 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
         subCategory,
         headline: analysis.verdict.headline,
         marketAlert,
+        signalMarks,
       };
       return rec;
     } catch (e) {

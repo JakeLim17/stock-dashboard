@@ -18,6 +18,8 @@ import {
   predict,
   assessVolatility,
   computeIntradayMetrics,
+  evaluateSignalMarks,
+  pickTopSignalMarks,
 } from "./analyzer";
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
@@ -267,6 +269,12 @@ export async function buildSnapshot(
       saveTech(meta.code, quote.fetchedAt, tech);
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
+      // 시그널 마크 — 가격/이력/수급으로 즉시 계산. 우선순위 컷 적용.
+      const signalMarks = pickTopSignalMarks(
+        evaluateSignalMarks({ quote, history: hist, flow }),
+        4
+      );
+
       return {
         meta,
         quote,
@@ -278,6 +286,7 @@ export async function buildSnapshot(
         consensus,
         consensusValuation,
         researches,
+        signalMarks,
       };
     })
   );

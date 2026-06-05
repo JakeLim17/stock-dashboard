@@ -516,6 +516,32 @@ export interface ResearchNote {
   id?: string;
 }
 
+// ─── 시그널 마크 ────────────────────────────────────────────────────────────
+// 종목 카드 헤더에 작게 노출되는 "한눈에 보이는 신호".
+// 신고가/신저가/연속/거래량폭발/외인픽/개미무덤 등 빠른 인지용.
+//
+// tone:
+//   good    : 호재/상승 신호 (text-up 계열)
+//   bad     : 악재/하락 신호 (text-down 계열)
+//   warn    : 주의/관심 신호 (text-warn 계열)
+//   neutral : 중립 (회색 계열)
+//
+// 동시 노출은 우선순위 컷으로 최대 3~4개 — UI에서 잘라낸다.
+export interface SignalMark {
+  // 안정 키 (저장·매핑용). 예: "new_52w_high"
+  key: string;
+  // 사용자 노출 이모지. 예: "🚀"
+  emoji: string;
+  // 한국어 짧은 라벨. 예: "52주 신고가"
+  label: string;
+  // 색상 분기
+  tone: "good" | "bad" | "warn" | "neutral";
+  // 호버 시 부연 설명 (있을 때만 title)
+  detail?: string;
+  // 동시 노출 시 우선순위 — 작을수록 먼저 노출 (우선순위 컷에 사용)
+  priority?: number;
+}
+
 export interface StockSnapshot {
   meta: SymbolMeta;
   quote: Quote;
@@ -528,6 +554,10 @@ export interface StockSnapshot {
   consensus?: AnalystConsensus | null;
   consensusValuation?: Valuation | null;
   researches?: ResearchNote[] | null;
+  // 시그널 마크 (이모지 배지) — 신고가/거래량폭발/외인픽 등 한눈에 보이는 신호.
+  // evaluateSignalMarks(quote, history, flow)로 매번 재계산되며, 데이터 부족 시
+  // 빈 배열 또는 undefined.
+  signalMarks?: SignalMark[];
 }
 
 export interface MarketIndicator {
@@ -619,6 +649,9 @@ export interface Recommendation {
   headline: string;
   // 한국 종목인 경우 시장경보(투자주의 등) — 없으면 null
   marketAlert?: MarketAlert | null;
+  // 시그널 마크 (이모지 배지) — StockSnapshot.signalMarks와 동일 스키마.
+  // 추천 카드 헤더에도 노출하기 위해 함께 계산해 내려준다.
+  signalMarks?: SignalMark[];
 }
 
 export interface RecommendationsResponse {

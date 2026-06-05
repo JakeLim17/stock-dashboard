@@ -6,3 +6,5 @@ export { assessVolatility } from "./volatilityScore";
 export type { VolatilityInput } from "./volatilityScore";
 export { computeIntradayMetrics } from "./intradayMetrics";
 export type { IntradayMetrics } from "./intradayMetrics";
+export { evaluateSignalMarks, pickTopSignalMarks } from "./signalMarks";
+export type { SignalMarkInput } from "./signalMarks";
