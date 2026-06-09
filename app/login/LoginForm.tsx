@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRound, Loader2 } from "lucide-react";
+import { ArrowRight, KeyRound, Loader2 } from "lucide-react";
 import { LoadingScreen } from "@/components/LoadingScreen";
 
 // HTML form 의 native submit 동작은 그대로 유지하고,
@@ -25,19 +25,46 @@ export function LoginSubmitButton() {
         type="submit"
         onClick={() => setSubmitting(true)}
         aria-busy={submitting}
-        className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity active:opacity-80 touch-manipulation"
+        className="group relative w-full h-11 inline-flex items-center justify-center gap-2 rounded-lg overflow-hidden font-medium text-white transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] touch-manipulation shadow-[0_0_24px_-8px_rgba(77,141,255,0.55)] hover:shadow-[0_0_32px_-6px_rgba(77,141,255,0.85)]"
       >
-        {submitting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            로그인 중...
-          </>
-        ) : (
-          <>
-            <KeyRound className="h-4 w-4" />
-            들어가기
-          </>
-        )}
+        {/* 그라데이션 layer 1 — 기본 */}
+        <span
+          aria-hidden
+          className="absolute inset-0 transition-opacity duration-300 group-hover:opacity-0"
+          style={{
+            background:
+              "linear-gradient(135deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 55%, white) 100%)",
+          }}
+        />
+        {/* 그라데이션 layer 2 — hover 시 살짝 밝아짐 */}
+        <span
+          aria-hidden
+          className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          style={{
+            background:
+              "linear-gradient(135deg, color-mix(in oklab, var(--accent) 70%, white) 0%, var(--accent) 100%)",
+          }}
+        />
+        {/* 상단 미세 하이라이트 */}
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-px bg-white/30"
+        />
+
+        <span className="relative z-10 inline-flex items-center gap-2">
+          {submitting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>로그인 중...</span>
+            </>
+          ) : (
+            <>
+              <KeyRound className="h-4 w-4" />
+              <span>들어가기</span>
+              <ArrowRight className="h-4 w-4 -ml-0.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </>
+          )}
+        </span>
       </button>
 
       {submitting ? (
