@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import {
   fetchQuote,
   fetchQuotesBatch,
@@ -147,6 +148,16 @@ export async function fetchNewsItems(limit = 30): Promise<NewsItem[]> {
   }
   return news;
 }
+
+// ──────────────────────────────────────────────────────────────
+// React.cache로 한 SSR request 내 중복 호출 제거.
+//   - app/page.tsx에서 first-paint RSC들이 같은 데이터를 await하더라도 1번만 fetch
+//   - buildSnapshot도 동일 cached 버전 사용 → DashboardLoader와 first-paint slot이 fetch 공유
+//   - 클라이언트 polling이 /api/snapshot으로 호출하는 buildSnapshot은 매 request 별로 새 캐시
+//     스코프라 polling 신선도에 영향 없음
+// ──────────────────────────────────────────────────────────────
+export const cachedMarketIndicators = cache(fetchMarketIndicators);
+export const cachedNewsItems = cache(() => fetchNewsItems(30));
 
 // ──────────────────────────────────────────────────────────────
 // 3) 매크로 이벤트 — 즉시 (24h 메모리 캐시). FOMC·KOSPI 만기·KRX 휴장.
@@ -398,9 +409,11 @@ export async function buildSnapshot(
   options: BuildSnapshotOptions = {}
 ): Promise<DashboardSnapshot> {
   // 뉴스 실패는 치명적이지 않음 — 빈 배열로 진행. 호출자가 별도 fetch 시도해도 무방.
+  // cached* 사용 — page.tsx의 first-paint RSC가 동일 request 내에서 먼저 호출했다면
+  // 그 결과를 그대로 재사용 (Promise dedup으로 외부 호출 1회).
   const [indicatorResult, news] = await Promise.all([
-    fetchMarketIndicators(),
-    fetchNewsItems(30).catch(() => [] as NewsItem[]),
+    cachedMarketIndicators(),
+    cachedNewsItems().catch(() => [] as NewsItem[]),
   ]);
 
   const watchResult = await fetchWatchlistSnapshots(requestedSymbols, {
