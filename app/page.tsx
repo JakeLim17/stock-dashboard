@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { DashboardClient } from "@/components/DashboardClient";
-import { DashboardSkeleton } from "@/components/skeletons/DashboardSkeleton";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { buildSnapshot } from "@/lib/snapshot";
 
 // 매 요청마다 새로 (라이브 데이터)
@@ -9,12 +9,15 @@ export const revalidate = 0;
 
 // Suspense streaming SSR 구조.
 //
-//  1. 페이지 진입 즉시 layout.tsx + Suspense fallback(DashboardSkeleton) 이 HTML로 stream → 1초 이내 화면 윤곽 표시.
-//  2. DashboardLoader가 buildSnapshot()을 await하는 동안 사용자는 스켈레톤을 본다.
+//  1. 페이지 진입 즉시 layout.tsx + Suspense fallback(LoadingScreen) 이 HTML로 stream
+//     → 단계 메시지 + 카운트다운 + progress bar 가 즉시 표시되어 체감 대기 시간을 줄임.
+//  2. DashboardLoader가 buildSnapshot()을 await하는 동안 사용자는 LoadingScreen을 본다.
 //  3. 데이터가 도착하면 동일 HTTP 응답의 다음 청크로 진짜 컨텐츠가 stream되어 fallback 자리에 자동 교체.
 //
-// 페이지 전환 시점에는 app/loading.tsx가 먼저 보이고, 페이지 RSC가 시작되면
-// 이 페이지의 Suspense fallback이 이어받는다 — 두 단계 모두 빈 화면을 피한다.
+// 주의: HTML form POST + 303 redirect 흐름(로그인) 에서는 app/loading.tsx 가 트리거되지
+// 않는다 (Next.js client navigation 일 때만 작동). 따라서 첫 진입의 풀스크린 로딩 UX는
+// 이 Suspense fallback 이 단독으로 책임진다 — 그래서 DashboardSkeleton 이 아닌
+// LoadingScreen 을 쓴다.
 //
 // 영역별(SummaryBar/StockGrid/News) Suspense 분리는 DashboardClient가 단일 state로
 // polling을 통합 관리하는 구조라 별도 Phase에서 진행한다. (lib/snapshot.ts 의
@@ -22,7 +25,7 @@ export const revalidate = 0;
 // 호출 가능한 형태로 준비되어 있음.)
 export default function HomePage() {
   return (
-    <Suspense fallback={<DashboardSkeleton />}>
+    <Suspense fallback={<LoadingScreen />}>
       <DashboardLoader />
     </Suspense>
   );
