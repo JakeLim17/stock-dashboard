@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { Activity, KeyRound } from "lucide-react";
+import { LoginSubmitButton } from "./LoginForm";
 
 interface PageProps {
   searchParams: Promise<{ next?: string; error?: string }>;
@@ -61,13 +62,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             </p>
           )}
 
-          <button
-            type="submit"
-            className="w-full h-11 inline-flex items-center justify-center gap-2 rounded-md bg-foreground text-background font-medium hover:opacity-90 transition-opacity active:opacity-80 touch-manipulation"
-          >
-            <KeyRound className="h-4 w-4" />
-            들어가기
-          </button>
+          <LoginSubmitButton />
         </form>
       </div>
     </Suspense>

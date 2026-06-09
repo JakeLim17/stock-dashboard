@@ -22,7 +22,15 @@ import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
 import { fmtRelative } from "@/lib/utils";
-import { LogOut, MoonStar, RefreshCw, Search, Plus, X } from "lucide-react";
+import {
+  Loader2,
+  LogOut,
+  MoonStar,
+  RefreshCw,
+  Search,
+  Plus,
+  X,
+} from "lucide-react";
 
 async function logout() {
   try {
@@ -94,6 +102,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       ""
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -354,12 +363,22 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           <ThemeToggle />
           <button
             type="button"
-            onClick={() => void logout()}
-            title="로그아웃"
-            aria-label="로그아웃"
-            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card hover:bg-muted transition-colors"
+            onClick={() => {
+              if (loggingOut) return;
+              setLoggingOut(true);
+              void logout();
+            }}
+            disabled={loggingOut}
+            title={loggingOut ? "로그아웃 중..." : "로그아웃"}
+            aria-label={loggingOut ? "로그아웃 중" : "로그아웃"}
+            aria-busy={loggingOut}
+            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-60 disabled:cursor-progress transition-colors"
           >
-            <LogOut className="h-4 w-4" />
+            {loggingOut ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="h-4 w-4" />
+            )}
           </button>
         </div>
       </header>
