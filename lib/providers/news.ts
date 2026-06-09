@@ -56,6 +56,35 @@ const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
   // ── 바이오 ──────────────────────────────────────────────
   { q: "삼성바이오로직스", symbol: "207940.KS", lang: "ko" },
 
+  // ── 2026-06 카탈로그 확장 종목 (한·영 인기 종목 위주) ────
+  { q: "두산로보틱스", symbol: "454910.KS", lang: "ko" },
+  { q: "Doosan Robotics", symbol: "454910.KS", lang: "en" },
+  { q: "씨에스윈드", symbol: "112610.KS", lang: "ko" },
+  { q: "CS Wind", symbol: "112610.KS", lang: "en" },
+  { q: "휴젤 보톡스", symbol: "145020.KQ", lang: "ko" },
+  { q: "Hugel botulinum", symbol: "145020.KQ", lang: "en" },
+  { q: "LG생활건강", symbol: "051900.KS", lang: "ko" },
+  { q: "삼양식품 불닭", symbol: "003230.KS", lang: "ko" },
+  { q: "Samyang Foods Buldak", symbol: "003230.KS", lang: "en" },
+  { q: "스튜디오드래곤", symbol: "253450.KQ", lang: "ko" },
+  { q: "현대건설", symbol: "000720.KS", lang: "ko" },
+  { q: "Hyundai E&C", symbol: "000720.KS", lang: "en" },
+  { q: "더존비즈온", symbol: "012510.KS", lang: "ko" },
+  { q: "LG디스플레이 OLED", symbol: "034220.KS", lang: "ko" },
+  { q: "LG Display OLED", symbol: "034220.KS", lang: "en" },
+  { q: "CJ대한통운", symbol: "000120.KS", lang: "ko" },
+
+  // ── 미국 빅테크 (영문 쿼리만 — 한국어는 노이즈) ──────────
+  { q: "Apple AAPL", symbol: "AAPL", lang: "en" },
+  { q: "Microsoft Azure cloud", symbol: "MSFT", lang: "en" },
+  { q: "Alphabet Google", symbol: "GOOGL", lang: "en" },
+  { q: "Meta Platforms", symbol: "META", lang: "en" },
+  { q: "Amazon AWS", symbol: "AMZN", lang: "en" },
+  { q: "Tesla TSLA EV", symbol: "TSLA", lang: "en" },
+  { q: "AMD chip", symbol: "AMD", lang: "en" },
+  { q: "TSMC foundry", symbol: "TSM", lang: "en" },
+  { q: "Palantir AI", symbol: "PLTR", lang: "en" },
+
   // ── 시장 전반 ───────────────────────────────────────────
   { q: "반도체", lang: "ko" },
   { q: "환율 달러", lang: "ko" },
@@ -150,8 +179,37 @@ const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
   { kw: "두산에너빌리티", code: "034020.KS" },
   { kw: "대한항공", code: "003490.KS" },
   { kw: "삼성바이오로직스", code: "207940.KS" },
+  // ── 2026-06 카탈로그 확장 ────────────────────────────────
+  { kw: "두산로보틱스", code: "454910.KS" },
+  { kw: "씨에스윈드", code: "112610.KS" },
+  { kw: "휴젤", code: "145020.KQ" },
+  { kw: "LG생활건강", code: "051900.KS" },
+  { kw: "삼양식품", code: "003230.KS" },
+  { kw: "스튜디오드래곤", code: "253450.KQ" },
+  { kw: "현대건설", code: "000720.KS" },
+  { kw: "더존비즈온", code: "012510.KS" },
+  { kw: "LG디스플레이", code: "034220.KS" },
+  { kw: "CJ대한통운", code: "000120.KS" },
+  // 미국 빅테크 (한·영 모두)
   { kw: "엔비디아", code: "NVDA" },
   { kw: "nvidia", code: "NVDA" },
+  { kw: "애플", code: "AAPL" },
+  { kw: "apple", code: "AAPL" },
+  { kw: "마이크로소프트", code: "MSFT" },
+  { kw: "microsoft", code: "MSFT" },
+  { kw: "알파벳", code: "GOOGL" },
+  { kw: "alphabet", code: "GOOGL" },
+  { kw: "구글", code: "GOOGL" },
+  { kw: "google", code: "GOOGL" },
+  { kw: "메타", code: "META" },
+  { kw: "meta platforms", code: "META" },
+  { kw: "아마존", code: "AMZN" },
+  { kw: "amazon", code: "AMZN" },
+  { kw: "테슬라", code: "TSLA" },
+  { kw: "tesla", code: "TSLA" },
+  { kw: "tsmc", code: "TSM" },
+  { kw: "팔란티어", code: "PLTR" },
+  { kw: "palantir", code: "PLTR" },
 ];
 
 function matchSymbol(text: string): string | null {

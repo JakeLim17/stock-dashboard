@@ -44,8 +44,11 @@ export function VolatilityBadge({
     assessment.intradayUsed ? "분봉 가중 적용" : "일봉 기반",
   ].join("\n");
 
+  // 도박장 등급은 살짝 흔들림으로 시각적 경고 강화. (prefers-reduced-motion 시 자동 무효)
+  const className = assessment.level === "gambling" ? "shake-soft" : undefined;
+
   return (
-    <Badge variant={variant} size={size} title={title}>
+    <Badge variant={variant} size={size} title={title} className={className}>
       <Icon className="h-3 w-3" />
       {label}
     </Badge>

@@ -2,6 +2,7 @@
 
 import type { StockSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
+import { PriceTicker } from "./PriceTicker";
 import {
   changeColor,
   fmtNumber,
@@ -84,9 +85,9 @@ export function PredictionHero({
               {snap.meta.name}
             </div>
             <div
-              className={`tabular text-2xl md:text-3xl font-bold ${changeColor(primary.changeRate)}`}
+              className={`text-2xl md:text-3xl font-bold ${changeColor(primary.changeRate)}`}
             >
-              {fmtNumber(primary.price, 0)}
+              <PriceTicker value={primary.price} decimals={0} />
             </div>
             <div
               className={`tabular text-sm ${changeColor(primary.changeRate)}`}

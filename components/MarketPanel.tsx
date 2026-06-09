@@ -1,6 +1,7 @@
 import type { MarketIndicator } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
-import { changeColor, fmtNumber, fmtPercent, priceFreshness } from "@/lib/utils";
+import { PriceTicker } from "./PriceTicker";
+import { changeColor, fmtPercent, priceFreshness } from "@/lib/utils";
 import { TrendingDown, TrendingUp, AlertTriangle, Minus } from "lucide-react";
 
 export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
@@ -38,8 +39,8 @@ export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="tabular text-sm font-semibold">
-                    {fmtNumber(i.value, i.code === "KRW=X" ? 2 : 2)}
+                  <div className="text-sm font-semibold">
+                    <PriceTicker value={i.value} decimals={2} />
                   </div>
                   <div className={`tabular text-xs inline-flex items-center gap-1 ${changeColor(i.changeRate)}`}>
                     {iconFor(i)} {fmtPercent(i.changeRate)}

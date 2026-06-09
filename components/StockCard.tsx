@@ -10,6 +10,7 @@ import { MarketAlertBadge } from "./MarketAlertBadge";
 import { VolatilityBadge } from "./VolatilityBadge";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
+import { PriceTicker } from "./PriceTicker";
 import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
@@ -94,8 +95,8 @@ export function StockCard({ snap, onSelect, selected }: {
         {/* 가격 — 메인은 항상 "지금 진행 중인 거래". 시간외 거래중이면 시간외가 메인. */}
         <div className="flex items-end justify-between">
           <div>
-            <div className={`tabular text-3xl font-bold ${changeColor(primary.changeRate)}`}>
-              {fmtNumber(primary.price, 0)}
+            <div className={`text-3xl font-bold ${changeColor(primary.changeRate)}`}>
+              <PriceTicker value={primary.price} decimals={0} />
             </div>
             <div className={`tabular text-sm mt-1 inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
               {trendIcon}
@@ -177,13 +178,13 @@ export function StockCard({ snap, onSelect, selected }: {
             </div>
             <div className="text-right">
               <div
-                className={`tabular text-base font-semibold ${
+                className={`text-base font-semibold ${
                   secondary.isExtended
                     ? changeColor(secondary.changeRate)
                     : "text-muted-foreground"
                 }`}
               >
-                {fmtNumber(secondary.price, 0)}
+                <PriceTicker value={secondary.price} decimals={0} />
               </div>
               <div
                 className={`tabular text-[11px] ${

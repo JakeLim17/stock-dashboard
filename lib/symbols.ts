@@ -78,6 +78,70 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "028260.KS", name: "삼성물산", kind: "kr-stock", sector: "유통종합" },
   // 항공
   { code: "003490.KS", name: "대한항공", kind: "kr-stock", sector: "항공", isSectorLeader: true, sectorLeaderLabel: "항공 대장" },
+
+  // ─── 2026-06 카탈로그 확장 (한국 28종 + 미국 9종) ───────────────────────
+  // 로봇
+  { code: "454910.KS", name: "두산로보틱스", kind: "kr-stock", sector: "로봇", isSectorLeader: true, sectorLeaderLabel: "로봇 대장" },
+  { code: "277810.KQ", name: "레인보우로보틱스", kind: "kr-stock", sector: "로봇" },
+  // 반도체 장비
+  { code: "403870.KQ", name: "HPSP", kind: "kr-stock", sector: "반도체장비" },
+  { code: "240810.KQ", name: "원익IPS", kind: "kr-stock", sector: "반도체장비" },
+  { code: "039030.KQ", name: "이오테크닉스", kind: "kr-stock", sector: "반도체장비" },
+  // 반도체 소재
+  { code: "014680.KS", name: "한솔케미칼", kind: "kr-stock", sector: "반도체소재" },
+  { code: "357780.KQ", name: "솔브레인", kind: "kr-stock", sector: "반도체소재" },
+  { code: "005290.KQ", name: "동진쎄미켐", kind: "kr-stock", sector: "반도체소재" },
+  // 신재생 (풍력·태양광)
+  { code: "112610.KS", name: "씨에스윈드", kind: "kr-stock", sector: "신재생", isSectorLeader: true, sectorLeaderLabel: "풍력타워 대장" },
+  { code: "009830.KS", name: "한화솔루션", kind: "kr-stock", sector: "신재생" },
+  // 수소·연료전지
+  { code: "336260.KS", name: "두산퓨얼셀", kind: "kr-stock", sector: "수소" },
+  // 의료미용·보톡스
+  { code: "145020.KQ", name: "휴젤", kind: "kr-stock", sector: "의료미용", isSectorLeader: true, sectorLeaderLabel: "보톡스 대장" },
+  { code: "214150.KQ", name: "클래시스", kind: "kr-stock", sector: "의료미용" },
+  { code: "086900.KQ", name: "메디톡스", kind: "kr-stock", sector: "의료미용" },
+  // 화장품
+  { code: "051900.KS", name: "LG생활건강", kind: "kr-stock", sector: "화장품", isSectorLeader: true, sectorLeaderLabel: "화장품 대장" },
+  { code: "090430.KS", name: "아모레퍼시픽", kind: "kr-stock", sector: "화장품" },
+  // K-푸드·식음료
+  { code: "003230.KS", name: "삼양식품", kind: "kr-stock", sector: "식음료", isSectorLeader: true, sectorLeaderLabel: "K-푸드 대장" },
+  { code: "097950.KS", name: "CJ제일제당", kind: "kr-stock", sector: "식음료" },
+  { code: "004370.KS", name: "농심", kind: "kr-stock", sector: "식음료" },
+  { code: "271560.KS", name: "오리온", kind: "kr-stock", sector: "식음료" },
+  // 콘텐츠·미디어
+  { code: "253450.KQ", name: "스튜디오드래곤", kind: "kr-stock", sector: "콘텐츠", isSectorLeader: true, sectorLeaderLabel: "콘텐츠 대장" },
+  { code: "035760.KQ", name: "CJ ENM", kind: "kr-stock", sector: "콘텐츠" },
+  // 여행·레저·카지노
+  { code: "008770.KS", name: "호텔신라", kind: "kr-stock", sector: "여행레저", isSectorLeader: true, sectorLeaderLabel: "여행 대장" },
+  { code: "035250.KS", name: "강원랜드", kind: "kr-stock", sector: "여행레저" },
+  // 유통·리테일
+  { code: "139480.KS", name: "이마트", kind: "kr-stock", sector: "유통", isSectorLeader: true, sectorLeaderLabel: "유통 대장" },
+  { code: "004170.KS", name: "신세계", kind: "kr-stock", sector: "유통" },
+  // 건설
+  { code: "000720.KS", name: "현대건설", kind: "kr-stock", sector: "건설", isSectorLeader: true, sectorLeaderLabel: "건설 대장" },
+  { code: "006360.KS", name: "GS건설", kind: "kr-stock", sector: "건설" },
+  // 디스플레이
+  { code: "034220.KS", name: "LG디스플레이", kind: "kr-stock", sector: "디스플레이", isSectorLeader: true, sectorLeaderLabel: "디스플레이 대장" },
+  { code: "213420.KQ", name: "덕산네오룩스", kind: "kr-stock", sector: "디스플레이" },
+  // 전선·송배전
+  { code: "006260.KS", name: "LS", kind: "kr-stock", sector: "전선", isSectorLeader: true, sectorLeaderLabel: "전선 대장" },
+  // AI 소프트웨어
+  { code: "012510.KS", name: "더존비즈온", kind: "kr-stock", sector: "AI소프트웨어", isSectorLeader: true, sectorLeaderLabel: "AI SW 대장" },
+  // 물류·택배
+  { code: "000120.KS", name: "CJ대한통운", kind: "kr-stock", sector: "물류", isSectorLeader: true, sectorLeaderLabel: "물류 대장" },
+
+  // ─── 미국 빅테크 (kind: "us-stock") ─────────────────────────────────────
+  // 한국식 flow(외인/기관) 데이터는 fetchFlowOrMock에서 자동 mock 처리됨.
+  // 야후 quote/chart/quoteSummary로 시세·컨센서스 모두 가능.
+  { code: "AAPL", name: "애플", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "스마트폰 대장" },
+  { code: "MSFT", name: "마이크로소프트", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "클라우드 대장" },
+  { code: "GOOGL", name: "알파벳", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "검색 대장" },
+  { code: "META", name: "메타", kind: "us-stock", sector: "글로벌IT" },
+  { code: "AMZN", name: "아마존", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "이커머스 대장" },
+  { code: "TSLA", name: "테슬라", kind: "us-stock", sector: "글로벌EV", isSectorLeader: true, sectorLeaderLabel: "EV 대장" },
+  { code: "AMD", name: "AMD", kind: "us-stock", sector: "글로벌반도체" },
+  { code: "TSM", name: "TSMC", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "파운드리 대장" },
+  { code: "PLTR", name: "팔란티어", kind: "us-stock", sector: "글로벌AI" },
 ];
 
 // 시장 지표 패널
@@ -106,7 +170,21 @@ export type ThemeTag =
   | "nuclear_power"
   | "biotech"
   | "shipbuilding"
-  | "finance";
+  | "finance"
+  // ── 2026-06 카탈로그 확장 ──────────────────────────────
+  | "robot"
+  | "semi_equipment"
+  | "renewable"
+  | "medical_aesthetic"
+  | "beauty"
+  | "k_food"
+  | "content_media"
+  | "travel_leisure"
+  | "retail"
+  | "construction"
+  | "display"
+  | "ai_software"
+  | "us_bigtech";
 
 export interface ThemeDefinition {
   id: ThemeTag;
@@ -205,6 +283,117 @@ export const THEMES: ThemeDefinition[] = [
       "086790.KS",
       "032830.KS",
       "323410.KS",
+    ],
+  },
+  // ─── 2026-06 카탈로그 확장 테마 ───────────────────────────────────────
+  {
+    id: "robot",
+    label: "로봇",
+    emoji: "🤖",
+    description: "협동로봇·휴머노이드",
+    codes: ["454910.KS", "277810.KQ"],
+  },
+  {
+    id: "semi_equipment",
+    label: "반도체 장비·소재",
+    emoji: "🔧",
+    description: "장비·소재·HBM 후공정",
+    codes: [
+      "042700.KS",
+      "403870.KQ",
+      "240810.KQ",
+      "039030.KQ",
+      "014680.KS",
+      "357780.KQ",
+      "005290.KQ",
+    ],
+  },
+  {
+    id: "renewable",
+    label: "신재생·수소",
+    emoji: "🌱",
+    description: "풍력·태양광·연료전지",
+    codes: ["112610.KS", "009830.KS", "336260.KS"],
+  },
+  {
+    id: "medical_aesthetic",
+    label: "의료미용",
+    emoji: "💉",
+    description: "보톡스·미용 의료기기",
+    codes: ["145020.KQ", "214150.KQ", "086900.KQ"],
+  },
+  {
+    id: "beauty",
+    label: "K-뷰티",
+    emoji: "💄",
+    description: "화장품·생활용품",
+    codes: ["051900.KS", "090430.KS"],
+  },
+  {
+    id: "k_food",
+    label: "K-푸드",
+    emoji: "🍜",
+    description: "글로벌 K-푸드 수출",
+    codes: ["003230.KS", "097950.KS", "004370.KS", "271560.KS"],
+  },
+  {
+    id: "content_media",
+    label: "콘텐츠·미디어",
+    emoji: "🎬",
+    description: "드라마·예능·K-팝",
+    codes: ["253450.KQ", "035760.KQ", "352820.KS"],
+  },
+  {
+    id: "travel_leisure",
+    label: "여행·레저",
+    emoji: "🏖️",
+    description: "면세·호텔·카지노",
+    codes: ["008770.KS", "035250.KS"],
+  },
+  {
+    id: "retail",
+    label: "유통",
+    emoji: "🛒",
+    description: "백화점·대형마트",
+    codes: ["139480.KS", "004170.KS"],
+  },
+  {
+    id: "construction",
+    label: "건설",
+    emoji: "🏗️",
+    description: "주택·플랜트·해외수주",
+    codes: ["000720.KS", "006360.KS"],
+  },
+  {
+    id: "display",
+    label: "디스플레이",
+    emoji: "📺",
+    description: "OLED·소재",
+    codes: ["034220.KS", "213420.KQ"],
+  },
+  {
+    id: "ai_software",
+    label: "AI 소프트웨어",
+    emoji: "🧮",
+    description: "ERP·SaaS·AI 솔루션",
+    codes: ["012510.KS"],
+  },
+  {
+    id: "us_bigtech",
+    label: "미국 빅테크",
+    emoji: "🇺🇸",
+    description: "글로벌 시총 상위·AI 인프라",
+    codes: [
+      "AAPL",
+      "MSFT",
+      "GOOGL",
+      "META",
+      "AMZN",
+      "TSLA",
+      "AMD",
+      "TSM",
+      "PLTR",
+      "NVDA",
     ],
   },
 ];
