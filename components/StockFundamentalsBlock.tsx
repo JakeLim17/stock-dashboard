@@ -1,0 +1,245 @@
+"use client";
+
+import type { StockSnapshot } from "@/lib/types";
+import { Badge } from "./ui/Badge";
+import { PriceTicker } from "./PriceTicker";
+import { PriceWithKrw } from "./PriceWithKrw";
+import {
+  changeColor,
+  currencyOf,
+  fmtNumber,
+  fmtPercent,
+  fmtSigned,
+  fmtTime,
+  pickPrimaryQuote,
+  priceTimeLabel,
+} from "@/lib/utils";
+
+// 카드/디테일 패널 양쪽에서 재사용하는 "종목 펀더멘털 블록".
+// 직접 들어있는 것:
+//   - secondary 박스 (시간외 ↔ 정규장 종가 자동 스왑)
+//   - 거래량 / RSI(14)
+//   - 수급(외인/기관/개인 당일·5일) + 출처·신선도 라벨
+//
+// StockCard 본문에서 단일 source로 노출, StockDetailPanel "수급" 탭에서도 동일 컴포넌트 재사용.
+// 비선택 종목 카드는 여전히 카드 본문에서 이 블록을 보고, 선택 종목은 모바일에서 카드가 숨겨지지만
+// Detail "수급" 탭에서 같은 정보를 한눈에 본다.
+//
+// variant:
+//   "card"   - 종목 카드 본문 (배경 muted/40, 좁은 폭 기준)
+//   "detail" - StockDetailPanel "수급" 탭 (배경 muted/20, 넓은 폭 기준)
+type Variant = "card" | "detail";
+
+interface Props {
+  snap: StockSnapshot;
+  krwRate?: number | null;
+  variant?: Variant;
+}
+
+export function StockFundamentalsBlock({
+  snap,
+  krwRate,
+  variant = "card",
+}: Props) {
+  const { meta, quote, tech, flow } = snap;
+  const { secondary } = pickPrimaryQuote(quote);
+  const currency = currencyOf(meta.code, meta.currency);
+  const isDetail = variant === "detail";
+
+  return (
+    <div className={isDetail ? "space-y-4" : "space-y-4"}>
+      {/* 부연 박스 — 시간외 거래 또는 정규장 종가. 카드/디테일 동일 노출. */}
+      {secondary && (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 flex items-center justify-between gap-3">
+          <div className="space-y-1 text-xs">
+            <div className="flex items-center gap-2">
+              <Badge variant={secondary.active ? "good" : "neutral"} size="sm">
+                {secondary.label}
+                {secondary.active ? " · 거래중" : ""}
+              </Badge>
+              {secondary.time && (
+                <span className="text-muted-foreground tabular">
+                  {secondary.isExtended
+                    ? fmtTime(secondary.time)
+                    : priceTimeLabel(secondary.time)}
+                </span>
+              )}
+            </div>
+            {secondary.isExtended && secondary.volume != null && (
+              <div className="text-[11px] text-muted-foreground tabular">
+                시간외 거래량 {fmtNumber(secondary.volume)}
+              </div>
+            )}
+          </div>
+          <div className="text-right">
+            <div
+              className={`text-base font-semibold ${
+                secondary.isExtended
+                  ? changeColor(secondary.changeRate)
+                  : "text-muted-foreground"
+              }`}
+            >
+              <PriceTicker value={secondary.price} decimals={0} />
+            </div>
+            {currency === "USD" && (
+              <div className="text-[10px] leading-tight">
+                <PriceWithKrw
+                  price={secondary.price}
+                  currency={currency}
+                  krwRate={krwRate ?? null}
+                />
+              </div>
+            )}
+            <div
+              className={`tabular text-[11px] ${
+                secondary.isExtended
+                  ? changeColor(secondary.changeRate)
+                  : "text-muted-foreground"
+              }`}
+            >
+              {fmtSigned(secondary.changeAbs)} ({fmtPercent(secondary.changeRate)})
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 거래량 / RSI(14) */}
+      <div
+        className={`grid grid-cols-2 gap-x-4 gap-y-2 text-sm ${
+          isDetail ? "" : "border-t border-border pt-3"
+        }`}
+      >
+        <Row label="거래량" value={fmtNumber(quote.volume)} />
+        <Row
+          label="RSI(14)"
+          value={tech.rsi14 != null ? tech.rsi14.toFixed(0) : "—"}
+        />
+      </div>
+
+      {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 */}
+      <FlowSection flow={flow} variant={variant} />
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+}: {
+  label: React.ReactNode;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="tabular font-medium">{value}</span>
+    </div>
+  );
+}
+
+function flowLabel(v: number | null | undefined): string {
+  if (v == null) return "—";
+  const eok = v / 1e8;
+  const sign = eok > 0 ? "+" : "";
+  return `${sign}${eok.toFixed(0)}억`;
+}
+
+function flowLabel5d(v: number | null | undefined): string {
+  if (v == null) return "—";
+  const eok = Math.round(v / 1e8);
+  const sign = eok > 0 ? "+" : "";
+  return `${sign}${eok.toLocaleString("ko-KR")}`;
+}
+
+function freshnessLabel(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 0) return "방금 전";
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "방금 전";
+  if (min < 60) return `조회 ${min}분 전`;
+  const hr = Math.round(min / 60);
+  return `조회 ${hr}시간 전`;
+}
+
+function FlowSection({
+  flow,
+  variant,
+}: {
+  flow: import("@/lib/types").FlowData;
+  variant: Variant;
+}) {
+  const cells: Array<{
+    label: string;
+    value: number | null | undefined;
+  }> = [
+    { label: "외인", value: flow.foreignNet },
+    { label: "기관", value: flow.institutionNet },
+    { label: "개인", value: flow.individualNet },
+  ];
+  const has5d =
+    flow.foreignNet5d != null ||
+    flow.institutionNet5d != null ||
+    flow.individualNet5d != null;
+  const fresh = flow.fetchedAt ? freshnessLabel(flow.fetchedAt) : null;
+  const isDetail = variant === "detail";
+
+  return (
+    <div
+      className={
+        isDetail
+          ? "rounded-lg border border-border bg-muted/20 p-3 space-y-2"
+          : "border-t border-border pt-3 space-y-2"
+      }
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          수급 (당일 누적 · 종일치, 억)
+        </span>
+        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1.5">
+          {fresh && <span>{fresh}</span>}
+          {flow.source && (
+            <span>
+              {flow.source === "naver"
+                ? "네이버"
+                : flow.source === "kis"
+                  ? "KIS"
+                  : "mock"}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-sm">
+        {cells.map((c) => (
+          <div
+            key={c.label}
+            className={`rounded-md px-2 py-1.5 text-center ${
+              isDetail
+                ? "bg-background border border-border"
+                : "bg-muted/40"
+            }`}
+          >
+            <div className="text-[10px] text-muted-foreground">{c.label}</div>
+            <div
+              className={`tabular font-semibold ${
+                c.value != null ? changeColor(c.value) : ""
+              }`}
+            >
+              {flowLabel(c.value)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {has5d && (
+        <div className="text-[11px] text-muted-foreground tabular leading-snug">
+          <span className="mr-1">5일:</span>
+          외인 {flowLabel5d(flow.foreignNet5d)} / 기관{" "}
+          {flowLabel5d(flow.institutionNet5d)} / 개인{" "}
+          {flowLabel5d(flow.individualNet5d)} 억
+        </div>
+      )}
+      <div className="text-[10px] text-muted-foreground/80 leading-snug">
+        ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
+      </div>
+    </div>
+  );
+}

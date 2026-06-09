@@ -540,17 +540,26 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
       />
 
-      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용 */}
+      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용.
+          모바일(<lg)에서는 "선택 종목" 카드는 숨김 — Hero/Detail에 동일 정보가 모두 있어 중복.
+          데스크탑(>=lg)에서는 가로 비교를 위해 선택 종목도 그대로 노출. */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {snap.primaries.map((p) => (
-          <StockCard
-            key={p.meta.code}
-            snap={p}
-            selected={p.meta.code === selected}
-            onSelect={setSelected}
-            krwRate={krwRate}
-          />
-        ))}
+        {snap.primaries.map((p) => {
+          const isSelected = p.meta.code === selected;
+          return (
+            <div
+              key={p.meta.code}
+              className={isSelected ? "hidden lg:block" : ""}
+            >
+              <StockCard
+                snap={p}
+                selected={isSelected}
+                onSelect={setSelected}
+                krwRate={krwRate}
+              />
+            </div>
+          );
+        })}
         {snap.primaries.length === 0 && (
           <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
             종목 데이터를 불러오지 못했습니다.
@@ -565,13 +574,15 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       )}
 
       {/* 차트 + 마켓 시장신호 (예측은 아래 별도 행) */}
+      {/* grid items-stretch(기본) + 왼쪽 wrapper flex로 PriceChart 카드와 차트 영역을 오른쪽 컬럼 높이까지 stretch. */}
+      {/* PriceChart는 autoSize:true 이므로 컨테이너가 자라면 차트도 자동 follow. 컴포넌트 내부 수정 없이 outer wrapper만 조정. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col [&>div>div:last-child]:flex-1 [&>div>div:last-child]:!h-auto [&>div>div:last-child]:min-h-[280px]">
           {selectedSnap && (
             <PriceChart code={selectedSnap.meta.code} name={selectedSnap.meta.name} />
           )}
         </div>
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4">
           <MarketPanel indicators={snap.indicators} />
           {/* 이벤트 캘린더 — 실적·배당·FOMC·KOSPI 만기·휴장 D-N. 마켓 패널 아래 같은 우측 컬럼. */}
           <EventCalendar snapshot={snap} />
