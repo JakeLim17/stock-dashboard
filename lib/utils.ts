@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { Quote } from "./types";
+import type { MarketIndicator, Quote } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -290,6 +290,47 @@ export function pickPrimaryQuote(quote: Quote): {
     },
     secondary: null,
   };
+}
+
+// ─── 통화·환율 헬퍼 (USD 종목 원화 병기용) ─────────────────────────────────
+// 한국 종목(.KS/.KQ)은 KRW, 그 외(미국 ADR·메가캡·환율·지수)는 USD로 본다.
+// SymbolMeta.currency가 명시되어 있으면 그쪽을 우선 사용.
+export type DisplayCurrency = "KRW" | "USD";
+
+export function currencyOf(
+  code: string,
+  explicit?: DisplayCurrency
+): DisplayCurrency {
+  if (explicit) return explicit;
+  // 한국 종목 코드: 6자리 숫자 + .KS / .KQ
+  if (/^\d{6}\.K[SQ]$/.test(code)) return "KRW";
+  // 그 외 (AAPL·NVDA·^SOX·NQ=F 등)는 일단 USD로 본다.
+  // 환율(KRW=X)·달러원 자체는 KRW 표기지만, 원화 병기는 USD 종목에만 붙으므로
+  // 호출 측이 "isUS"로 분기를 거른다.
+  return "USD";
+}
+
+// 대시보드 indicators에서 USDKRW 환율값 추출.
+// 환율 데이터 없거나 0 이하면 null (호출 측은 보조 표시 생략).
+export function getKrwRate(
+  indicators: Pick<MarketIndicator, "code" | "value">[] | undefined | null
+): number | null {
+  if (!indicators) return null;
+  const fx = indicators.find((i) => i.code === "KRW=X");
+  if (!fx || !Number.isFinite(fx.value) || fx.value <= 0) return null;
+  return fx.value;
+}
+
+// USD 가격을 원화 정수(콤마)로 포맷. 보조 표시 전용 — 소수점 버림.
+// 환율 없거나 가격 비정상이면 빈 문자열을 반환해 호출 측이 보조 표시를 생략한다.
+export function formatKrwAmount(
+  price: number | null | undefined,
+  krwRate: number | null
+): string {
+  if (price == null || !Number.isFinite(price)) return "";
+  if (krwRate == null || krwRate <= 0) return "";
+  const krw = Math.floor(price * krwRate);
+  return `₩${krw.toLocaleString("ko-KR")}`;
 }
 
 // 안전한 fetch with timeout

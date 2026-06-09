@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
+import { PriceWithKrw } from "./PriceWithKrw";
 import {
   changeColor,
+  currencyOf,
   fmtNumber,
   fmtPercent,
   fmtRelative,
@@ -26,10 +28,13 @@ export function PredictionPanel({
   snaps,
   selectedCode,
   embedded = false,
+  krwRate,
 }: {
   snaps: StockSnapshot[];
   selectedCode?: string;
   embedded?: boolean;
+  /** USDKRW 환율 — USD 종목 SL/TP1/TP2/진입가 원화 병기에 사용. 없으면 보조 표시 생략. */
+  krwRate?: number | null;
 }) {
   const [activeCode, setActiveCode] = useState(
     () => selectedCode ?? snaps[0]?.meta.code ?? ""
@@ -104,6 +109,8 @@ export function PredictionPanel({
   const oneDay = p.ranges.find((r) => r.horizonDays === 1);
   const oneWeek = p.ranges.find((r) => r.horizonDays === 5);
   const primaryRange = oneDay ?? oneWeek ?? p.ranges[0];
+  // 활성 종목 통화 — USD면 진입/손절/목표 가격에 원화 병기. KRW면 보조 표시 생략(회귀 방지).
+  const currency = currencyOf(snap.meta.code, snap.meta.currency);
 
   const inner = (
     <>
@@ -172,10 +179,11 @@ export function PredictionPanel({
             상세 예측 보기
           </summary>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5 pt-4">
-            {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0) */}
+            {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0).
+                신규(EWMA + t df=5)는 95% 신뢰, 옛 캐시(stddev + 정규)는 68%로 표기. */}
             {p.ranges.length > 0 && (
               <Section
-                title="변동성 범위 (68% 신뢰)"
+                title={`변동성 범위 (${Math.round((p.ranges[0].confidence ?? 0.68) * 100)}% 신뢰)`}
                 icon={<LineChart className="h-3.5 w-3.5" />}
               >
                 <div className="space-y-2">
@@ -216,27 +224,48 @@ export function PredictionPanel({
                 icon={<Crosshair className="h-3.5 w-3.5" />}
               >
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                  <PriceRow label="진입 기준" value={p.targets.entry} />
+                  <PriceRow
+                    label="진입 기준"
+                    value={p.targets.entry}
+                    currency={currency}
+                    krwRate={krwRate ?? null}
+                  />
                   <PriceRow
                     label="손절"
                     value={p.targets.stopLoss}
                     refPrice={price}
                     tone="down"
+                    currency={currency}
+                    krwRate={krwRate ?? null}
                   />
                   <PriceRow
                     label="목표 1"
                     value={p.targets.takeProfit1}
                     refPrice={price}
                     tone="up"
+                    currency={currency}
+                    krwRate={krwRate ?? null}
                   />
                   <PriceRow
                     label="목표 2"
                     value={p.targets.takeProfit2}
                     refPrice={price}
                     tone="up"
+                    currency={currency}
+                    krwRate={krwRate ?? null}
                   />
-                  <PriceRow label="지지선 (20일)" value={p.targets.support} />
-                  <PriceRow label="저항선 (20일)" value={p.targets.resistance} />
+                  <PriceRow
+                    label="지지선 (20일)"
+                    value={p.targets.support}
+                    currency={currency}
+                    krwRate={krwRate ?? null}
+                  />
+                  <PriceRow
+                    label="저항선 (20일)"
+                    value={p.targets.resistance}
+                    currency={currency}
+                    krwRate={krwRate ?? null}
+                  />
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/60 text-xs">
                   <span className="text-muted-foreground">손익비</span>
@@ -374,13 +403,46 @@ export function PredictionPanel({
     </>
   );
 
+  // σ 배지 — 신규 응답엔 volatilityModel.dailySigma 가 직접 들어옴.
+  // 옛 캐시 호환: 범위에서 역추출(stdSigma) 했지만 95% 신뢰구간 곱하기 t-multiplier 가 섞여있어
+  // 부정확하므로 volatilityModel 우선.
+  const dailySigmaPct =
+    p.volatilityModel?.dailySigma != null
+      ? p.volatilityModel.dailySigma
+      : stdSigma(p);
+  const modelLabel =
+    p.volatilityModel?.kind === "ewma-t"
+      ? `EWMA · t분포(df=${p.volatilityModel.df ?? 5}) · ${Math.round((p.volatilityModel.confidence ?? 0.95) * 100)}% 신뢰`
+      : "최근 90일 변동성 기반";
+
   if (embedded) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-end">
-          <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
-            σ {(stdSigma(p) * 100).toFixed(2)}%/일
-          </Badge>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[11px] text-muted-foreground">{modelLabel}</span>
+          <div className="flex items-center gap-2">
+            {p.eventVolatility && (
+              <Badge
+                variant="warn"
+                size="sm"
+                className="shrink-0 whitespace-nowrap"
+                title={`${p.eventVolatility.eventLabel} — σ × ${p.eventVolatility.factor.toFixed(2)} 부풀림 적용`}
+              >
+                📅 {p.eventVolatility.shortLabel} D
+                {p.eventVolatility.daysToEvent >= 0
+                  ? `-${p.eventVolatility.daysToEvent}`
+                  : `+${Math.abs(p.eventVolatility.daysToEvent)}`}{" "}
+                · +{Math.round((p.eventVolatility.factor - 1) * 100)}%
+              </Badge>
+            )}
+            <Badge
+              variant="neutral"
+              size="sm"
+              className="shrink-0 whitespace-nowrap"
+            >
+              σ {(dailySigmaPct * 100).toFixed(2)}%/일
+            </Badge>
+          </div>
         </div>
         {inner}
       </div>
@@ -392,13 +454,30 @@ export function PredictionPanel({
       <CardHeader className="flex items-start justify-between gap-3">
         <div>
           <CardTitle>예측</CardTitle>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            최근 90일 변동성 기반
-          </p>
+          <p className="text-[11px] text-muted-foreground mt-1">{modelLabel}</p>
         </div>
-        <Badge variant="neutral" size="sm" className="shrink-0 whitespace-nowrap">
-          σ {(stdSigma(p) * 100).toFixed(2)}%/일
-        </Badge>
+        <div className="flex items-center gap-2">
+          {p.eventVolatility && (
+            <Badge
+              variant="warn"
+              size="sm"
+              className="shrink-0 whitespace-nowrap"
+              title={`${p.eventVolatility.eventLabel} — σ × ${p.eventVolatility.factor.toFixed(2)} 부풀림 적용`}
+            >
+              📅 {p.eventVolatility.shortLabel} D
+              {p.eventVolatility.daysToEvent >= 0
+                ? `-${p.eventVolatility.daysToEvent}`
+                : `+${Math.abs(p.eventVolatility.daysToEvent)}`}
+            </Badge>
+          )}
+          <Badge
+            variant="neutral"
+            size="sm"
+            className="shrink-0 whitespace-nowrap"
+          >
+            σ {(dailySigmaPct * 100).toFixed(2)}%/일
+          </Badge>
+        </div>
       </CardHeader>
       <CardBody className="space-y-4">{inner}</CardBody>
     </Card>
@@ -622,24 +701,41 @@ function PriceRow({
   value,
   refPrice,
   tone,
+  currency,
+  krwRate,
 }: {
   label: string;
   value: number;
   refPrice?: number;
   tone?: "up" | "down";
+  currency?: "KRW" | "USD";
+  krwRate?: number | null;
 }) {
   const delta =
     refPrice && refPrice > 0 ? value / refPrice - 1 : null;
   const toneClass =
     tone === "up" ? "text-up" : tone === "down" ? "text-down" : "";
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-start justify-between gap-2">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`tabular text-sm font-medium ${toneClass}`}>
-        {fmtNumber(value)}
-        {delta !== null && Math.abs(delta) >= 0.001 && (
-          <span className="text-[11px] text-muted-foreground ml-1 tabular">
-            ({fmtPercent(delta, 1)})
+      <span className="text-right">
+        <span className={`tabular text-sm font-medium ${toneClass}`}>
+          {fmtNumber(value)}
+          {delta !== null && Math.abs(delta) >= 0.001 && (
+            <span className="text-[11px] text-muted-foreground ml-1 tabular">
+              ({fmtPercent(delta, 1)})
+            </span>
+          )}
+        </span>
+        {/* USD 종목 — 환율 적용 원화 보조. 환율 없으면 자동 생략. */}
+        {currency === "USD" && (
+          <span className="block text-[10px] leading-tight mt-0.5">
+            <PriceWithKrw
+              price={value}
+              currency={currency}
+              krwRate={krwRate ?? null}
+              prefix=""
+            />
           </span>
         )}
       </span>

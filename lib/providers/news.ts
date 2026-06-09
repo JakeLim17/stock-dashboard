@@ -85,6 +85,39 @@ const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
   { q: "TSMC foundry", symbol: "TSM", lang: "en" },
   { q: "Palantir AI", symbol: "PLTR", lang: "en" },
 
+  // ── 2026-06 미국 카탈로그 확장 (영문 쿼리 위주) ──────────
+  // 반도체/AI 인프라
+  { q: "Broadcom AVGO AI networking", symbol: "AVGO", lang: "en" },
+  { q: "Qualcomm QCOM Snapdragon", symbol: "QCOM", lang: "en" },
+  { q: "Micron MU HBM memory", symbol: "MU", lang: "en" },
+  { q: "ARM Holdings chip IP", symbol: "ARM", lang: "en" },
+  { q: "Marvell MRVL semiconductor", symbol: "MRVL", lang: "en" },
+  { q: "Super Micro SMCI AI server", symbol: "SMCI", lang: "en" },
+  // AI 소프트웨어
+  { q: "Oracle ORCL cloud AI", symbol: "ORCL", lang: "en" },
+  { q: "Salesforce CRM Agentforce", symbol: "CRM", lang: "en" },
+  { q: "ServiceNow NOW enterprise AI", symbol: "NOW", lang: "en" },
+  { q: "Adobe ADBE Firefly", symbol: "ADBE", lang: "en" },
+  // 헬스케어
+  { q: "Eli Lilly LLY GLP-1 weight loss", symbol: "LLY", lang: "en" },
+  { q: "UnitedHealth UNH insurance", symbol: "UNH", lang: "en" },
+  // 핀테크
+  { q: "Visa V payments", symbol: "V", lang: "en" },
+  { q: "Mastercard MA payments", symbol: "MA", lang: "en" },
+  // 소비/리테일
+  { q: "Costco COST membership earnings", symbol: "COST", lang: "en" },
+  { q: "Walmart WMT retail", symbol: "WMT", lang: "en" },
+  { q: "Home Depot HD housing", symbol: "HD", lang: "en" },
+  // 중국 ADR
+  { q: "Alibaba BABA cloud", symbol: "BABA", lang: "en" },
+  { q: "PDD Holdings Temu Pinduoduo", symbol: "PDD", lang: "en" },
+  // 에너지
+  { q: "Exxon Mobil XOM oil", symbol: "XOM", lang: "en" },
+  { q: "Chevron CVX oil", symbol: "CVX", lang: "en" },
+  // 핫 테마 (BTC 노출·코인 거래소)
+  { q: "MicroStrategy MSTR bitcoin treasury", symbol: "MSTR", lang: "en" },
+  { q: "Coinbase COIN crypto exchange", symbol: "COIN", lang: "en" },
+
   // ── 시장 전반 ───────────────────────────────────────────
   { q: "반도체", lang: "ko" },
   { q: "환율 달러", lang: "ko" },
@@ -210,6 +243,60 @@ const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
   { kw: "tsmc", code: "TSM" },
   { kw: "팔란티어", code: "PLTR" },
   { kw: "palantir", code: "PLTR" },
+  // ── 2026-06 미국 카탈로그 확장 (한·영 키워드 매핑) ───────
+  // 반도체/AI 인프라
+  { kw: "브로드컴", code: "AVGO" },
+  { kw: "broadcom", code: "AVGO" },
+  { kw: "퀄컴", code: "QCOM" },
+  { kw: "qualcomm", code: "QCOM" },
+  { kw: "마이크론", code: "MU" },
+  { kw: "micron", code: "MU" },
+  { kw: "arm holdings", code: "ARM" },
+  { kw: "마벨", code: "MRVL" },
+  { kw: "marvell", code: "MRVL" },
+  { kw: "슈퍼마이크로", code: "SMCI" },
+  { kw: "super micro", code: "SMCI" },
+  // AI 소프트웨어
+  { kw: "오라클", code: "ORCL" },
+  { kw: "oracle", code: "ORCL" },
+  { kw: "세일즈포스", code: "CRM" },
+  { kw: "salesforce", code: "CRM" },
+  { kw: "서비스나우", code: "NOW" },
+  { kw: "servicenow", code: "NOW" },
+  { kw: "어도비", code: "ADBE" },
+  { kw: "adobe", code: "ADBE" },
+  // 헬스케어
+  { kw: "일라이릴리", code: "LLY" },
+  { kw: "eli lilly", code: "LLY" },
+  { kw: "유나이티드헬스", code: "UNH" },
+  { kw: "unitedhealth", code: "UNH" },
+  // 핀테크
+  { kw: "비자카드", code: "V" },
+  { kw: "마스터카드", code: "MA" },
+  { kw: "mastercard", code: "MA" },
+  // 소비/리테일
+  { kw: "코스트코", code: "COST" },
+  { kw: "costco", code: "COST" },
+  { kw: "월마트", code: "WMT" },
+  { kw: "walmart", code: "WMT" },
+  { kw: "홈디포", code: "HD" },
+  { kw: "home depot", code: "HD" },
+  // 중국 ADR
+  { kw: "알리바바", code: "BABA" },
+  { kw: "alibaba", code: "BABA" },
+  { kw: "테무", code: "PDD" },
+  { kw: "pdd holdings", code: "PDD" },
+  { kw: "pinduoduo", code: "PDD" },
+  // 에너지
+  { kw: "엑손모빌", code: "XOM" },
+  { kw: "exxon", code: "XOM" },
+  { kw: "셰브론", code: "CVX" },
+  { kw: "chevron", code: "CVX" },
+  // 핫 테마 — BTC 노출·코인 거래소
+  { kw: "마이크로스트래티지", code: "MSTR" },
+  { kw: "microstrategy", code: "MSTR" },
+  { kw: "코인베이스", code: "COIN" },
+  { kw: "coinbase", code: "COIN" },
 ];
 
 function matchSymbol(text: string): string | null {

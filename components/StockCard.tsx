@@ -11,9 +11,11 @@ import { VolatilityBadge } from "./VolatilityBadge";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
 import { PriceTicker } from "./PriceTicker";
+import { PriceWithKrw } from "./PriceWithKrw";
 import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
+  currencyOf,
   fmtNumber,
   fmtPercent,
   fmtSigned,
@@ -44,16 +46,20 @@ const SIGNAL_VARIANT = {
 
 type SignalKey = keyof typeof SIGNAL_VARIANT;
 
-export function StockCard({ snap, onSelect, selected }: {
+export function StockCard({ snap, onSelect, selected, krwRate }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
   selected?: boolean;
+  /** USDKRW 환율 — USD 종목 원화 병기에 사용. null이면 보조 표시 생략. */
+  krwRate?: number | null;
 }) {
   const { meta, quote, tech, flow, analysis, consensus } = snap;
 
   // 메인/부연 가격 자동 스왑 — "지금 진행 중인 거래"가 있으면 그게 메인.
   // 정규장 마감 후 시간외가 거래중이면 메인=시간외, 부연=정규장 종가.
   const { primary, secondary } = pickPrimaryQuote(quote);
+  // 통화 — 한국 종목은 KRW(보조 표시 생략), 미국 종목은 USD(원화 병기).
+  const currency = currencyOf(meta.code, meta.currency);
 
   const trendIcon =
     primary.changeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
@@ -98,6 +104,16 @@ export function StockCard({ snap, onSelect, selected }: {
             <div className={`text-3xl font-bold ${changeColor(primary.changeRate)}`}>
               <PriceTicker value={primary.price} decimals={0} />
             </div>
+            {/* USD 종목 — 환율 적용 원화 보조 표시. 환율 없으면 자동 생략. */}
+            {currency === "USD" && (
+              <div className="text-[11px] mt-0.5">
+                <PriceWithKrw
+                  price={primary.price}
+                  currency={currency}
+                  krwRate={krwRate ?? null}
+                />
+              </div>
+            )}
             <div className={`tabular text-sm mt-1 inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
               {trendIcon}
               {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
@@ -186,6 +202,16 @@ export function StockCard({ snap, onSelect, selected }: {
               >
                 <PriceTicker value={secondary.price} decimals={0} />
               </div>
+              {/* USD 종목 시간외 가격도 동일 원화 병기. */}
+              {currency === "USD" && (
+                <div className="text-[10px] leading-tight">
+                  <PriceWithKrw
+                    price={secondary.price}
+                    currency={currency}
+                    krwRate={krwRate ?? null}
+                  />
+                </div>
+              )}
               <div
                 className={`tabular text-[11px] ${
                   secondary.isExtended

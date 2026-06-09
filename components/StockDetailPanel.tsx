@@ -31,6 +31,8 @@ interface Props {
   snap?: StockSnapshot | null;
   // 종목 관련 뉴스(전체 뉴스 배열). 내부에서 24h + 종목 매칭 필터링.
   allNews: NewsItem[];
+  // USDKRW 환율 — USD 종목 예측 가격(SL/TP1/TP2/진입) 원화 병기에 사용. 없으면 보조 표시 생략.
+  krwRate?: number | null;
 }
 
 const TAB_META: Record<
@@ -43,7 +45,7 @@ const TAB_META: Record<
 };
 
 export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
-  function StockDetailPanel({ snap, allNews }, ref) {
+  function StockDetailPanel({ snap, allNews, krwRate }, ref) {
     const [tab, setTab] = useState<DetailTabKey>("prediction");
     const rootRef = useRef<HTMLDivElement>(null);
 
@@ -131,6 +133,7 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
               snaps={[snap]}
               selectedCode={snap.meta.code}
               embedded
+              krwRate={krwRate}
             />
           )}
           {tab === "consensus" && <ConsensusPanel snap={snap} embedded />}

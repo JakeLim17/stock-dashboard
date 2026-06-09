@@ -133,15 +133,50 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // ─── 미국 빅테크 (kind: "us-stock") ─────────────────────────────────────
   // 한국식 flow(외인/기관) 데이터는 fetchFlowOrMock에서 자동 mock 처리됨.
   // 야후 quote/chart/quoteSummary로 시세·컨센서스 모두 가능.
-  { code: "AAPL", name: "애플", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "스마트폰 대장" },
-  { code: "MSFT", name: "마이크로소프트", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "클라우드 대장" },
-  { code: "GOOGL", name: "알파벳", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "검색 대장" },
-  { code: "META", name: "메타", kind: "us-stock", sector: "글로벌IT" },
-  { code: "AMZN", name: "아마존", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "이커머스 대장" },
-  { code: "TSLA", name: "테슬라", kind: "us-stock", sector: "글로벌EV", isSectorLeader: true, sectorLeaderLabel: "EV 대장" },
-  { code: "AMD", name: "AMD", kind: "us-stock", sector: "글로벌반도체" },
-  { code: "TSM", name: "TSMC", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "파운드리 대장" },
-  { code: "PLTR", name: "팔란티어", kind: "us-stock", sector: "글로벌AI" },
+  { code: "AAPL", name: "애플", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "스마트폰 대장", currency: "USD" },
+  { code: "MSFT", name: "마이크로소프트", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "클라우드 대장", currency: "USD" },
+  { code: "GOOGL", name: "알파벳", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "검색 대장", currency: "USD" },
+  { code: "META", name: "메타", kind: "us-stock", sector: "글로벌IT", currency: "USD" },
+  { code: "AMZN", name: "아마존", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "이커머스 대장", currency: "USD" },
+  { code: "TSLA", name: "테슬라", kind: "us-stock", sector: "글로벌EV", isSectorLeader: true, sectorLeaderLabel: "EV 대장", currency: "USD" },
+  { code: "AMD", name: "AMD", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "TSM", name: "TSMC", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "파운드리 대장", currency: "USD" },
+  { code: "PLTR", name: "팔란티어", kind: "us-stock", sector: "글로벌AI", currency: "USD" },
+
+  // ─── 2026-06 미국 카탈로그 확장 (~23종) ────────────────────────────────────
+  // 사용성 우선 — 섹터별 대표주만. sectorLeader는 분야 내 명백한 1위에만.
+  //
+  // 반도체/AI 인프라 — 기존 글로벌반도체 섹터에 묶음. AVGO를 AI 네트워킹 대장으로.
+  { code: "AVGO", name: "브로드컴", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "AI 네트워킹 대장", currency: "USD" },
+  { code: "QCOM", name: "퀄컴", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "MU", name: "마이크론", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "美 메모리 대장", currency: "USD" },
+  { code: "ARM", name: "ARM", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "모바일 IP 대장", currency: "USD" },
+  { code: "MRVL", name: "마벨", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  // AI 소프트웨어 / 엔터프라이즈 SW
+  { code: "ORCL", name: "오라클", kind: "us-stock", sector: "글로벌소프트웨어", isSectorLeader: true, sectorLeaderLabel: "AI 인프라 SW 대장", currency: "USD" },
+  { code: "CRM", name: "세일즈포스", kind: "us-stock", sector: "글로벌소프트웨어", isSectorLeader: true, sectorLeaderLabel: "SaaS 대장", currency: "USD" },
+  { code: "NOW", name: "서비스나우", kind: "us-stock", sector: "글로벌소프트웨어", currency: "USD" },
+  { code: "ADBE", name: "어도비", kind: "us-stock", sector: "글로벌소프트웨어", currency: "USD" },
+  // 헬스케어 메가캡 — LLY(비만치료제 GLP-1 대장), UNH(보험 대장)
+  { code: "LLY", name: "일라이릴리", kind: "us-stock", sector: "글로벌헬스케어", isSectorLeader: true, sectorLeaderLabel: "GLP-1 대장", currency: "USD" },
+  { code: "UNH", name: "유나이티드헬스", kind: "us-stock", sector: "글로벌헬스케어", isSectorLeader: true, sectorLeaderLabel: "美 보험 대장", currency: "USD" },
+  // 핀테크·페이먼트
+  { code: "V", name: "비자", kind: "us-stock", sector: "글로벌핀테크", isSectorLeader: true, sectorLeaderLabel: "결제 네트워크 대장", currency: "USD" },
+  { code: "MA", name: "마스터카드", kind: "us-stock", sector: "글로벌핀테크", currency: "USD" },
+  // 소비/리테일
+  { code: "COST", name: "코스트코", kind: "us-stock", sector: "글로벌소비재", isSectorLeader: true, sectorLeaderLabel: "회원제 유통 대장", currency: "USD" },
+  { code: "WMT", name: "월마트", kind: "us-stock", sector: "글로벌소비재", isSectorLeader: true, sectorLeaderLabel: "美 대형 유통 대장", currency: "USD" },
+  { code: "HD", name: "홈디포", kind: "us-stock", sector: "글로벌소비재", currency: "USD" },
+  // 중국 ADR — 미국 ADR로 거래되는 중국 빅테크
+  { code: "BABA", name: "알리바바", kind: "us-stock", sector: "중국ADR", isSectorLeader: true, sectorLeaderLabel: "중국 빅테크 대장", currency: "USD" },
+  { code: "PDD", name: "PDD홀딩스(테무)", kind: "us-stock", sector: "중국ADR", currency: "USD" },
+  // 에너지 — 정유 메가캡
+  { code: "XOM", name: "엑손모빌", kind: "us-stock", sector: "글로벌에너지", isSectorLeader: true, sectorLeaderLabel: "글로벌 정유 대장", currency: "USD" },
+  { code: "CVX", name: "셰브론", kind: "us-stock", sector: "글로벌에너지", currency: "USD" },
+  // 핫 테마 — AI 서버(SMCI), BTC 노출(MSTR), 코인 거래소(COIN)
+  { code: "SMCI", name: "슈퍼마이크로", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "MSTR", name: "마이크로스트래티지(BTC)", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "BTC 노출 대장", currency: "USD" },
+  { code: "COIN", name: "코인베이스", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "美 코인거래소 대장", currency: "USD" },
 ];
 
 // 시장 지표 패널
@@ -184,7 +219,16 @@ export type ThemeTag =
   | "construction"
   | "display"
   | "ai_software"
-  | "us_bigtech";
+  | "us_bigtech"
+  // ── 2026-06 미국 카탈로그 확장 — 섹터별 그룹 ───────────────
+  | "us_semiconductor"
+  | "us_software"
+  | "us_healthcare"
+  | "us_fintech"
+  | "us_consumer"
+  | "us_china_adr"
+  | "us_energy"
+  | "us_crypto";
 
 export interface ThemeDefinition {
   id: ThemeTag;
@@ -395,6 +439,73 @@ export const THEMES: ThemeDefinition[] = [
       "PLTR",
       "NVDA",
     ],
+  },
+  // ─── 2026-06 미국 카탈로그 확장 테마 ───────────────────────────────────
+  {
+    id: "us_semiconductor",
+    label: "美 반도체·AI 인프라",
+    emoji: "🇺🇸",
+    description: "NVDA·AMD·AVGO 등 AI 학습·네트워킹 핵심",
+    codes: [
+      "NVDA",
+      "AMD",
+      "TSM",
+      "AVGO",
+      "QCOM",
+      "MU",
+      "ARM",
+      "MRVL",
+      "SMCI",
+    ],
+  },
+  {
+    id: "us_software",
+    label: "美 AI 소프트웨어",
+    emoji: "🧮",
+    description: "엔터프라이즈 SaaS · AI 인프라 SW",
+    codes: ["ORCL", "CRM", "NOW", "ADBE", "PLTR"],
+  },
+  {
+    id: "us_healthcare",
+    label: "美 헬스케어",
+    emoji: "💊",
+    description: "GLP-1 비만치료제 · 의료보험 메가캡",
+    codes: ["LLY", "UNH"],
+  },
+  {
+    id: "us_fintech",
+    label: "美 핀테크·결제",
+    emoji: "💳",
+    description: "Visa·Mastercard 글로벌 결제 네트워크",
+    codes: ["V", "MA"],
+  },
+  {
+    id: "us_consumer",
+    label: "美 소비·리테일",
+    emoji: "🛍️",
+    description: "Costco·Walmart·홈디포",
+    codes: ["COST", "WMT", "HD"],
+  },
+  {
+    id: "us_china_adr",
+    label: "중국 ADR",
+    emoji: "🇨🇳",
+    description: "미국 ADR로 거래되는 중국 빅테크",
+    codes: ["BABA", "PDD"],
+  },
+  {
+    id: "us_energy",
+    label: "美 에너지",
+    emoji: "🛢️",
+    description: "엑손·셰브론 정유 메가캡",
+    codes: ["XOM", "CVX"],
+  },
+  {
+    id: "us_crypto",
+    label: "美 암호화폐 노출",
+    emoji: "₿",
+    description: "BTC 대량 보유·美 코인거래소",
+    codes: ["MSTR", "COIN"],
   },
 ];
 

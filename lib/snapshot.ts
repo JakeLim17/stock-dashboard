@@ -348,6 +348,12 @@ export async function fetchWatchlistSnapshots(
         ].slice(0, 3);
         analysis.reasons = analysis.shortTerm.reasons;
       }
+      // 임박 가격 이벤트(종목별 실적·배당) + 매크로(FOMC·KOSPI 만기) 를 σ 부풀림 산정에 전달.
+      // 가장 임팩트 큰 단일 이벤트만 적용 (eventVolatility.ts 단일 선택).
+      const eventsForVolatility: EventItem[] = [
+        ...upcomingEvents,
+        ...getMacroEventsCached(),
+      ];
       const predictions = predict({
         quote,
         history: hist,
@@ -357,6 +363,7 @@ export async function fetchWatchlistSnapshots(
         heatScore: analysis.heatScore,
         overseasNight,
         intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
+        events: eventsForVolatility,
       });
 
       saveQuote(quote);

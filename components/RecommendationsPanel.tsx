@@ -19,7 +19,13 @@ import {
   Target,
   Hourglass,
 } from "lucide-react";
-import { changeColor, fmtPercent, fmtRelative } from "@/lib/utils";
+import {
+  changeColor,
+  currencyOf,
+  fmtPercent,
+  fmtRelative,
+} from "@/lib/utils";
+import { PriceWithKrw } from "./PriceWithKrw";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
 import { WATCHLIST_CANDIDATES, MARKET_INDICATORS } from "@/lib/symbols";
@@ -46,6 +52,8 @@ interface Props {
   onAddToWatchlist: (code: string) => void;
   // 관심종목 최대 개수 (도달 시 추가 버튼 비활성화)
   maxWatch: number;
+  // USDKRW 환율 — USD 종목 카드 가격 옆 원화 보조 표시. 없으면 보조 표시 생략.
+  krwRate?: number | null;
 }
 
 const CATEGORY_LABEL: Record<RecommendationCategory, string> = {
@@ -71,6 +79,7 @@ export function RecommendationsPanel({
   watchlist,
   onAddToWatchlist,
   maxWatch,
+  krwRate,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<RecommendationsResponse | null>(null);
@@ -312,6 +321,7 @@ export function RecommendationsPanel({
                             watchlist={watchlist}
                             maxWatch={maxWatch}
                             onAddToWatchlist={onAddToWatchlist}
+                            krwRate={krwRate}
                           />
                         )}
                         {scaleIn.length > 0 && (
@@ -326,6 +336,7 @@ export function RecommendationsPanel({
                             watchlist={watchlist}
                             maxWatch={maxWatch}
                             onAddToWatchlist={onAddToWatchlist}
+                            krwRate={krwRate}
                           />
                         )}
                         {others.length > 0 && (
@@ -340,6 +351,7 @@ export function RecommendationsPanel({
                                   watchlist.length >= maxWatch
                                 }
                                 onAdd={() => onAddToWatchlist(rec.code)}
+                                krwRate={krwRate}
                               />
                             ))}
                           </div>
@@ -368,6 +380,7 @@ export function RecommendationsPanel({
                               watchlist.length >= maxWatch
                             }
                             onAdd={() => onAddToWatchlist(rec.code)}
+                            krwRate={krwRate}
                           />
                         ))}
                       </div>
@@ -436,12 +449,19 @@ function RecommendationCard({
   inWatchlist,
   disabled,
   onAdd,
+  krwRate,
 }: {
   rec: Recommendation;
   inWatchlist: boolean;
   disabled: boolean;
   onAdd: () => void;
+  krwRate?: number | null;
 }) {
+  // rec.currency는 string("USD"/"KRW")라 캐스팅하지 않고 currencyOf로 정규화.
+  const explicit =
+    rec.currency === "USD" || rec.currency === "KRW" ? rec.currency : undefined;
+  const currency = currencyOf(rec.code, explicit);
+
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2.5 space-y-2 hover:border-foreground/20 transition-colors">
       {/* 상단: 종목명·티커 + verdict 배지 + 현재가/등락률 */}
@@ -474,6 +494,17 @@ function RecommendationCard({
           <div className="text-sm font-semibold tabular">
             {rec.price.toLocaleString("ko-KR")}
           </div>
+          {/* USD 종목 — 환율 적용 원화 보조. 없으면 자동 생략. */}
+          {currency === "USD" && (
+            <div className="text-[10px] leading-tight">
+              <PriceWithKrw
+                price={rec.price}
+                currency={currency}
+                krwRate={krwRate ?? null}
+                prefix=""
+              />
+            </div>
+          )}
           <div className={`text-[11px] tabular ${changeColor(rec.changeRate)}`}>
             {fmtPercent(rec.changeRate)}
           </div>
@@ -601,6 +632,7 @@ function BuySubBlock({
   watchlist,
   maxWatch,
   onAddToWatchlist,
+  krwRate,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -610,6 +642,7 @@ function BuySubBlock({
   watchlist: string[];
   maxWatch: number;
   onAddToWatchlist: (code: string) => void;
+  krwRate?: number | null;
 }) {
   return (
     <div className="space-y-1.5 pl-2 border-l-2 border-border/60">
@@ -628,6 +661,7 @@ function BuySubBlock({
             inWatchlist={watchSet.has(rec.code)}
             disabled={!watchSet.has(rec.code) && watchlist.length >= maxWatch}
             onAdd={() => onAddToWatchlist(rec.code)}
+            krwRate={krwRate}
           />
         ))}
       </div>

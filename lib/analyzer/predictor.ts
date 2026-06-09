@@ -1,6 +1,7 @@
 import "server-only";
 import type { HistoricalPoint } from "../providers/yahoo";
 import type {
+  EventItem,
   PriceRange,
   PriceTargets,
   Predictions,
@@ -9,6 +10,18 @@ import type {
   OverseasNightIndicator,
   ValuationMetrics,
 } from "../types";
+import { ewmaVolatility, tDistQuantile } from "./statHelpers";
+import { computeEventInflation } from "./eventVolatility";
+
+// 변동성 모델 상수 — Predictions.volatilityModel 메타로도 함께 노출되어
+// UI hint 라벨("EWMA λ=0.94 · t(df=5) 95%")에 사용된다.
+const EWMA_LAMBDA = 0.94; // RiskMetrics 표준
+const T_DF = 5; // 일간 수익률의 fat-tail 반영 (df=5)
+const T_TWO_SIDED_CONFIDENCE = 0.95; // 양측 95% 신뢰구간
+const T_QUANTILE_975 = tDistQuantile(0.975, T_DF); // ≈ 2.571
+const NORMAL_QUANTILE_975 = 1.96; // 정규분포 폴백용
+// 이벤트 부풀림이 이 값 이하면 UI 노출 X — "거의 차이 없음"으로 간주.
+const EVENT_INFLATION_DISPLAY_THRESHOLD = 1.05;
 
 // ─── 기본 통계 유틸 ────────────────────────────────────────
 
@@ -219,6 +232,10 @@ export interface PredictorInput {
   overseasNight?: OverseasNightIndicator | null;
   // 한국 종목 + 장중일 때만 채워지는 1분봉 기반 vol. intradayRange 정밀화에 사용.
   intradayDailyVol?: number | null;
+  // 임박 가격 이벤트 (실적·배당) + 매크로(FOMC·KOSPI 만기). 가장 임팩트 큰 이벤트의
+  // proximity 기반 σ 부풀림 계수를 가격 범위 산정에 반영한다 (eventVolatility.ts).
+  // 빈 배열·undefined 면 부풀림 없음(factor=1).
+  events?: EventItem[] | null;
 }
 
 export function predict(input: PredictorInput): Predictions {
@@ -231,11 +248,27 @@ export function predict(input: PredictorInput): Predictions {
     heatScore,
     overseasNight,
     intradayDailyVol,
+    events,
   } = input;
 
   const closes = history.map((h) => h.close).filter((c) => Number.isFinite(c) && c > 0);
   const returns = dailyReturns(history);
-  const sigma = stddev(returns); // 일일 변동성
+
+  // ─ σ 모델 선택 ───────────────────────────────────────────
+  // 30일 이상의 일간 수익률이 확보되면 EWMA(λ=0.94) σ + t(df=5) 분포 quantile 사용
+  // (최근 변동성 가중 + fat-tail). 미달이면 단순 stddev + 정규분포(±1.96σ)로 폴백.
+  const sigma =
+    returns.length >= 30 ? ewmaVolatility(returns, EWMA_LAMBDA) : stddev(returns);
+  const volKind: "ewma-t" | "stddev-normal" =
+    returns.length >= 30 ? "ewma-t" : "stddev-normal";
+  const tailMultiplier =
+    volKind === "ewma-t" ? T_QUANTILE_975 : NORMAL_QUANTILE_975;
+
+  // ─ 이벤트 부풀림 ─────────────────────────────────────────
+  // events 에는 종목별 (실적·배당) + 매크로(FOMC·KOSPI 만기) 가 합쳐져 들어옴.
+  // 가장 임팩트 큰 단일 이벤트의 factor만 적용 (eventVolatility.ts).
+  const eventInflation = computeEventInflation(events, Date.now());
+  const adjustedSigma = sigma * eventInflation.factor;
 
   const price = quote.price || closes[closes.length - 1] || 0;
 
@@ -246,7 +279,8 @@ export function predict(input: PredictorInput): Predictions {
   //    A는 순수 변동성 신뢰구간만 보여준다.
   //
   //    center = price (변동 없음 가정)
-  //    band   = price · exp(±σ·√Δt)  → 68% 신뢰구간
+  //    band   = price · exp(±tMult · σ_adj · √Δt)  → 95% 양측 신뢰구간 (t df=5)
+  //    σ_adj  = EWMA σ × 이벤트 부풀림 계수
   const ranges: PriceRange[] = [];
   if (price > 0 && returns.length >= 15) {
     const horizons: { label: string; days: number }[] = [
@@ -256,7 +290,7 @@ export function predict(input: PredictorInput): Predictions {
       { label: "2주", days: 10 },
     ];
     for (const h of horizons) {
-      const horizonSigma = sigma * Math.sqrt(h.days);
+      const horizonSigma = adjustedSigma * Math.sqrt(h.days) * tailMultiplier;
       const center = price;
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);
@@ -266,7 +300,7 @@ export function predict(input: PredictorInput): Predictions {
         center,
         low,
         high,
-        confidence: 0.68,
+        confidence: T_TWO_SIDED_CONFIDENCE,
       });
     }
   }
@@ -452,5 +486,28 @@ export function predict(input: PredictorInput): Predictions {
       sell: Math.round(sellStrength),
     },
     intradayRange,
+    volatilityModel: sigma > 0
+      ? {
+          kind: volKind,
+          lambda: volKind === "ewma-t" ? EWMA_LAMBDA : undefined,
+          df: volKind === "ewma-t" ? T_DF : undefined,
+          confidence: T_TWO_SIDED_CONFIDENCE,
+          dailySigma: sigma,
+          adjustedDailySigma: adjustedSigma,
+        }
+      : null,
+    eventVolatility:
+      eventInflation.factor >= EVENT_INFLATION_DISPLAY_THRESHOLD &&
+      eventInflation.event &&
+      eventInflation.shortLabel != null &&
+      eventInflation.daysToEvent != null
+        ? {
+            factor: eventInflation.factor,
+            eventKind: eventInflation.event.kind,
+            eventLabel: eventInflation.event.label,
+            shortLabel: eventInflation.shortLabel,
+            daysToEvent: eventInflation.daysToEvent,
+          }
+        : null,
   };
 }

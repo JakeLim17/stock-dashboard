@@ -45,7 +45,15 @@ export type SectorTag =
   | "글로벌IT"
   | "글로벌EV"
   | "글로벌반도체"
-  | "글로벌AI";
+  | "글로벌AI"
+  // ── 2026-06 미국 카탈로그 확장 — 섹터별 대표주 묶음 ────────
+  | "글로벌소프트웨어"   // CRM/ORCL/NOW/ADBE
+  | "글로벌헬스케어"     // LLY/UNH
+  | "글로벌핀테크"       // V/MA
+  | "글로벌소비재"       // COST/WMT/HD
+  | "중국ADR"            // BABA/PDD
+  | "글로벌에너지"       // XOM/CVX
+  | "글로벌암호화폐";    // MSTR/COIN (BTC 노출)
 
 export interface SymbolMeta {
   // 내부 표준 코드 (예: 005930.KS)
@@ -65,6 +73,10 @@ export interface SymbolMeta {
   // 배지에 표시되는 한국어 짧은 라벨. 예: "반도체 대장", "MLCC 대장", "AI 반도체 대장".
   // isSectorLeader가 true일 때만 의미가 있다.
   sectorLeaderLabel?: string;
+  // 표시·환산용 통화. 한국 종목·환율은 "KRW", 미국 종목은 "USD".
+  // 비워두면 currencyOf(code) 헬퍼가 코드 형태로 추정한다(.KS/.KQ → KRW, 그 외 → USD).
+  // 수치 계산 자체엔 영향 없음. 원화 병기·포맷 분기에만 사용.
+  currency?: "KRW" | "USD";
 }
 
 export interface OverseasNightIndicator {
@@ -424,6 +436,35 @@ export interface Predictions {
     expectedRangePct: number;
     // "atr" | "sigma" | "intraday-blend" — 디버그/디스플레이용 출처 라벨
     source?: "atr" | "sigma" | "intraday-blend";
+  } | null;
+  // PriceRange 계산에 사용한 변동성 모델 메타.
+  //   kind         : "ewma-t" = EWMA σ + t(df=5) quantile (fat-tail) / "stddev-normal" = 단순 stddev + 정규분포 폴백
+  //   lambda       : EWMA 감쇠 계수 (기본 0.94)
+  //   df           : t-분포 자유도 (기본 5)
+  //   confidence   : 0.95 = 95% 양측 신뢰구간
+  //   dailySigma   : 부풀림 적용 전 일일 σ (UI σ 배지에 표시)
+  //   adjustedDailySigma : 이벤트 부풀림 곱한 후 일일 σ (range 계산에 실제 사용)
+  // 옛 스냅샷 호환을 위해 optional. 신규 응답엔 항상 채움.
+  volatilityModel?: {
+    kind: "ewma-t" | "stddev-normal";
+    lambda?: number;
+    df?: number;
+    confidence: number;
+    dailySigma: number;
+    adjustedDailySigma: number;
+  } | null;
+  // 임박 이벤트로 σ 가 부풀려진 경우 메타. factor ≤ 1.05 면 null (미미한 영향은 노출 X).
+  //   factor       : 1 + α (예: 1.6 = +60%)
+  //   eventKind    : earnings | fomc | kospi_expiry | dividend
+  //   eventLabel   : 사용자 표시용 한국어 라벨 (예: "삼성전자 실적 발표")
+  //   shortLabel   : 짧은 카테고리 ("실적" / "FOMC" / "옵션만기" / "배당락")
+  //   daysToEvent  : D-N (양수=미래, 0=오늘, 음수=과거)
+  eventVolatility?: {
+    factor: number;
+    eventKind: EventKind;
+    eventLabel: string;
+    shortLabel: string;
+    daysToEvent: number;
   } | null;
 }
 

@@ -21,7 +21,7 @@ import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
-import { fmtRelative } from "@/lib/utils";
+import { fmtRelative, getKrwRate } from "@/lib/utils";
 import {
   Loader2,
   LogOut,
@@ -305,6 +305,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const selectedSnap =
     snap.primaries.find((p) => p.meta.code === selected) ?? snap.primaries[0];
 
+  // USDKRW 환율 — USD 종목 원화 병기에 사용. indicators(KRW=X) 기준.
+  // 환율이 없거나 fetch 실패면 null → 자식들이 보조 표시를 자동 생략(graceful).
+  const krwRate = getKrwRate(snap.indicators);
+
   const lastUpdated = `${fmtRelative(snap.generatedAt)} 업데이트 · 자동 ${
     refreshMs / 1000
   }초`;
@@ -510,6 +514,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         watchlist={watchCodes}
         onAddToWatchlist={handleAddFromRecommendation}
         maxWatch={MAX_WATCH}
+        krwRate={krwRate}
       />
 
       {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
@@ -524,6 +529,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       <PredictionHero
         snap={selectedSnap}
         onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
+        krwRate={krwRate}
       />
 
       {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
@@ -531,6 +537,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         ref={detailRef}
         snap={selectedSnap}
         allNews={snap.news}
+        krwRate={krwRate}
       />
 
       {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용 */}
@@ -541,6 +548,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             snap={p}
             selected={p.meta.code === selected}
             onSelect={setSelected}
+            krwRate={krwRate}
           />
         ))}
         {snap.primaries.length === 0 && (

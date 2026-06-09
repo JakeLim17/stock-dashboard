@@ -3,8 +3,10 @@
 import type { StockSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
 import { PriceTicker } from "./PriceTicker";
+import { PriceWithKrw } from "./PriceWithKrw";
 import {
   changeColor,
+  currencyOf,
   fmtNumber,
   fmtPercent,
   fmtSigned,
@@ -24,15 +26,19 @@ import { LineChart, TrendingUp } from "lucide-react";
 export function PredictionHero({
   snap,
   onJumpToPrediction,
+  krwRate,
 }: {
   snap?: StockSnapshot | null;
   onJumpToPrediction?: () => void;
+  /** USDKRW 환율 — USD 종목 원화 병기에 사용. 없으면 보조 표시 생략. */
+  krwRate?: number | null;
 }) {
   if (!snap) return null;
 
   const { primary } = pickPrimaryQuote(snap.quote);
   const p = snap.predictions;
   const verdict = snap.analysis.verdict;
+  const currency = currencyOf(snap.meta.code, snap.meta.currency);
   const oneDay = p?.ranges.find((r) => r.horizonDays === 1) ?? null;
   const oneWeek = p?.ranges.find((r) => r.horizonDays === 5) ?? null;
   const buyStrength = p?.strength.buy ?? snap.analysis.buyScore;
@@ -40,6 +46,13 @@ export function PredictionHero({
   const rr = p?.targets?.riskReward ?? null;
   const intradayRange = p?.intradayRange ?? null;
   const volatility = snap.analysis.volatility ?? null;
+  const volModel = p?.volatilityModel ?? null;
+  const eventVol = p?.eventVolatility ?? null;
+  // 변동성 모델 라벨 — 신규 응답엔 항상 채워지지만, 옛 캐시 호환 위해 폴백.
+  const modelLabel =
+    volModel?.kind === "ewma-t"
+      ? `EWMA · t분포(df=${volModel.df ?? 5}) · ${Math.round((volModel.confidence ?? 0.95) * 100)}% 신뢰`
+      : "최근 90일 변동성 기반";
 
   const handleClick = () => {
     onJumpToPrediction?.();
@@ -63,16 +76,32 @@ export function PredictionHero({
     >
       <div className="px-5 py-4 md:py-5">
         {/* 헤더 */}
-        <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-wider text-accent font-semibold">
             <LineChart className="h-3.5 w-3.5" />
             예측 Hero · 선택 종목
           </div>
-          {p && (
-            <span className="text-[11px] text-muted-foreground">
-              최근 90일 변동성 기반
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {/* 이벤트 부풀림 배지 — D-day 임박 시 noisy하지 않도록 factor>1.05 일 때만 노출.
+                예: "📅 실적 D-2 · 범위 +60%" — 사용자가 "오늘 예측 폭이 왜 크지?" 의문을 즉시 해소. */}
+            {eventVol && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-warn/40 bg-warn/10 text-warn px-2 py-0.5 text-[11px] font-medium"
+                title={`${eventVol.eventLabel} (D${eventVol.daysToEvent >= 0 ? "-" : "+"}${Math.abs(eventVol.daysToEvent)}) — σ × ${eventVol.factor.toFixed(2)} 적용`}
+              >
+                📅 {eventVol.shortLabel} D
+                {eventVol.daysToEvent >= 0
+                  ? `-${eventVol.daysToEvent}`
+                  : `+${Math.abs(eventVol.daysToEvent)}`}{" "}
+                · 범위 +{Math.round((eventVol.factor - 1) * 100)}%
+              </span>
+            )}
+            {p && (
+              <span className="text-[11px] text-muted-foreground">
+                {modelLabel}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
@@ -89,6 +118,16 @@ export function PredictionHero({
             >
               <PriceTicker value={primary.price} decimals={0} />
             </div>
+            {/* USD 종목 — 환율 적용 원화 보조. 환율 없으면 자동 생략. */}
+            {currency === "USD" && (
+              <div className="text-xs">
+                <PriceWithKrw
+                  price={primary.price}
+                  currency={currency}
+                  krwRate={krwRate ?? null}
+                />
+              </div>
+            )}
             <div
               className={`tabular text-sm ${changeColor(primary.changeRate)}`}
             >
@@ -206,12 +245,32 @@ export function PredictionHero({
                   <div className="tabular font-semibold text-down">
                     {fmtNumber(p.targets.stopLoss, 0)}
                   </div>
+                  {currency === "USD" && (
+                    <div className="text-[10px] leading-tight mt-0.5">
+                      <PriceWithKrw
+                        price={p.targets.stopLoss}
+                        currency={currency}
+                        krwRate={krwRate ?? null}
+                        prefix=""
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="rounded-md bg-muted/40 px-2 py-1.5">
                   <div className="text-muted-foreground">목표1</div>
                   <div className="tabular font-semibold text-up">
                     {fmtNumber(p.targets.takeProfit1, 0)}
                   </div>
+                  {currency === "USD" && (
+                    <div className="text-[10px] leading-tight mt-0.5">
+                      <PriceWithKrw
+                        price={p.targets.takeProfit1}
+                        currency={currency}
+                        krwRate={krwRate ?? null}
+                        prefix=""
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
