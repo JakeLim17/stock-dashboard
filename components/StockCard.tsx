@@ -178,26 +178,25 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
         {/* 분석 — 메인 결론(verdict)을 위로 크게, 단기/장기 상세는 접힘으로 정리.
             "사라는 건지 말라는 건지" 피드백에 맞춰 1초 안에 행동을 정하도록 통합.
 
-            선택 카드(데스크탑 전용 노출)에서는 단·장기/변동성/기회/리스크 배지를
-            Detail 패널 헤더에서 이미 보여주므로 중복 제거. verdict.headline은 카드별
-            액션 가이드 문장이라 항상 노출. */}
+            데스크탑에서 여러 카드를 한 줄에 두고 비교할 때 모든 카드에 같은 배지가
+            보여야 직관적이라는 사용자 피드백에 따라, 선택 여부와 무관하게 단·장기/
+            변동성/기회/리스크 배지를 항상 노출한다. 모바일 중복은 W4(Detail 패널이
+            열렸을 때 카드 자동 숨김)로 이미 해결됨. */}
         <div className="border-t border-border pt-3 space-y-2">
           <div className="text-xs text-muted-foreground tracking-wide uppercase">
             분석
           </div>
 
-          {!selected && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <SignalDetailBadges
-                short={analysis.shortTerm.signal}
-                long={analysis.longTerm.signal}
-                title={analysis.verdict.detail}
-              />
-              <VolatilityBadge assessment={analysis.volatility} />
-              <OpportunityBadge assessment={analysis.externalOpportunity} />
-              <RiskBadge assessment={analysis.externalRisk} />
-            </div>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <SignalDetailBadges
+              short={analysis.shortTerm.signal}
+              long={analysis.longTerm.signal}
+              title={analysis.verdict.detail}
+            />
+            <VolatilityBadge assessment={analysis.volatility} />
+            <OpportunityBadge assessment={analysis.externalOpportunity} />
+            <RiskBadge assessment={analysis.externalRisk} />
+          </div>
           <p className="text-sm font-semibold leading-snug">
             {analysis.verdict.headline}
           </p>
