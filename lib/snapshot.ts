@@ -433,7 +433,13 @@ export async function fetchWatchlistSnapshots(
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
       const signalMarks = pickTopSignalMarks(
-        evaluateSignalMarks({ quote, history: hist, flow }),
+        evaluateSignalMarks({
+          quote,
+          history: hist,
+          flow,
+          valuation: consensusValuation,
+          upcomingEvents,
+        }),
         4
       );
 

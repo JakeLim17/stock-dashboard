@@ -153,6 +153,8 @@ export interface Quote {
   volume: number | null;
   high?: number | null;
   low?: number | null;
+  // 오늘 정규장 시가. 갭상승/갭하락 시그널 평가 등에 사용. Yahoo regularMarketOpen.
+  open?: number | null;
   marketCap?: number | null;
   currency?: string;
   valuation?: ValuationMetrics | null;

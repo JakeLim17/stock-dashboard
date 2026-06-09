@@ -392,8 +392,15 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
       const subCategory = SUBCATEGORY_BY_ACTION[analysis.verdict.action];
 
       // 시그널 마크 — 추천 카드 헤더에도 같이 노출. 작은 카드라 3개로 컷.
+      // 추천 빌드 단계에선 종목별 upcomingEvents 를 별도로 fetch 하지 않으므로
+      // 어닝 D-N 마크는 건너뛴다 (대시보드 카드에서만 노출). valuation 은 활용 가능.
       const signalMarks = pickTopSignalMarks(
-        evaluateSignalMarks({ quote, history: hist, flow }),
+        evaluateSignalMarks({
+          quote,
+          history: hist,
+          flow,
+          valuation: bundle.valuation,
+        }),
         3
       );
 

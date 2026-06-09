@@ -53,6 +53,7 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
     volume: num(q.regularMarketVolume),
     high: num(q.regularMarketDayHigh),
     low: num(q.regularMarketDayLow),
+    open: num(q.regularMarketOpen),
     marketCap: num(q.marketCap),
     currency: str(q.currency),
     valuation: {
