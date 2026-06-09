@@ -668,6 +668,28 @@ export interface MarketIndicator {
   // 시장 상태(REGULAR/POSTPOST/CLOSED 등). stale 라벨 톤 결정과
   // "정규장 종가" 같은 안내 문구에 사용.
   marketState?: string;
+  // ── 보조 시세 필드 — 카드 좁아도 함께 노출 ────────────────────
+  // 전일 종가 대비 절대 변동값. 지수·환율은 % 만 보면 감이 안 잡혀
+  // "+22.50" 같은 raw 변화량을 함께 보여준다.
+  changeAbs?: number | null;
+  // 전일 정규장 종가. 비교 기준.
+  prevClose?: number | null;
+  // 오늘 정규장 일중 고/저. 미국 지수는 정규장 시간에만 갱신.
+  dayHigh?: number | null;
+  dayLow?: number | null;
+  // ── 변동성 — 일별 close 표본 기반 σ% (KRW=X 등 history 추적 인디케이터에 한정) ──
+  // sigmaPct는 day 단위. 0.42 = 0.42% / day. label은 UI 노출용 짧은 문구.
+  volatility?: {
+    window: "1w" | "1m";
+    sigmaPct: number;
+    label: string;
+    // 보조 — 다른 윈도우 σ도 같이 들고 있어 한 줄에 2개 표기 가능.
+    secondaryWindow?: "1w" | "1m";
+    secondarySigmaPct?: number;
+  } | null;
+  // 최근 일별 close — Sparkline(미니 추세 차트) 렌더용. 최대 ~30개.
+  // 실패 또는 데이터 부족 시 undefined. 길이 < 2면 클라이언트가 자동 미렌더.
+  closeHistory?: number[];
 }
 
 export interface DashboardSnapshot {

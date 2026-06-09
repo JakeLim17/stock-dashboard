@@ -71,3 +71,24 @@ export function tDistQuantile(p: number, df = 5): number {
   // Number→String 변환은 trailing zero를 제거하므로 표 키와 그대로 매칭됨 (예: 0.95 → "0.95").
   return row[String(nearestP)] ?? row["0.975"];
 }
+
+// 일별 종가 시계열에서 로그수익률을 뽑아 일별 σ(소수)를 반환.
+// 시장 신호 패널의 KRW=X 변동성 표시처럼 "최근 N일 일별 변동성"이 직관적인 자리에 사용.
+//
+// returnCount ≥ 30  → ewmaVolatility(λ=0.94) 결과 (최근 가중치 우위)
+// returnCount  < 30 → 단순 표본 표준편차 폴백 (워밍업 부족 시 EWMA가 초기 σ에 끌려가서 부정확)
+//
+// closes는 시간순(과거 → 최신) 정렬을 가정. 비정상값(음수·0)은 건너뛴다.
+export function dailySigmaFromCloses(closes: number[]): number {
+  if (!Array.isArray(closes) || closes.length < 3) return 0;
+  const returns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const prev = closes[i - 1];
+    const cur = closes[i];
+    if (prev > 0 && cur > 0) {
+      returns.push(Math.log(cur / prev));
+    }
+  }
+  if (returns.length < 2) return 0;
+  return ewmaVolatility(returns);
+}

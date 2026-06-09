@@ -26,6 +26,7 @@ import {
   evaluateSignalMarks,
   pickTopSignalMarks,
 } from "./analyzer";
+import { dailySigmaFromCloses } from "./analyzer/statHelpers";
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
@@ -87,8 +88,60 @@ export interface WatchlistDeps {
 // ──────────────────────────────────────────────────────────────
 export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
   const errors: Record<string, string> = {};
-  const indicatorResults = await fetchQuotesBatch(MARKET_INDICATORS);
+  // 시세 batch + 모든 인디케이터 일별 close history(최근 35영업일)를 병렬로.
+  // history는 (1) KRW=X 변동성 σ 계산, (2) 모든 카드의 Sparkline 렌더에 사용.
+  // 실패한 심볼은 빈 배열로 fallback — 시세는 살아 있을 수 있으므로 카드 자체는 그대로 노출.
+  const [indicatorResults, historyResults] = await Promise.all([
+    fetchQuotesBatch(MARKET_INDICATORS),
+    Promise.all(
+      MARKET_INDICATORS.map((meta) =>
+        fetchHistorical(meta.code, 35).catch(() => [])
+      )
+    ),
+  ]);
+  const historyMap = new Map<string, number[]>();
+  for (let i = 0; i < MARKET_INDICATORS.length; i++) {
+    const meta = MARKET_INDICATORS[i];
+    const closes = historyResults[i]
+      .map((p) => p.close)
+      .filter((v) => Number.isFinite(v) && v > 0);
+    historyMap.set(meta.code, closes);
+  }
   const indicators: MarketIndicator[] = [];
+
+  // KRW=X 변동성 — 일별 close → 로그수익률 → 1개월(EWMA) / 1주(표본 stddev) σ%.
+  // σ는 단위 % / day. 한 줄에 2개를 보여줘 사용자가 "최근 변동성 안정/확대"를 직관 파악.
+  const fxCloses = historyMap.get("KRW=X") ?? [];
+  const fxVolatility = (() => {
+    if (fxCloses.length < 6) return null;
+    const sigma30 = dailySigmaFromCloses(fxCloses.slice(-22)); // 약 1개월 거래일
+    // 1주(직전 5거래일) 표본 표준편차 — 짧은 윈도우엔 단순 stddev가 직관적.
+    const recent = fxCloses.slice(-6);
+    const r1w: number[] = [];
+    for (let i = 1; i < recent.length; i++) {
+      const p = recent[i - 1];
+      const c = recent[i];
+      if (p > 0 && c > 0) r1w.push(Math.log(c / p));
+    }
+    const mu1w = r1w.length > 0 ? r1w.reduce((a, b) => a + b, 0) / r1w.length : 0;
+    const var1w =
+      r1w.length > 1
+        ? r1w.reduce((acc, x) => acc + (x - mu1w) ** 2, 0) / (r1w.length - 1)
+        : 0;
+    const sigma1w = Math.sqrt(Math.max(var1w, 0));
+
+    if (sigma30 <= 0 && sigma1w <= 0) return null;
+    const pct30 = sigma30 * 100;
+    const pct1w = sigma1w * 100;
+    return {
+      window: "1m" as const,
+      sigmaPct: pct30,
+      label: `σ(1M) ${pct30.toFixed(2)}% / day`,
+      secondaryWindow: "1w" as const,
+      secondarySigmaPct: pct1w,
+    };
+  })();
+
   for (let i = 0; i < indicatorResults.length; i++) {
     const r = indicatorResults[i];
     const meta = MARKET_INDICATORS[i];
@@ -98,6 +151,7 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
     }
     const q = r.quote;
     saveQuote(q);
+    const closeHistory = historyMap.get(meta.code) ?? [];
     indicators.push({
       code: meta.code,
       name: meta.name,
@@ -107,6 +161,13 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
       hint: indicatorHint(meta.code, q.changeRate),
       priceTime: q.priceTime ?? null,
       marketState: q.marketState,
+      changeAbs: q.changeAbs ?? null,
+      prevClose: q.prevClose ?? null,
+      dayHigh: q.high ?? null,
+      dayLow: q.low ?? null,
+      volatility: meta.code === "KRW=X" ? fxVolatility : null,
+      // 최근 30영업일치만 잘라 응답 크기 절감 (Sparkline에 충분).
+      closeHistory: closeHistory.length >= 2 ? closeHistory.slice(-30) : undefined,
     });
   }
 
