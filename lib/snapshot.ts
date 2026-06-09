@@ -36,6 +36,7 @@ import {
 } from "./symbols";
 import type {
   DashboardSnapshot,
+  EventItem,
   MarketIndicator,
   NewsItem,
   OverseasNightIndicator,
@@ -48,16 +49,43 @@ export interface BuildSnapshotOptions {
   includeOverseasNight?: boolean;
 }
 
-// 메인 대시보드 1회 분의 스냅샷을 만든다. 실패한 부분은 errors 맵에 기록하고 가능한 부분은 채워서 반환.
-export async function buildSnapshot(
-  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
-  options: BuildSnapshotOptions = {}
-): Promise<DashboardSnapshot> {
-  const errors: Record<string, string> = {};
-  const watchSymbols: SymbolMeta[] = resolveWatchSymbols(requestedSymbols);
-  const includeOverseasNight = options.includeOverseasNight === true;
+// 시장 분위기·반도체 과열도 계산에 쓰이는 컨텍스트.
+// fetchMarketIndicators() 결과로 자동 도출되며, 이후 fetchWatchlistSnapshots()의
+// 종목 분석/예측에 그대로 전달돼 일관된 시장 컨텍스트를 유지한다.
+export interface MarketContextSnapshot {
+  semiHeat: number; // 0~100
+  nasdaqRate: number;
+  fxRate: number;
+  vix: number;
+}
 
-  // 1) 시장 지표 먼저 (분석 컨텍스트로 필요)
+export interface MarketIndicatorsResult {
+  indicators: MarketIndicator[];
+  errors: Record<string, string>;
+  context: MarketContextSnapshot;
+  // 환율(KRW=X) — 해외 야간 지표 계산에 재사용. 없으면 null.
+  usdKrw: number | null;
+}
+
+export interface WatchlistSnapshotsResult {
+  primaries: StockSnapshot[];
+  errors: Record<string, string>;
+}
+
+export interface WatchlistDeps {
+  indicators?: MarketIndicator[];
+  news?: NewsItem[];
+  context?: MarketContextSnapshot;
+  usdKrw?: number | null;
+  options?: BuildSnapshotOptions;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 1) 시장 지표 — 빠른 영역 (1-2초). SummaryBar / MarketPanel 1차 채움용.
+//    Suspense streaming 단계 중 가장 먼저 도착한다.
+// ──────────────────────────────────────────────────────────────
+export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
+  const errors: Record<string, string> = {};
   const indicatorResults = await fetchQuotesBatch(MARKET_INDICATORS);
   const indicators: MarketIndicator[] = [];
   for (let i = 0; i < indicatorResults.length; i++) {
@@ -81,30 +109,105 @@ export async function buildSnapshot(
     });
   }
 
-  // 컨텍스트 추출
   const sox = indicators.find((i) => i.code === "^SOX");
   const nvda = indicators.find((i) => i.code === "NVDA");
   const nq = indicators.find((i) => i.code === "NQ=F");
   const fx = indicators.find((i) => i.code === "KRW=X");
   const vix = indicators.find((i) => i.code === "^VIX");
 
-  // 반도체 과열도 = SOX + NVDA 평균을 0~100으로 환산
+  // 반도체 과열도 = SOX + NVDA 평균을 0~100으로 환산 (1% 변동 → ±15점)
   const semiSignal = ((sox?.changeRate ?? 0) + (nvda?.changeRate ?? 0)) / 2;
-  const semiHeat = Math.round(50 + semiSignal * 1500); // 1%변동 → ±15점
+  const semiHeat = Math.round(50 + semiSignal * 1500);
   const semiHeatClamped = Math.max(0, Math.min(100, semiHeat));
 
-  const context = {
-    semiHeat: semiHeatClamped,
-    nasdaqRate: nq?.changeRate ?? 0,
-    fxRate: fx?.changeRate ?? 0,
-    vix: vix?.value ?? 15,
+  return {
+    indicators,
+    errors,
+    context: {
+      semiHeat: semiHeatClamped,
+      nasdaqRate: nq?.changeRate ?? 0,
+      fxRate: fx?.changeRate ?? 0,
+      vix: vix?.value ?? 15,
+    },
+    usdKrw: fx?.value ?? null,
   };
+}
 
-  const usdKrw = fx?.value ?? null;
+// ──────────────────────────────────────────────────────────────
+// 2) 뉴스 — 빠른 영역 (1-2초). NewsPanel + externalRisk 입력.
+// ──────────────────────────────────────────────────────────────
+export async function fetchNewsItems(limit = 30): Promise<NewsItem[]> {
+  const news = await fetchAllNews(limit);
+  if (news.length > 0) {
+    try {
+      saveNews(news);
+    } catch {
+      /* 메모리 DB 등 — 무시 */
+    }
+  }
+  return news;
+}
 
-  // 1.5) 베타 시나리오용 시장 시계열/환율 + 뉴스(외부 리스크 평가에 필요) — 병렬.
-  // 뉴스는 종목 분석 전에 받아야 종목별 externalRisk를 analyze()에 넣을 수 있다.
-  const [nasdaqHistory, fxHistory, eurUsdQuote, newsFetched] = await Promise.all([
+// ──────────────────────────────────────────────────────────────
+// 3) 매크로 이벤트 — 즉시 (24h 메모리 캐시). FOMC·KOSPI 만기·KRX 휴장.
+// ──────────────────────────────────────────────────────────────
+export function fetchMacroEvents(): EventItem[] {
+  const now = Date.now();
+  return getMacroEventsCached().filter(
+    (e) => e.date >= now - 86_400_000 && e.date <= now + 60 * 86_400_000
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// 4) marketMood 조립 — indicators + news 둘 다 있어야 가능.
+//    별도 함수로 두면 page.tsx에서 두 데이터가 도착하는 시점에 호출 가능.
+// ──────────────────────────────────────────────────────────────
+export function buildMarketMood(
+  indicators: MarketIndicator[],
+  news: NewsItem[],
+  semiHeat: number
+): DashboardSnapshot["marketMood"] {
+  return {
+    label: marketMoodLabel(indicators),
+    semiHeat,
+    riskKeywords: riskKeywords(news),
+  };
+}
+
+// ──────────────────────────────────────────────────────────────
+// 5) 관심 종목 분석 — 가장 느린 영역 (3-5초).
+//    indicators / news / context 가 없으면 내부에서 직접 fetch한다(독립 호출 가능).
+//    있으면 그대로 재사용 (buildSnapshot 등 합성 호출에서 중복 방지).
+// ──────────────────────────────────────────────────────────────
+export async function fetchWatchlistSnapshots(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  deps: WatchlistDeps = {}
+): Promise<WatchlistSnapshotsResult> {
+  const errors: Record<string, string> = {};
+  const watchSymbols: SymbolMeta[] = resolveWatchSymbols(requestedSymbols);
+  const includeOverseasNight = deps.options?.includeOverseasNight === true;
+
+  // indicators / news / context 가 없으면 자체 fetch (독립 호출 시 안전망).
+  let indicators = deps.indicators;
+  let context = deps.context;
+  let usdKrw = deps.usdKrw ?? null;
+  if (!indicators || !context) {
+    const r = await fetchMarketIndicators();
+    indicators = r.indicators;
+    context = r.context;
+    usdKrw = r.usdKrw;
+    Object.assign(errors, r.errors);
+  }
+
+  const newsAllPromise: Promise<NewsItem[]> = deps.news
+    ? Promise.resolve(deps.news)
+    : fetchNewsItems(30).catch((e) => {
+        errors["news"] = e instanceof Error ? e.message : String(e);
+        return [] as NewsItem[];
+      });
+
+  // 베타 시나리오용 시장 시계열 + (옵션) 유로/달러 시세 — 종목 분석 전 병렬 fetch.
+  const [nasdaqHistory, fxHistory, eurUsdQuote, newsAll] = await Promise.all([
     fetchHistorical("NQ=F", 90).catch(() => []),
     fetchHistorical("KRW=X", 90).catch(() => []),
     includeOverseasNight
@@ -113,51 +216,35 @@ export async function buildSnapshot(
           return null;
         })
       : Promise.resolve(null),
-    fetchAllNews(30).catch((e) => {
-      errors["news"] = e instanceof Error ? e.message : String(e);
-      return [] as NewsItem[];
-    }),
+    newsAllPromise,
   ]);
   const eurUsd = eurUsdQuote?.price ?? null;
-  const newsAll: NewsItem[] = newsFetched;
-  // 뉴스 DB 저장은 비차단으로 — 분석은 메모리 newsAll 기준.
-  if (newsAll.length > 0) {
-    try {
-      saveNews(newsAll);
-    } catch {
-      /* 메모리 DB 등 — 무시 */
-    }
-  }
 
-  // 2) 관심 종목 — quote, historical, flow, 컨센서스(캐시) 병렬
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, bundle, marketAlert, upcomingEvents] = await Promise.all([
-        fetchQuotesBatch([meta]).then((r) => r[0]),
-        fetchHistorical(meta.code, 90),
-        // 컨센서스/밸류에이션은 종목당 6시간 캐시. miss일 때만 Yahoo+Naver 호출.
-        getConsensusBundle(meta.code).catch(() => ({
-          consensus: null,
-          valuation: null,
-          researches: [],
-        })),
-        // 한국 종목만 시장경보(투자주의/경고/위험 등) 조회 — 6시간 캐시.
-        // 미국 종목·지수는 호출 자체를 스킵해 네트워크 낭비 방지.
-        isKrStock(meta.code)
-          ? getMarketAlertCached(meta.code).catch(() => null)
-          : Promise.resolve(null),
-        // 다가올 가격 이벤트(실적/배당) — 24h 캐시. 한국 종목은 야후가 종종 비워두지만 안전 실패.
-        fetchEventsForSymbol(meta).catch(() => []),
-      ]);
+      const [quoteRes, hist, bundle, marketAlert, upcomingEvents] =
+        await Promise.all([
+          fetchQuotesBatch([meta]).then((r) => r[0]),
+          fetchHistorical(meta.code, 90),
+          getConsensusBundle(meta.code).catch(() => ({
+            consensus: null,
+            valuation: null,
+            researches: [],
+          })),
+          isKrStock(meta.code)
+            ? getMarketAlertCached(meta.code).catch(() => null)
+            : Promise.resolve(null),
+          fetchEventsForSymbol(meta).catch(() => []),
+        ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
-      // 시장경보를 quote에 부착 — UI/분석 룰이 quote 한 객체에서 모두 읽도록.
-      const quote: typeof quoteRes.quote = { ...quoteRes.quote, marketAlert };
+      const quote: typeof quoteRes.quote = {
+        ...quoteRes.quote,
+        marketAlert,
+      };
 
-      // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 오차가 누적된다.
-      // 현재 시세 대비로 매번 재계산해 룰/UI가 같은 값을 본다.
-      // domestic/global도 같이 재계산 — 3-way 컨센 UI/룰에서 모두 일관된 값 사용.
+      // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 매번 재계산 — 룰/UI가 같은 값을 보도록.
       const consensus = bundle.consensus
         ? {
             ...bundle.consensus,
@@ -179,25 +266,23 @@ export async function buildSnapshot(
       const researches = bundle.researches;
 
       const overseasNight = includeOverseasNight
-        ? await fetchOverseasNightIndicator(meta, quote, usdKrw, eurUsd).catch(
-            (e) => {
-              errors[`night:${meta.code}`] =
-                e instanceof Error ? e.message : String(e);
-              return null;
-            }
-          )
+        ? await fetchOverseasNightIndicator(
+            meta,
+            quote,
+            usdKrw,
+            eurUsd
+          ).catch((e) => {
+            errors[`night:${meta.code}`] =
+              e instanceof Error ? e.message : String(e);
+            return null;
+          })
         : null;
 
       const flowRes = await fetchFlowOrMock(meta.code, quote.price);
       const tech = computeTech(hist);
-      // flow의 신선도 라벨용 — 최초엔 quote.fetchedAt에 동기화 (이후 KIS 도입 시
-      // KIS 자체 timestamp로 교체 가능). 네이버 일별 누적은 사실상 일 단위라 분 단위
-      // 정확도가 없지만, "조회한 시점"을 표시함으로써 사용자가 stale 여부를 가늠할 수 있다.
       const flow = { ...flowRes.flow, fetchedAt: quote.fetchedAt };
 
       // 한국 종목 + 정규장 진행 중일 때만 1분봉 호출 (TTL 60s 캐시).
-      // 미국·지수·환율은 호출 자체를 스킵해 네트워크 낭비 방지.
-      // intraday는 변동성 점수 + 진폭 예측 정밀화에만 사용.
       const intradayBars =
         isKrStock(meta.code) && isKrMarketOpen()
           ? await fetchIntradayBars(meta.code).catch(() => null)
@@ -206,8 +291,7 @@ export async function buildSnapshot(
         ? computeIntradayMetrics(intradayBars)
         : null;
 
-      // 종목 관련 뉴스 + 시장 전반(symbol 미지정) 뉴스를 합쳐 외부 리스크 평가.
-      // 시장 전반 뉴스(예: "트럼프, 중국 반도체에 100% 관세")는 모든 watchlist에 영향.
+      // 종목 + 시장 전반 뉴스를 합쳐 외부 리스크 평가.
       const relatedNews = newsAll.filter(
         (n) =>
           n.symbol === meta.code ||
@@ -215,8 +299,6 @@ export async function buildSnapshot(
           n.symbol == null
       );
       const externalRisk = assessNewsRisk(relatedNews);
-      // 호재(opportunity)는 종목명 매칭이 엄격해야 펌프 방지 → assessOpportunity 내부에서
-      // 시장 전반 뉴스는 자동 제외한다. (newsAll 통째로 넘겨도 안전.)
       const externalOpportunity = assessOpportunity(
         newsAll,
         meta.code,
@@ -232,12 +314,10 @@ export async function buildSnapshot(
         externalRisk,
         externalOpportunity,
         context: {
-          ...context,
+          ...context!,
           overseasNightRate: overseasNight?.changeRate ?? null,
         },
       });
-      // 변동성("사팔사팔") 점수 — 일봉 + 수급 + (한국+장중) 분봉 가중.
-      // verdict shift는 하지 않고 analysis.volatility 로만 노출 (안전장치 유지).
       const volatility = assessVolatility({
         history: hist,
         flow,
@@ -245,8 +325,6 @@ export async function buildSnapshot(
         intraday: intradayMetrics,
       });
       analysis.volatility = volatility;
-      // 도박장 등급이면 단기 reasons 첫 줄에 한 줄 prepend.
-      // verdict 자체는 안 흔들고 사용자에게 시각적으로 강조하는 용도.
       if (volatility.level === "gambling" || volatility.level === "high") {
         const top = volatility.drivers[0]?.label;
         const tag =
@@ -275,7 +353,6 @@ export async function buildSnapshot(
       saveTech(meta.code, quote.fetchedAt, tech);
       saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
-      // 시그널 마크 — 가격/이력/수급으로 즉시 계산. 우선순위 컷 적용.
       const signalMarks = pickTopSignalMarks(
         evaluateSignalMarks({ quote, history: hist, flow }),
         4
@@ -308,26 +385,46 @@ export async function buildSnapshot(
     }
   }
 
-  // 3) 뉴스는 이미 §1.5에서 newsAll로 받아 두었다.
-  const marketMood = {
-    label: marketMoodLabel(indicators),
-    semiHeat: semiHeatClamped,
-    riskKeywords: riskKeywords(newsAll),
-  };
+  return { primaries, errors };
+}
 
-  // 매크로 이벤트 (FOMC·KOSPI 만기·KRX 휴장) — 24h 메모리 캐시. 종목과 무관하게 한 번만.
-  const macroEvents = getMacroEventsCached().filter(
-    (e) => e.date >= Date.now() - 86_400_000 && e.date <= Date.now() + 60 * 86_400_000
-  );
+// ──────────────────────────────────────────────────────────────
+// 기존 호환 — 메인 대시보드 1회 분의 통합 스냅샷.
+//   indicators + news 를 병렬로 받고 → watchlist 분석에 deps로 주입.
+//   외부 인터페이스(반환 shape)는 종전과 동일.
+// ──────────────────────────────────────────────────────────────
+export async function buildSnapshot(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  // 뉴스 실패는 치명적이지 않음 — 빈 배열로 진행. 호출자가 별도 fetch 시도해도 무방.
+  const [indicatorResult, news] = await Promise.all([
+    fetchMarketIndicators(),
+    fetchNewsItems(30).catch(() => [] as NewsItem[]),
+  ]);
+
+  const watchResult = await fetchWatchlistSnapshots(requestedSymbols, {
+    indicators: indicatorResult.indicators,
+    news,
+    context: indicatorResult.context,
+    usdKrw: indicatorResult.usdKrw,
+    options,
+  });
+
+  const errors = { ...indicatorResult.errors, ...watchResult.errors };
 
   return {
     generatedAt: Date.now(),
-    primaries,
-    indicators,
-    marketMood,
-    news: newsAll,
+    primaries: watchResult.primaries,
+    indicators: indicatorResult.indicators,
+    marketMood: buildMarketMood(
+      indicatorResult.indicators,
+      news,
+      indicatorResult.context.semiHeat
+    ),
+    news,
     errors,
-    macroEvents,
+    macroEvents: fetchMacroEvents(),
   };
 }
 
