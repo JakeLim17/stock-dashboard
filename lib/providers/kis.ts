@@ -42,15 +42,14 @@ function getAppSecret(): string | null {
   return process.env.KIS_APP_SECRET ?? null;
 }
 
-function kisExplicitlyEnabled(): boolean {
+function kisExplicitlyDisabled(): boolean {
   const v = (process.env.KIS_ENABLED ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
+  return v === "0" || v === "false" || v === "no" || v === "off";
 }
 
 export function kisEnabled(): boolean {
-  // KIS 토큰 발급 시 카톡/SMS 알림이 발생한다.
-  // 키가 있어도 기본은 OFF로 두고, 운영자가 KIS_ENABLED=1 을 명시한 경우에만 호출한다.
-  return kisExplicitlyEnabled() && !!(getAppKey() && getAppSecret());
+  // 키가 있으면 KIS를 사용한다. 단, 장애 대응용으로 KIS_ENABLED=0 을 두면 완전히 끌 수 있다.
+  return !kisExplicitlyDisabled() && !!(getAppKey() && getAppSecret());
 }
 
 // 디버그 로그 — DEBUG_KIS=1 일 때만 활성화. 평소엔 조용히.
@@ -106,6 +105,18 @@ function legacyTokenCachePath(): string {
 
 function tokenLockPath(): string {
   return `${tokenCachePath()}.lock`;
+}
+
+function kisFetchTimeoutMs(): number {
+  const fromEnv = Number(process.env.KIS_FETCH_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return 4_000;
+}
+
+function tokenWaitMs(): number {
+  const fromEnv = Number(process.env.KIS_TOKEN_WAIT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return 2_000;
 }
 
 function keyFingerprint(): string {
@@ -222,6 +233,22 @@ interface KisTokenResponse {
   access_token_token_expired?: string; // "YYYY-MM-DD HH:mm:ss"
 }
 
+function parseKisTokenExpired(s: string | undefined): number | null {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const [, yy, mo, dd, hh, mi, ss] = m;
+  const y = Number(yy);
+  const month = Number(mo);
+  const d = Number(dd);
+  const h = Number(hh);
+  const min = Number(mi);
+  const sec = Number(ss);
+  if (![y, month, d, h, min, sec].every(Number.isFinite)) return null;
+  // KIS 응답 만료시각은 KST 기준 문자열이다.
+  return Date.UTC(y, month - 1, d, h - 9, min, sec);
+}
+
 function isTokenAuthError(status: number, body: string): boolean {
   if (status === 401) return true;
   if (status !== 403) return false;
@@ -247,6 +274,7 @@ async function requestNewToken(): Promise<string> {
       appsecret,
     }),
     cache: "no-store",
+    signal: AbortSignal.timeout(kisFetchTimeoutMs()),
   });
 
   if (!res.ok) {
@@ -266,7 +294,9 @@ async function requestNewToken(): Promise<string> {
   const issuedAt = Date.now();
   const expiresInSec = typeof json.expires_in === "number" ? json.expires_in : 86_400;
   const safeWindowMs = 5 * 60 * 1000;
-  const expiresAt = issuedAt + expiresInSec * 1000 - safeWindowMs;
+  const expiresAt =
+    (parseKisTokenExpired(json.access_token_token_expired) ??
+      issuedAt + expiresInSec * 1000) - safeWindowMs;
 
   const tc: TokenCache = {
     token: json.access_token,
@@ -289,7 +319,7 @@ async function requestNewTokenLocked(): Promise<string> {
 
   const lock = await acquireTokenIssueLock();
   if (!lock) {
-    const peerToken = await waitForPeerToken();
+    const peerToken = await waitForPeerToken(tokenWaitMs());
     if (peerToken) return peerToken;
     throw new Error("KIS 토큰 발급 대기 초과 — 중복 발급 방지를 위해 이번 호출은 fallback");
   }
@@ -421,6 +451,7 @@ async function kisGet<T>(params: KisGetParams): Promise<T> {
         "content-type": "application/json; charset=utf-8",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(kisFetchTimeoutMs()),
     });
   }
 

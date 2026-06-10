@@ -37,14 +37,14 @@ npm run start
 | 키 | 필수 | 설명 |
 |---|---|---|
 | `DASHBOARD_PASS` | 권장 | 비밀번호. 설정 시 `/login`에서 1회 입력 후 30일 자동 통과 |
-| `KIS_ENABLED` | 선택 | `1`/`true`일 때만 KIS 호출 활성화. 기본값은 비활성 |
+| `KIS_ENABLED` | 선택 | `0`/`false`로 두면 KIS 호출 비활성화. 기본값은 활성 |
 | `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
 | `KIS_APP_SECRET` | 선택 | 동 시크릿 |
 | `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |
 
 **Vercel 공개 배포에선 `DASHBOARD_PASS` 설정 권장** — 봇 크롤로 인한 함수 호출 폭주를 막아줍니다. 한 번 로그인하면 같은 브라우저에서 30일 동안 비번을 다시 묻지 않습니다.
-**KIS는 기본 비활성**입니다. 토큰 발급 때 카톡/SMS 알림이 올 수 있어, 키를 넣어도 `KIS_ENABLED=1`을 명시해야만 KIS를 호출합니다.
-**KIS를 끄면 외인/기관 수급은 네이버 또는 mock data로 표시**됩니다. 시세·뉴스는 무료 소스만으로 정상 동작합니다.
+**KIS 토큰은 발급 시 알림톡/SMS가 올 수 있습니다.** 앱은 토큰을 `data/kis-token.json`에 저장해 만료 전까지 재사용합니다.
+문자 폭주 등 장애 대응이 필요할 때만 `KIS_ENABLED=0`으로 끄면, 외인/기관 수급은 네이버 또는 mock data로 표시됩니다.
 
 ## 디렉토리 구조
 
@@ -156,7 +156,7 @@ DashboardClient (60s polling)
 # 3) Build / Output / Install 기본값 그대로
 # 4) Environment Variables (선택)
 #    - DASHBOARD_PASS
-#    - KIS_ENABLED=1 을 넣은 경우에만 KIS 활성화
+#    - KIS_ENABLED=0 은 장애 대응용 비활성화 스위치
 #    - KIS_APP_KEY / KIS_APP_SECRET / KIS_BASE_URL
 # 5) Deploy
 ```
