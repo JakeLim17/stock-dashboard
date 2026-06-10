@@ -125,6 +125,15 @@ interface KisTokenResponse {
   access_token_token_expired?: string; // "YYYY-MM-DD HH:mm:ss"
 }
 
+function isTokenAuthError(status: number, body: string): boolean {
+  if (status === 401) return true;
+  if (status !== 403) return false;
+
+  // KIS는 호출 제한/권한 오류도 403으로 내려준다.
+  // 토큰 문구가 있는 경우에만 재발급해서 문자/SMS 발송을 최소화한다.
+  return /token|access[_-]?token|bearer|oauth|토큰/i.test(body);
+}
+
 async function requestNewToken(): Promise<string> {
   const appkey = getAppKey();
   const appsecret = getAppSecret();
@@ -280,13 +289,18 @@ async function kisGet<T>(params: KisGetParams): Promise<T> {
   try {
     let token = await getToken();
     let res = await call(token);
+    let errorText = "";
     if (res.status === 401 || res.status === 403) {
+      errorText = await res.text().catch(() => "");
+    }
+    if (isTokenAuthError(res.status, errorText)) {
       token = await getToken(true);
       res = await call(token);
+      errorText = "";
     }
     // EGW00201 (초당 거래건수 초과) — 1초 대기 후 1회 재시도. 보통 회복됨.
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
+      const text = errorText || (await res.text().catch(() => ""));
       if (res.status === 500 && /EGW00201|초당 거래건수/.test(text)) {
         await new Promise((r) => setTimeout(r, 1100));
         res = await call(token);
