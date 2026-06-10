@@ -38,6 +38,9 @@ npm run start
 |---|---|---|
 | `DASHBOARD_PASS` | 권장 | 비밀번호. 설정 시 `/login`에서 1회 입력 후 30일 자동 통과 |
 | `KIS_ENABLED` | 선택 | `0`/`false`로 두면 KIS 호출 비활성화. 기본값은 활성 |
+| `KIS_INDEX_ENABLED` | 선택 | `1`이면 한국 지수도 KIS로 조회. 기본은 빠른 Yahoo |
+| `KIS_HISTORY_ENABLED` | 선택 | `1`이면 일봉 히스토리도 KIS로 조회. 기본은 빠른 Yahoo |
+| `KIS_EXTRAS_ENABLED` | 선택 | `1`이면 프로그램매매/공매도 보조 데이터 조회 |
 | `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
 | `KIS_APP_SECRET` | 선택 | 동 시크릿 |
 | `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |

@@ -8,6 +8,7 @@ import {
   fetchFlowOrMock,
   fetchAllNews,
   riskKeywords,
+  fetchYahooQuotesBatch,
 } from "./providers";
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
@@ -87,6 +88,11 @@ export interface WatchlistDeps {
   options?: BuildSnapshotOptions;
 }
 
+function envEnabled(name: string): boolean {
+  const v = (process.env[name] ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 // ──────────────────────────────────────────────────────────────
 // 1) 시장 지표 — 빠른 영역 (1-2초). SummaryBar / MarketPanel 1차 채움용.
 //    Suspense streaming 단계 중 가장 먼저 도착한다.
@@ -97,7 +103,7 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
   // history는 (1) KRW=X 변동성 σ 계산, (2) 모든 카드의 Sparkline 렌더에 사용.
   // 실패한 심볼은 빈 배열로 fallback — 시세는 살아 있을 수 있으므로 카드 자체는 그대로 노출.
   const [indicatorResults, historyResults] = await Promise.all([
-    fetchQuotesBatch(MARKET_INDICATORS),
+    fetchYahooQuotesBatch(MARKET_INDICATORS),
     Promise.all(
       MARKET_INDICATORS.map((meta) =>
         fetchHistorical(meta.code, 35).catch(() => [])
@@ -300,8 +306,9 @@ export async function fetchWatchlistSnapshots(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      // 한국 종목 + KIS 활성 시: 프로그램 매매 + 공매도 잔고 병렬 fetch (각각 60s/5min 캐시).
-      const wantsKisExtras = kisEnabled() && isKrStock(meta.code);
+      // 프로그램 매매/공매도는 보조 정보라 첫 로딩 병목을 피하기 위해 opt-in.
+      const wantsKisExtras =
+        envEnabled("KIS_EXTRAS_ENABLED") && kisEnabled() && isKrStock(meta.code);
       const [
         quoteRes,
         hist,

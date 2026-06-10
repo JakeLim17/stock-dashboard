@@ -23,10 +23,9 @@ import type { FlowData, Quote } from "../types";
 //   - 시세(fetchQuote)
 //       한국:   KIS → 네이버 → Yahoo
 //       해외:   KIS(us-stock 한정) → Yahoo
-//       지수/환율/선물: Yahoo (KIS 미지원)
+//       지수/환율/선물: Yahoo (한국 지수 KIS는 KIS_INDEX_ENABLED=1 일 때만)
 //   - 일별(fetchHistorical)
-//       한국:   KIS → Yahoo
-//       해외:   KIS(us-stock 한정) → Yahoo
+//       기본 Yahoo. KIS_HISTORY_ENABLED=1 이면 한국/미국 주식 KIS 우선.
 //       기타:  Yahoo
 //   - 수급(fetchFlowOrMock)
 //       한국:   KIS → 네이버 → mock
@@ -39,9 +38,19 @@ function isUsTicker(code: string): boolean {
   return /^[A-Z][A-Z0-9.\-]{0,9}$/.test(code);
 }
 
+function envEnabled(name: string): boolean {
+  const v = (process.env[name] ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 async function fetchQuote(code: string, name: string): Promise<Quote> {
   // 한국 지수(^KS11, ^KQ11, ^KS200) — KIS inquire-index-price 우선 → Yahoo 폴백.
-  if (kisEnabled() && yahooIndexToKisCode(code) != null) {
+  // 첫 로딩의 시장 지표는 빠른 표시가 중요해 기본은 Yahoo를 사용한다.
+  if (
+    envEnabled("KIS_INDEX_ENABLED") &&
+    kisEnabled() &&
+    yahooIndexToKisCode(code) != null
+  ) {
     const kisIdx = await fetchKrIndex(code, name);
     if (kisIdx) {
       // IndexQuote → Quote 변환. 지수는 거래량 외 valuation/marketCap 없음.
@@ -105,7 +114,9 @@ async function fetchHistorical(
   code: string,
   days = 90
 ): Promise<Awaited<ReturnType<typeof fetchYahooHistorical>>> {
-  if (kisEnabled()) {
+  // 분석용 일봉은 첫 로딩 병목이 커서 기본 Yahoo를 사용한다.
+  // KIS 일봉이 꼭 필요하면 KIS_HISTORY_ENABLED=1 로 opt-in.
+  if (envEnabled("KIS_HISTORY_ENABLED") && kisEnabled()) {
     if (isKrStock(code)) {
       const kis = await fetchKrHistorical(code, days);
       if (kis && kis.length > 0) return kis;
