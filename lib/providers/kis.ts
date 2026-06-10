@@ -1,4 +1,6 @@
 import "server-only";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { FlowData, Quote } from "../types";
 import { toKisCode } from "../symbols";
 import type { HistoricalPoint } from "./yahoo";
@@ -31,6 +33,13 @@ export function kisEnabled(): boolean {
   return !!(getAppKey() && getAppSecret());
 }
 
+// 디버그 로그 — DEBUG_KIS=1 일 때만 활성화. 평소엔 조용히.
+function dbg(...args: unknown[]): void {
+  if (process.env.DEBUG_KIS === "1" || process.env.DEBUG_KIS === "true") {
+    console.log("[kis]", ...args);
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // OAuth 토큰
 // ────────────────────────────────────────────────────────────────────
@@ -38,10 +47,63 @@ export function kisEnabled(): boolean {
 interface TokenCache {
   token: string;
   expiresAt: number; // epoch ms — 실제 expires_in 보다 5분 일찍 만료 취급
+  // 어떤 키로 발급된 토큰인지 — 키가 바뀌면 캐시 무효화
+  keyFingerprint: string;
 }
 
 let cachedToken: TokenCache | null = null;
 let inflightTokenPromise: Promise<string> | null = null;
+// 토큰 발급 1분당 1회(EGW00133) lockout 회피용 cooldown.
+// 발급 실패 시 60초간 추가 요청을 즉시 throw → 같은 시간 내 호출자는 빠르게 fallback 가도록.
+let tokenCooldownUntil = 0;
+let diskCacheLoaded = false;
+
+// node_modules/.cache 하위에 토큰 1개만 저장 — git ignore 자동 + dev 재시작/Turbopack
+// 모듈 reload 후에도 동일 키면 그대로 재사용 (KIS 토큰은 24h 유효).
+function tokenCachePath(): string {
+  return path.join(process.cwd(), "node_modules", ".cache", "kis-token.json");
+}
+
+function keyFingerprint(): string {
+  const k = getAppKey() ?? "";
+  // 앞 8자만 fingerprint로 — 키가 같은 환경인지 확인용 (전체 키는 디스크 평문 저장 안 함을 흉내)
+  return `${k.slice(0, 8)}:${k.length}`;
+}
+
+async function loadTokenFromDisk(): Promise<void> {
+  if (diskCacheLoaded) return;
+  diskCacheLoaded = true;
+  try {
+    const raw = await fs.readFile(tokenCachePath(), "utf8");
+    const parsed = JSON.parse(raw) as Partial<TokenCache>;
+    if (
+      parsed?.token &&
+      typeof parsed.expiresAt === "number" &&
+      parsed.expiresAt > Date.now() &&
+      parsed.keyFingerprint === keyFingerprint()
+    ) {
+      cachedToken = {
+        token: parsed.token,
+        expiresAt: parsed.expiresAt,
+        keyFingerprint: parsed.keyFingerprint,
+      };
+    }
+  } catch {
+    // 파일 없음/파싱 실패 — 무시
+  }
+}
+
+async function saveTokenToDisk(tc: TokenCache): Promise<void> {
+  try {
+    const dir = path.dirname(tokenCachePath());
+    await fs.mkdir(dir, { recursive: true });
+    const tmp = `${tokenCachePath()}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(tc), "utf8");
+    await fs.rename(tmp, tokenCachePath());
+  } catch {
+    // 쓰기 실패는 치명적이지 않음 — 메모리 캐시로 동작 가능
+  }
+}
 
 interface KisTokenResponse {
   access_token: string;
@@ -70,6 +132,10 @@ async function requestNewToken(): Promise<string> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // EGW00133 = 1분당 1회 제한. 60초 cooldown 걸어서 추가 호출 차단.
+    if (res.status === 403 && /EGW00133|1분당 1회/.test(text)) {
+      tokenCooldownUntil = Date.now() + 60_000;
+    }
     throw new Error(`KIS 토큰 발급 실패 (${res.status}): ${text.slice(0, 200)}`);
   }
 
@@ -82,13 +148,26 @@ async function requestNewToken(): Promise<string> {
   const safeWindowMs = 5 * 60 * 1000;
   const expiresAt = Date.now() + expiresInSec * 1000 - safeWindowMs;
 
-  cachedToken = { token: json.access_token, expiresAt };
+  const tc: TokenCache = {
+    token: json.access_token,
+    expiresAt,
+    keyFingerprint: keyFingerprint(),
+  };
+  cachedToken = tc;
+  // 비동기 디스크 저장 — 실패해도 무시
+  void saveTokenToDisk(tc);
   return json.access_token;
 }
 
 async function getToken(forceRefresh = false): Promise<string> {
+  await loadTokenFromDisk();
   if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.token;
+  }
+  // 1분당 1회 lockout — 토큰 새로 못 받으므로 즉시 throw
+  if (tokenCooldownUntil > Date.now()) {
+    const sec = Math.ceil((tokenCooldownUntil - Date.now()) / 1000);
+    throw new Error(`KIS 토큰 cooldown 중 (${sec}초 남음) — naver/yahoo로 fallback`);
   }
   if (inflightTokenPromise) return inflightTokenPromise;
 
@@ -107,6 +186,51 @@ interface KisGetParams {
   trId: string;
   query: Record<string, string>;
   custType?: "P" | "B"; // 개인/법인. 기본 P
+}
+
+// KIS 초당 호출 한도(EGW00201) 대응 throttle.
+// 모의투자(openapivts)는 초당 ~1건, 실전은 키별 한도가 달라 보수적으로 직렬화.
+// 실전 환경에서도 EGW00201이 자주 발생해서 (단일 키 동시 호출 제한) — 안전 마진 크게.
+function isVtsMode(): boolean {
+  return (process.env.KIS_BASE_URL ?? "").includes("openapivts");
+}
+function kisMinIntervalMs(): number {
+  // 환경 변수로 override 가능 — 실전 키 한도 여유 있으면 낮춰 사용.
+  const fromEnv = Number(process.env.KIS_MIN_INTERVAL_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return isVtsMode() ? 1100 : 250; // 실전 초당 ~4건 (안전 마진)
+}
+function kisMaxConcurrency(): number {
+  return 1; // 직렬화 — EGW00201 회피 우선
+}
+
+let kisActiveCount = 0;
+let kisLastSendAt = 0;
+const kisWaiters: Array<() => void> = [];
+
+async function acquireKisSlot(): Promise<void> {
+  const maxC = kisMaxConcurrency();
+  const minInterval = kisMinIntervalMs();
+  while (true) {
+    if (kisActiveCount < maxC) {
+      const since = Date.now() - kisLastSendAt;
+      if (since >= minInterval) {
+        kisActiveCount += 1;
+        kisLastSendAt = Date.now();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, minInterval - since));
+      continue;
+    }
+    await new Promise<void>((resolve) => kisWaiters.push(resolve));
+  }
+}
+
+
+function releaseKisSlot(): void {
+  kisActiveCount = Math.max(0, kisActiveCount - 1);
+  const next = kisWaiters.shift();
+  if (next) next();
 }
 
 async function kisGet<T>(params: KisGetParams): Promise<T> {
@@ -139,17 +263,32 @@ async function kisGet<T>(params: KisGetParams): Promise<T> {
     });
   }
 
-  let token = await getToken();
-  let res = await call(token);
-  if (res.status === 401 || res.status === 403) {
-    token = await getToken(true);
-    res = await call(token);
+  await acquireKisSlot();
+  try {
+    let token = await getToken();
+    let res = await call(token);
+    if (res.status === 401 || res.status === 403) {
+      token = await getToken(true);
+      res = await call(token);
+    }
+    // EGW00201 (초당 거래건수 초과) — 1초 대기 후 1회 재시도. 보통 회복됨.
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      if (res.status === 500 && /EGW00201|초당 거래건수/.test(text)) {
+        await new Promise((r) => setTimeout(r, 1100));
+        res = await call(token);
+        if (res.ok) return (await res.json()) as T;
+        const t2 = await res.text().catch(() => "");
+        throw new Error(
+          `KIS GET ${params.path} ${res.status} (retry 후): ${t2.slice(0, 200)}`
+        );
+      }
+      throw new Error(`KIS GET ${params.path} ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return (await res.json()) as T;
+  } finally {
+    releaseKisSlot();
   }
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`KIS GET ${params.path} ${res.status}: ${text.slice(0, 200)}`);
-  }
-  return (await res.json()) as T;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -293,7 +432,8 @@ export async function fetchKrQuote(code: string, name: string): Promise<Quote | 
       priceTime: null,
       extendedHours: null,
     };
-  } catch {
+  } catch (e) {
+    dbg("[quote] throw:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -406,10 +546,17 @@ function toKrwNet(
 
 export async function fetchKrFlow(code: string): Promise<FlowData | null> {
   const six = toKisCode(code);
-  if (!six) return null;
-  if (!kisEnabled()) return null;
+  if (!six) {
+    dbg("[flow] skip — toKisCode null", code);
+    return null;
+  }
+  if (!kisEnabled()) {
+    dbg("[flow] skip — kisEnabled false");
+    return null;
+  }
 
   try {
+    dbg("[flow] call inquire-investor", six);
     const json = await kisGet<KisInvestorResponse>({
       path: "/uapi/domestic-stock/v1/quotations/inquire-investor",
       trId: "FHKST01010900",
@@ -419,9 +566,15 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       },
     });
 
-    if (json.rt_cd && json.rt_cd !== "0") return null;
+    if (json.rt_cd && json.rt_cd !== "0") {
+      dbg("[flow] rt_cd !=0", json.rt_cd, "msg=", (json as { msg1?: string }).msg1);
+      return null;
+    }
     const list = json.output ?? [];
-    if (list.length === 0) return null;
+    if (list.length === 0) {
+      dbg("[flow] empty output");
+      return null;
+    }
 
     const today = list[0];
     const todayClose = n(today.stck_clpr);
@@ -478,7 +631,8 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       source: "kis",
       fetchedAt: Date.now(),
     };
-  } catch {
+  } catch (e) {
+    dbg("[flow] throw:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
