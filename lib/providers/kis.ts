@@ -42,8 +42,15 @@ function getAppSecret(): string | null {
   return process.env.KIS_APP_SECRET ?? null;
 }
 
+function kisExplicitlyEnabled(): boolean {
+  const v = (process.env.KIS_ENABLED ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export function kisEnabled(): boolean {
-  return !!(getAppKey() && getAppSecret());
+  // KIS 토큰 발급 시 카톡/SMS 알림이 발생한다.
+  // 키가 있어도 기본은 OFF로 두고, 운영자가 KIS_ENABLED=1 을 명시한 경우에만 호출한다.
+  return kisExplicitlyEnabled() && !!(getAppKey() && getAppSecret());
 }
 
 // 디버그 로그 — DEBUG_KIS=1 일 때만 활성화. 평소엔 조용히.
