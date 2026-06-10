@@ -59,62 +59,152 @@ function dbg(...args: unknown[]): void {
 
 interface TokenCache {
   token: string;
+  issuedAt: number; // epoch ms — 발급 알림 중복 방지용
   expiresAt: number; // epoch ms — 실제 expires_in 보다 5분 일찍 만료 취급
   // 어떤 키로 발급된 토큰인지 — 키가 바뀌면 캐시 무효화
   keyFingerprint: string;
 }
 
-let cachedToken: TokenCache | null = null;
-let inflightTokenPromise: Promise<string> | null = null;
+interface TokenState {
+  cachedToken: TokenCache | null;
+  inflightTokenPromise: Promise<string> | null;
+  tokenCooldownUntil: number;
+  diskCacheLoaded: boolean;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __kisTokenState: TokenState | undefined;
+}
+
+const tokenState: TokenState = (global.__kisTokenState ??= {
+  cachedToken: null,
+  inflightTokenPromise: null,
+  tokenCooldownUntil: 0,
+  diskCacheLoaded: false,
+});
+
 // 토큰 발급 1분당 1회(EGW00133) lockout 회피용 cooldown.
 // 발급 실패 시 60초간 추가 요청을 즉시 throw → 같은 시간 내 호출자는 빠르게 fallback 가도록.
-let tokenCooldownUntil = 0;
-let diskCacheLoaded = false;
 
-// node_modules/.cache 하위에 토큰 1개만 저장 — git ignore 자동 + dev 재시작/Turbopack
-// 모듈 reload 후에도 동일 키면 그대로 재사용 (KIS 토큰은 24h 유효).
+// data 하위에 토큰 1개만 저장 — SQLite처럼 앱 실행 중 유지되는 writable 경로.
+// node_modules/.cache 는 배포/재설치/권한 변경 때 사라질 수 있어 반복 발급 원인이 된다.
 function tokenCachePath(): string {
+  return path.join(process.cwd(), "data", "kis-token.json");
+}
+
+function legacyTokenCachePath(): string {
   return path.join(process.cwd(), "node_modules", ".cache", "kis-token.json");
+}
+
+function tokenLockPath(): string {
+  return `${tokenCachePath()}.lock`;
 }
 
 function keyFingerprint(): string {
   const k = getAppKey() ?? "";
-  // 앞 8자만 fingerprint로 — 키가 같은 환경인지 확인용 (전체 키는 디스크 평문 저장 안 함을 흉내)
-  return `${k.slice(0, 8)}:${k.length}`;
+  // 앞 8자만 fingerprint로 — 키/서버가 같은 환경인지 확인용 (전체 키는 저장하지 않음)
+  return `${getBaseUrl()}:${k.slice(0, 8)}:${k.length}`;
 }
 
-async function loadTokenFromDisk(): Promise<void> {
-  if (diskCacheLoaded) return;
-  diskCacheLoaded = true;
+function normalizeTokenCache(raw: Partial<TokenCache>): TokenCache | null {
+  if (
+    !raw?.token ||
+    typeof raw.expiresAt !== "number" ||
+    raw.expiresAt <= Date.now() ||
+    raw.keyFingerprint !== keyFingerprint()
+  ) {
+    return null;
+  }
+  return {
+    token: raw.token,
+    // 예전 캐시는 issuedAt 이 없다. 이 경우 오래된 토큰처럼 취급해 1회 갱신 여지를 둔다.
+    issuedAt:
+      typeof raw.issuedAt === "number"
+        ? raw.issuedAt
+        : Math.max(0, raw.expiresAt - 86_400_000),
+    expiresAt: raw.expiresAt,
+    keyFingerprint: raw.keyFingerprint,
+  };
+}
+
+function isUsableToken(tc: TokenCache | null): tc is TokenCache {
+  return !!tc && tc.expiresAt > Date.now() && tc.keyFingerprint === keyFingerprint();
+}
+
+async function readTokenFile(file: string): Promise<TokenCache | null> {
   try {
-    const raw = await fs.readFile(tokenCachePath(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<TokenCache>;
-    if (
-      parsed?.token &&
-      typeof parsed.expiresAt === "number" &&
-      parsed.expiresAt > Date.now() &&
-      parsed.keyFingerprint === keyFingerprint()
-    ) {
-      cachedToken = {
-        token: parsed.token,
-        expiresAt: parsed.expiresAt,
-        keyFingerprint: parsed.keyFingerprint,
-      };
-    }
+    const raw = await fs.readFile(file, "utf8");
+    return normalizeTokenCache(JSON.parse(raw) as Partial<TokenCache>);
   } catch {
-    // 파일 없음/파싱 실패 — 무시
+    return null;
   }
 }
 
-async function saveTokenToDisk(tc: TokenCache): Promise<void> {
+async function loadTokenFromDisk(force = false): Promise<void> {
+  if (!force && tokenState.diskCacheLoaded) return;
+  tokenState.diskCacheLoaded = true;
+
+  const primary = await readTokenFile(tokenCachePath());
+  if (primary) {
+    tokenState.cachedToken = primary;
+    return;
+  }
+
+  // 기존 node_modules 캐시가 있으면 data 캐시로 1회 이관한다.
+  const legacy = await readTokenFile(legacyTokenCachePath());
+  if (legacy) {
+    tokenState.cachedToken = legacy;
+    await saveTokenToDisk(legacy);
+  }
+}
+
+async function saveTokenToDisk(tc: TokenCache): Promise<boolean> {
   try {
     const dir = path.dirname(tokenCachePath());
     await fs.mkdir(dir, { recursive: true });
     const tmp = `${tokenCachePath()}.${process.pid}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(tc), "utf8");
     await fs.rename(tmp, tokenCachePath());
+    return true;
+  } catch (e) {
+    dbg("[token] cache save failed:", e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForPeerToken(timeoutMs = 10_000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    await loadTokenFromDisk(true);
+    if (isUsableToken(tokenState.cachedToken)) {
+      return tokenState.cachedToken.token;
+    }
+  }
+  return null;
+}
+
+async function acquireTokenIssueLock(): Promise<Awaited<ReturnType<typeof fs.open>> | null> {
+  const lock = tokenLockPath();
+  try {
+    await fs.mkdir(path.dirname(lock), { recursive: true });
+    return await fs.open(lock, "wx");
   } catch {
-    // 쓰기 실패는 치명적이지 않음 — 메모리 캐시로 동작 가능
+    try {
+      const st = await fs.stat(lock);
+      if (Date.now() - st.mtimeMs > 30_000) {
+        await fs.unlink(lock).catch(() => undefined);
+        return await fs.open(lock, "wx");
+      }
+    } catch {
+      // lock 상태 확인 실패 — 아래에서 peer 대기 경로로 보낸다.
+    }
+    return null;
   }
 }
 
@@ -156,7 +246,7 @@ async function requestNewToken(): Promise<string> {
     const text = await res.text().catch(() => "");
     // EGW00133 = 1분당 1회 제한. 60초 cooldown 걸어서 추가 호출 차단.
     if (res.status === 403 && /EGW00133|1분당 1회/.test(text)) {
-      tokenCooldownUntil = Date.now() + 60_000;
+      tokenState.tokenCooldownUntil = Date.now() + 60_000;
     }
     throw new Error(`KIS 토큰 발급 실패 (${res.status}): ${text.slice(0, 200)}`);
   }
@@ -166,37 +256,79 @@ async function requestNewToken(): Promise<string> {
     throw new Error("KIS 토큰 응답에 access_token 없음");
   }
 
+  const issuedAt = Date.now();
   const expiresInSec = typeof json.expires_in === "number" ? json.expires_in : 86_400;
   const safeWindowMs = 5 * 60 * 1000;
-  const expiresAt = Date.now() + expiresInSec * 1000 - safeWindowMs;
+  const expiresAt = issuedAt + expiresInSec * 1000 - safeWindowMs;
 
   const tc: TokenCache = {
     token: json.access_token,
+    issuedAt,
     expiresAt,
     keyFingerprint: keyFingerprint(),
   };
-  cachedToken = tc;
-  // 비동기 디스크 저장 — 실패해도 무시
-  void saveTokenToDisk(tc);
+  tokenState.cachedToken = tc;
+  await saveTokenToDisk(tc);
+  dbg("[token] issued new token; expiresAt=", new Date(expiresAt).toISOString());
   return json.access_token;
+}
+
+async function requestNewTokenLocked(): Promise<string> {
+  await loadTokenFromDisk(true);
+  const cached = tokenState.cachedToken;
+  if (isUsableToken(cached)) {
+    return cached.token;
+  }
+
+  const lock = await acquireTokenIssueLock();
+  if (!lock) {
+    const peerToken = await waitForPeerToken();
+    if (peerToken) return peerToken;
+    throw new Error("KIS 토큰 발급 대기 초과 — 중복 발급 방지를 위해 이번 호출은 fallback");
+  }
+
+  try {
+    await loadTokenFromDisk(true);
+    const fresh = tokenState.cachedToken;
+    if (isUsableToken(fresh)) {
+      return fresh.token;
+    }
+    return await requestNewToken();
+  } finally {
+    await lock.close().catch(() => undefined);
+    await fs.unlink(tokenLockPath()).catch(() => undefined);
+  }
+}
+
+function forceRefreshMinIntervalMs(): number {
+  const fromEnv = Number(process.env.KIS_TOKEN_FORCE_REFRESH_MIN_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv;
+  // KIS 토큰은 24h 유효하다. 유효 토큰 인증 오류가 반복돼도 발급 알림 폭주를 막는다.
+  return 23 * 60 * 60 * 1000;
 }
 
 async function getToken(forceRefresh = false): Promise<string> {
   await loadTokenFromDisk();
-  if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) {
-    return cachedToken.token;
+  if (isUsableToken(tokenState.cachedToken)) {
+    if (!forceRefresh) return tokenState.cachedToken.token;
+
+    const age = Date.now() - tokenState.cachedToken.issuedAt;
+    if (age < forceRefreshMinIntervalMs()) {
+      dbg("[token] force refresh blocked; token age(ms)=", age);
+      return tokenState.cachedToken.token;
+    }
   }
   // 1분당 1회 lockout — 토큰 새로 못 받으므로 즉시 throw
-  if (tokenCooldownUntil > Date.now()) {
-    const sec = Math.ceil((tokenCooldownUntil - Date.now()) / 1000);
+  if (tokenState.tokenCooldownUntil > Date.now()) {
+    const sec = Math.ceil((tokenState.tokenCooldownUntil - Date.now()) / 1000);
     throw new Error(`KIS 토큰 cooldown 중 (${sec}초 남음) — naver/yahoo로 fallback`);
   }
-  if (inflightTokenPromise) return inflightTokenPromise;
+  if (tokenState.inflightTokenPromise) return tokenState.inflightTokenPromise;
 
-  inflightTokenPromise = requestNewToken().finally(() => {
-    inflightTokenPromise = null;
+  tokenState.inflightTokenPromise = requestNewTokenLocked().finally(() => {
+    tokenState.inflightTokenPromise = null;
   });
-  return inflightTokenPromise;
+  return tokenState.inflightTokenPromise;
 }
 
 // ────────────────────────────────────────────────────────────────────

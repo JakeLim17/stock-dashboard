@@ -43,4 +43,5 @@ next-env.d.ts
 # 로컬 SQLite 데이터
 /data/*.db
 /data/*.db-*
+/data/kis-token*.json
 
