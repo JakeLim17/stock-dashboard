@@ -64,10 +64,38 @@ export function AskingPricePanel({ code, active, pollMs = 1500 }: Props) {
   const asking = data?.asking;
   const executions = data?.executions;
 
+  // 빈 응답 (KIS 미지원 등) — 패널 자체에 명시.
   if (!asking && !executions && !loading) {
     return (
       <div className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
         호가/체결 데이터를 받지 못했어요. (KIS 키 또는 종목 미지원)
+      </div>
+    );
+  }
+
+  // 첫 fetch 진행 중 (data === null && loading) — 사용자에게 "호가 불러오는 중…" 명시.
+  // 호가 fetch 가 1.5초 폴링 + 첫 응답 수백 ms 라 빈 화면이 길게 노출되면 답답함.
+  // 주인님 규칙: "모든 창 로딩은 반드시 로딩중이라고 꼭 표시 — 예외 없다."
+  if (!asking && !executions && loading) {
+    return (
+      <div className="space-y-3" aria-busy="true" aria-live="polite">
+        <div className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-full border-2 border-muted-foreground/30 border-t-foreground animate-spin" />
+          호가 불러오는 중…
+        </div>
+        {/* 10단계 호가 더미 라인 — pulse skeleton 으로 실제 표 높이 채워 layout shift 방지 */}
+        <div className="space-y-1">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-[1fr_2fr_1fr] gap-2 animate-pulse"
+            >
+              <div className="h-4 rounded bg-muted/60" />
+              <div className="h-4 rounded bg-muted/40" />
+              <div className="h-4 rounded bg-muted/60" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

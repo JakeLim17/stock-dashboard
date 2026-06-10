@@ -34,12 +34,16 @@ interface Props {
   snap: StockSnapshot;
   krwRate?: number | null;
   variant?: Variant;
+  // KIS Open API 가 서버 설정에 활성화돼 있는지 — DashboardSnapshot.kisActive 미러.
+  // true 면 "분 단위 실시간은 KIS API 필요" 안내 문구를 숨긴다.
+  kisActive?: boolean;
 }
 
 export function StockFundamentalsBlock({
   snap,
   krwRate,
   variant = "card",
+  kisActive = false,
 }: Props) {
   const { meta, quote, tech, flow } = snap;
   const { secondary } = pickPrimaryQuote(quote);
@@ -79,14 +83,18 @@ export function StockFundamentalsBlock({
                   : "text-muted-foreground"
               }`}
             >
-              <PriceTicker value={secondary.price} decimals={0} />
+              <PriceTicker
+                value={secondary.price}
+                decimals={currency === "USD" ? 2 : 0}
+              />
             </div>
             {currency === "USD" && (
-              <div className="text-[10px] leading-tight">
+              <div className="mt-0.5">
                 <PriceWithKrw
                   price={secondary.price}
                   currency={currency}
                   krwRate={krwRate ?? null}
+                  size="xs"
                 />
               </div>
             )}
@@ -117,7 +125,7 @@ export function StockFundamentalsBlock({
       </div>
 
       {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 */}
-      <FlowSection flow={flow} variant={variant} />
+      <FlowSection flow={flow} variant={variant} kisActive={kisActive} />
 
       {/* 프로그램 매매 — KIS 활성 시 종목별 차익/비차익. 데이터 없으면 미노출. */}
       {snap.programTrade && (
@@ -290,9 +298,11 @@ function flowSourceLabel(source: import("@/lib/types").FlowData["source"]): stri
 function FlowSection({
   flow,
   variant,
+  kisActive,
 }: {
   flow: import("@/lib/types").FlowData;
   variant: Variant;
+  kisActive?: boolean;
 }) {
   const cells: Array<{
     label: string;
@@ -355,7 +365,9 @@ function FlowSection({
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
-      {flow.source !== "kis" && (
+      {/* "분 단위 실시간은 KIS API 필요" 안내 — KIS 가 active 하면 사용자에게 의미 없는 안내라
+          항상 미노출. KIS 비활성 + naver/mock 출처일 때만 표시된다. */}
+      {!kisActive && flow.source !== "kis" && (
         <div className="text-[10px] text-muted-foreground/80 leading-snug">
           ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
         </div>

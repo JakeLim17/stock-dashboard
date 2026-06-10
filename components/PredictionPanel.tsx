@@ -29,12 +29,16 @@ export function PredictionPanel({
   selectedCode,
   embedded = false,
   krwRate,
+  detailDefaultOpen = false,
 }: {
   snaps: StockSnapshot[];
   selectedCode?: string;
   embedded?: boolean;
   /** USDKRW 환율 — USD 종목 SL/TP1/TP2/진입가 원화 병기에 사용. 없으면 보조 표시 생략. */
   krwRate?: number | null;
+  /** 모바일 모달(MobileDetailSheet) 안에서는 sheet 자체가 좁아 접힘이 어색하다.
+   *  true 면 "상세 예측 보기" details 를 기본 펼쳐서 노출. 데스크탑 패널에선 기본 false 유지. */
+  detailDefaultOpen?: boolean;
 }) {
   const [activeCode, setActiveCode] = useState(
     () => selectedCode ?? snaps[0]?.meta.code ?? ""
@@ -174,7 +178,10 @@ export function PredictionPanel({
 
         {p.nightSignal && <NightValuationCard signal={p.nightSignal} />}
 
-        <details className="rounded-xl border border-border bg-muted/20 p-3">
+        <details
+          className="rounded-xl border border-border bg-muted/20 p-3"
+          open={detailDefaultOpen ? true : undefined}
+        >
           <summary className="cursor-pointer text-sm font-medium">
             상세 예측 보기
           </summary>

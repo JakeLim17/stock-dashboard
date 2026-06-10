@@ -9,9 +9,14 @@ import type {
   ScenarioRow,
   OverseasNightIndicator,
   ValuationMetrics,
+  SymbolMeta,
 } from "../types";
 import { ewmaVolatility, tDistQuantile } from "./statHelpers";
 import { computeEventInflation } from "./eventVolatility";
+import { estimateBeta, lastReturn, type MacroBetaResult } from "./macroBeta";
+import { computeVixGate } from "./vixGate";
+import { computeSectorLeading } from "./sectorLeading";
+import { computeMacroFactors } from "./macroFactors";
 
 // 변동성 모델 상수 — Predictions.volatilityModel 메타로도 함께 노출되어
 // UI hint 라벨("EWMA λ=0.94 · t(df=5) 95%")에 사용된다.
@@ -226,6 +231,23 @@ export interface PredictorInput {
   // 시장 베타 시나리오용 (없으면 시나리오 생략)
   nasdaqHistory?: HistoricalPoint[] | null;
   fxHistory?: HistoricalPoint[] | null;
+  // ── Round3 B: 매크로 시계열 풀 (60일 OLS 회귀에 사용) ──
+  //   ixicHistory : 나스닥 현물 ^IXIC
+  //   kospiHistory: ^KS11
+  //   soxHistory  : 필라델피아 반도체 (섹터 리딩)
+  //   dxyHistory  : 달러 인덱스 DX-Y.NYB (또는 DX=F)
+  //   us10yHistory: 미 10년물 ^TNX (현재는 lastReturn 만 활용 — 회귀 X)
+  //   vix         : VIX 현재값 (게이팅용)
+  //   us10y       : 미 10년물 현재값 (참고)
+  ixicHistory?: HistoricalPoint[] | null;
+  kospiHistory?: HistoricalPoint[] | null;
+  soxHistory?: HistoricalPoint[] | null;
+  dxyHistory?: HistoricalPoint[] | null;
+  us10yHistory?: HistoricalPoint[] | null;
+  vix?: number | null;
+  us10y?: number | null;
+  // ── 종목 메타(섹터·kind) — 매크로 팩터 분류에 필요 ──
+  meta?: SymbolMeta | null;
   // 기존 analyze() 결과에서 가져옴
   buyScore: number;
   heatScore: number;
@@ -238,12 +260,47 @@ export interface PredictorInput {
   events?: EventItem[] | null;
 }
 
+// 매크로 베타 회귀 결과를 한 번에 계산. 헬퍼는 표본 부족 시 null 반환.
+function buildMacroBetas(
+  history: HistoricalPoint[],
+  ixicHistory?: HistoricalPoint[] | null,
+  kospiHistory?: HistoricalPoint[] | null,
+  soxHistory?: HistoricalPoint[] | null,
+  dxyHistory?: HistoricalPoint[] | null
+): {
+  ixic: MacroBetaResult | null;
+  kospi: MacroBetaResult | null;
+  sox: MacroBetaResult | null;
+  dxy: MacroBetaResult | null;
+} {
+  return {
+    ixic: estimateBeta(history, ixicHistory),
+    kospi: estimateBeta(history, kospiHistory),
+    sox: estimateBeta(history, soxHistory),
+    dxy: estimateBeta(history, dxyHistory),
+  };
+}
+
+// 매크로 베타 결과의 가장 높은 R² — 모델 설명력 지표.
+function maxR2(...rs: (MacroBetaResult | null)[]): number {
+  let m = 0;
+  for (const r of rs) if (r && r.r2 > m) m = r.r2;
+  return m;
+}
+
 export function predict(input: PredictorInput): Predictions {
   const {
     quote,
     history,
     nasdaqHistory,
     fxHistory,
+    ixicHistory,
+    kospiHistory,
+    soxHistory,
+    dxyHistory,
+    us10yHistory,
+    vix,
+    meta,
     buyScore,
     heatScore,
     overseasNight,
@@ -272,6 +329,30 @@ export function predict(input: PredictorInput): Predictions {
 
   const price = quote.price || closes[closes.length - 1] || 0;
 
+  // ─ Round3 B: 매크로 베타 회귀 (60일 OLS) ────────────────────
+  // 4개 매크로 변수 각각에 대해 β·R²·잔차표준편차를 추정. 표본 부족 시 null.
+  const macroBetasRaw = buildMacroBetas(
+    history,
+    ixicHistory,
+    kospiHistory,
+    soxHistory,
+    dxyHistory
+  );
+
+  // ─ Round3 B: 섹터 리딩 (SOX lag-1 → 한국 반도체주) ───────────
+  // 한국 반도체 종목에만 적용. 데이터 부족·비반도체 종목은 null.
+  const sectorLeading = computeSectorLeading(meta, history, soxHistory);
+
+  // ─ Round3 B: 매크로 팩터 (DXY/US10Y 휴리스틱) ────────────────
+  // 종목 sector 기반 카테고리 분류 → DXY/US10Y 추정 베타 + lag-0 drift.
+  const dxyLast = lastReturn(dxyHistory);
+  const us10yLast = lastReturn(us10yHistory);
+  const macroFactors = computeMacroFactors(meta, dxyLast, us10yLast);
+
+  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 합산 (한도 ±2%).
+  const dailyDriftRaw = (sectorLeading?.drift ?? 0) + macroFactors.drift;
+  const dailyDrift = Math.max(-0.02, Math.min(0.02, dailyDriftRaw));
+
   // A. 가격 범위 — 변동성 기반 (drift=0, 추세 가정 없음)
   //    이전엔 center = price·exp(mean(returns)·Δt) 였지만, 우상향 종목은
   //    drift>0 이라 중심값이 항상 위로 편향되어 사용자가 "예측이 다 +"라고
@@ -281,17 +362,20 @@ export function predict(input: PredictorInput): Predictions {
   //    center = price (변동 없음 가정)
   //    band   = price · exp(±tMult · σ_adj · √Δt)  → 95% 양측 신뢰구간 (t df=5)
   //    σ_adj  = EWMA σ × 이벤트 부풀림 계수
+  // Round3 B: 1일·3일 center 에만 매크로 drift 를 보수적으로 가산.
+  // (1주·2주 horizon 은 단일 lag-0 신호의 영향이 희석되므로 적용 X.)
   const ranges: PriceRange[] = [];
   if (price > 0 && returns.length >= 15) {
-    const horizons: { label: string; days: number }[] = [
-      { label: "1일", days: 1 },
-      { label: "3일", days: 3 },
-      { label: "1주", days: 5 },
-      { label: "2주", days: 10 },
+    const horizons: { label: string; days: number; driftWeight: number }[] = [
+      { label: "1일", days: 1, driftWeight: 1.0 },
+      { label: "3일", days: 3, driftWeight: 0.6 },
+      { label: "1주", days: 5, driftWeight: 0 },
+      { label: "2주", days: 10, driftWeight: 0 },
     ];
     for (const h of horizons) {
       const horizonSigma = adjustedSigma * Math.sqrt(h.days) * tailMultiplier;
-      const center = price;
+      const drift = dailyDrift * h.driftWeight;
+      const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);
       ranges.push({
@@ -320,6 +404,9 @@ export function predict(input: PredictorInput): Predictions {
   const SL_ATR_MULT = 1.5;
   const TP1_ATR_MULT = 2.0;
   const TP2_ATR_MULT = 3.5;
+  // Round3 B: VIX 게이팅 — risk-off 환경에서 SL 폭 자동 확대.
+  const vixGate = computeVixGate(vix);
+  const slMultEffective = SL_ATR_MULT * vixGate.stopLossMult;
   let targets: PriceTargets | null = null;
   if (history.length >= 20 && price > 0) {
     const recent20 = history.slice(-20);
@@ -328,8 +415,8 @@ export function predict(input: PredictorInput): Predictions {
     const atr = averageTrueRange(history, 14);
     if (atr > 0) {
       const entry = price;
-      const rawStop = Math.max(support, price - SL_ATR_MULT * atr);
-      const stopLoss = rawStop >= entry ? entry - SL_ATR_MULT * atr : rawStop;
+      const rawStop = Math.max(support, price - slMultEffective * atr);
+      const stopLoss = rawStop >= entry ? entry - slMultEffective * atr : rawStop;
 
       const rawTP1 = price + TP1_ATR_MULT * atr;
       const takeProfit1 = rawTP1 > entry ? rawTP1 : entry * 1.01;
@@ -411,6 +498,38 @@ export function predict(input: PredictorInput): Predictions {
           confidence: confidenceFromR2(r2),
         });
       }
+    }
+  }
+
+  // Round3 B: 매크로 베타 회귀(buildMacroBetas) 결과를 시나리오로 변환.
+  //   KOSPI / SOX 베타가 의미있게 크면 +1% 시나리오 row 로 노출.
+  //   IXIC/DXY 회귀는 nasdaqHistory/fxHistory 시나리오와 중복될 수 있어 추가 안 함.
+  if (macroBetasRaw.kospi && Math.abs(macroBetasRaw.kospi.beta) > 0.1) {
+    scenarios.push({
+      label: "코스피 +1% 시",
+      expected: macroBetasRaw.kospi.beta * 0.01,
+      beta: macroBetasRaw.kospi.beta,
+      baselineLabel: "^KS11 60일",
+      r2: macroBetasRaw.kospi.r2,
+      confidence: confidenceFromR2(macroBetasRaw.kospi.r2),
+    });
+  }
+  if (macroBetasRaw.sox && Math.abs(macroBetasRaw.sox.beta) > 0.15) {
+    scenarios.push({
+      label: "필반 +1% 시",
+      expected: macroBetasRaw.sox.beta * 0.01,
+      beta: macroBetasRaw.sox.beta,
+      baselineLabel: "^SOX 60일",
+      r2: macroBetasRaw.sox.r2,
+      confidence: confidenceFromR2(macroBetasRaw.sox.r2),
+    });
+  }
+
+  // Round3 B: 매크로 팩터(휴리스틱) 시나리오 — DXY/US10Y 추정 영향.
+  //   회귀 베타가 아닌 카테고리 휴리스틱이라 confidence: "low" 로 표시.
+  for (const s of macroFactors.scenarios) {
+    if (Math.abs(s.expected) >= 0.0008) {
+      scenarios.push(s);
     }
   }
 
@@ -509,5 +628,101 @@ export function predict(input: PredictorInput): Predictions {
             daysToEvent: eventInflation.daysToEvent,
           }
         : null,
+
+    // Round3 B: 매크로 베타 회귀 결과 (표본 부족 시 키 누락) ───────────────
+    macroBetas: pickMacroBetaSummary(macroBetasRaw),
+
+    // Round3 B: 베이지안 신뢰도 — VIX gate × max(R²) × 표본 수 가중.
+    //   base = max(0.3, R²_max)  // R² 0이어도 최소 0.3 (변동성 모델 자체 신뢰)
+    //   adjusted = base × vixConfidenceMult
+    //   label: 0.7+ high / 0.4~0.7 medium / <0.4 low
+    modelConfidence: buildModelConfidence(macroBetasRaw, vixGate, returns.length),
   };
+}
+
+// 헬퍼: macroBetas 요약을 Predictions["macroBetas"] 형태로 변환.
+function pickMacroBetaSummary(b: {
+  ixic: MacroBetaResult | null;
+  kospi: MacroBetaResult | null;
+  sox: MacroBetaResult | null;
+  dxy: MacroBetaResult | null;
+}): NonNullable<Predictions["macroBetas"]> | null {
+  const out: NonNullable<Predictions["macroBetas"]> = {};
+  let anyKey = false;
+  if (b.ixic) {
+    out.ixic = {
+      beta: b.ixic.beta,
+      r2: b.ixic.r2,
+      residStd: b.ixic.residStd,
+      samples: b.ixic.samples,
+    };
+    anyKey = true;
+  }
+  if (b.kospi) {
+    out.kospi = {
+      beta: b.kospi.beta,
+      r2: b.kospi.r2,
+      residStd: b.kospi.residStd,
+      samples: b.kospi.samples,
+    };
+    anyKey = true;
+  }
+  if (b.sox) {
+    out.sox = {
+      beta: b.sox.beta,
+      r2: b.sox.r2,
+      residStd: b.sox.residStd,
+      samples: b.sox.samples,
+    };
+    anyKey = true;
+  }
+  if (b.dxy) {
+    out.dxy = {
+      beta: b.dxy.beta,
+      r2: b.dxy.r2,
+      residStd: b.dxy.residStd,
+      samples: b.dxy.samples,
+    };
+    anyKey = true;
+  }
+  return anyKey ? out : null;
+}
+
+// 헬퍼: 베이지안 신뢰도 산출.
+//   - R² 가 큰 매크로 변수가 있으면 시장 설명력 있다고 보고 base ↑
+//   - VIX gate 곱연산 — risk-off 환경에서 신뢰도 ↓
+//   - 표본 수 부족(<60)이면 gentle penalty
+function buildModelConfidence(
+  b: {
+    ixic: MacroBetaResult | null;
+    kospi: MacroBetaResult | null;
+    sox: MacroBetaResult | null;
+    dxy: MacroBetaResult | null;
+  },
+  vixGate: ReturnType<typeof computeVixGate>,
+  totalReturns: number
+): NonNullable<Predictions["modelConfidence"]> {
+  const r2max = maxR2(b.ixic, b.kospi, b.sox, b.dxy);
+  // R² 0~1 → confidence 0.3~1.0 매핑 (기본 변동성 모델 신뢰는 살림)
+  let base = 0.3 + 0.7 * r2max;
+  const factors: string[] = [];
+  if (r2max >= 0.6) factors.push(`최대 R² ${r2max.toFixed(2)} — 시장 연동 강함`);
+  else if (r2max >= 0.3) factors.push(`최대 R² ${r2max.toFixed(2)} — 시장 연동 보통`);
+  else factors.push(`최대 R² ${r2max.toFixed(2)} — 시장 연동 약함`);
+
+  // VIX gate
+  base *= vixGate.confidenceMult;
+  if (vixGate.confidenceMult !== 1) factors.push(vixGate.reason);
+
+  // 표본 수 패널티 — 60일 미달 시 0.95 곱 (회귀가 동작하는 조건이긴 함).
+  if (totalReturns < 60) {
+    base *= 0.95;
+    factors.push(`표본 ${totalReturns}일 — 추정 불확실성`);
+  }
+
+  const score = Math.max(0, Math.min(1, base));
+  const label: "high" | "medium" | "low" =
+    score >= 0.7 ? "high" : score >= 0.4 ? "medium" : "low";
+
+  return { score, label, factors };
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildSnapshot } from "@/lib/snapshot";
 import { invalidateConsensusCache } from "@/lib/providers/consensusCache";
 import { invalidateMarketAlertCache } from "@/lib/providers/marketAlertCache";
+import { invalidateEventCalendarCache } from "@/lib/providers/eventCalendar";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,10 +28,13 @@ export async function GET(req: Request) {
         for (const code of symbols) {
           invalidateConsensusCache(code);
           invalidateMarketAlertCache(code);
+          invalidateEventCalendarCache(code);
         }
       } else {
         invalidateConsensusCache();
         invalidateMarketAlertCache();
+        // 매크로 이벤트 캐시(global)도 비워 새 발표 일정이 즉시 반영되게 함.
+        invalidateEventCalendarCache();
       }
     }
 

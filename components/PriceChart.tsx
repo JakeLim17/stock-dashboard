@@ -37,8 +37,13 @@ interface DailyPoint {
   close: number;
 }
 
+interface ExtendedPoint extends OhlcPoint {
+  session?: "before" | "after";
+}
+
 interface IntradayApiResp {
   points: OhlcPoint[];
+  extendedPoints?: ExtendedPoint[];
   interval: string;
   error?: string;
 }
@@ -82,6 +87,8 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     close: number;
     bucketMs: number;
   } | null>(null);
+  // 시간외(앱장/프리장) 단일가 캔들 — 정규장 series 와 별도로 흐린 색으로 그림.
+  const extendedSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
   const [tf, setTf] = useState<Timeframe>("1m");
   const [mode, setMode] = useState<ChartMode>("domestic");
@@ -131,6 +138,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       chartRef.current = null;
       seriesRef.current = null;
       seriesKindRef.current = null;
+      extendedSeriesRef.current = null;
     };
   }, []);
 
@@ -208,8 +216,35 @@ export function PriceChart({ code, name, currentPrice }: Props) {
         close: p.close,
       }));
       series.setData(data);
+
+      // 시간외(앱장/프리장) 단일가 캔들 — 정규장 끝에 흐리게 덧붙임.
+      // 사용자에게 "지금 시간외 단일가가 정규장 종가와 얼마나 다른가" 를 한눈에 보여준다.
+      const extPoints = j.extendedPoints ?? [];
+      if (extPoints.length > 0) {
+        if (!extendedSeriesRef.current) {
+          extendedSeriesRef.current = chart.addSeries(CandlestickSeries, {
+            upColor: "rgba(239, 68, 68, 0.45)",
+            downColor: "rgba(59, 130, 246, 0.45)",
+            borderUpColor: "rgba(239, 68, 68, 0.5)",
+            borderDownColor: "rgba(59, 130, 246, 0.5)",
+            wickUpColor: "rgba(239, 68, 68, 0.5)",
+            wickDownColor: "rgba(59, 130, 246, 0.5)",
+          });
+        }
+        const eData: CandlestickData[] = extPoints.map((p) => ({
+          time: Math.floor(p.date / 1000) as UTCTimestamp,
+          open: p.open,
+          high: p.high,
+          low: p.low,
+          close: p.close,
+        }));
+        extendedSeriesRef.current.setData(eData);
+      } else if (extendedSeriesRef.current) {
+        extendedSeriesRef.current.setData([]);
+      }
+
       chart.timeScale().fitContent();
-      setEmpty(data.length === 0);
+      setEmpty(data.length === 0 && extPoints.length === 0);
       // 마지막 캔들 추적 — currentPrice 도착 시 update.
       const last = j.points?.[j.points.length - 1];
       if (last) {
@@ -253,6 +288,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       chart.timeScale().fitContent();
       setEmpty(data.length === 0);
       lastCandleRef.current = null;
+      if (extendedSeriesRef.current) extendedSeriesRef.current.setData([]);
     };
 
     const loadTick = async () => {
@@ -277,6 +313,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       chart.timeScale().fitContent();
       setEmpty(data.length === 0);
       lastCandleRef.current = null;
+      if (extendedSeriesRef.current) extendedSeriesRef.current.setData([]);
     };
 
     const runOnce = async () => {
@@ -387,7 +424,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
             <div className="text-[10px] text-muted-foreground mt-0.5">
               {effectiveTf === "tick"
                 ? "KIS 체결 · 1.5초 폴링"
-                : `KIS 분봉 · ${TF_LABEL[effectiveTf]} · 실시간 갱신`}
+                : `KIS 분봉 · ${TF_LABEL[effectiveTf]} · 실시간 갱신 · 흐린 캔들 = 시간외`}
             </div>
           )}
         </div>

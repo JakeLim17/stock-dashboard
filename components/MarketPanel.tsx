@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { MarketIndicator } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { PriceTicker } from "./PriceTicker";
@@ -5,7 +8,34 @@ import { Sparkline } from "./Sparkline";
 import { changeColor, fmtPercent, priceFreshness } from "@/lib/utils";
 import { TrendingDown, TrendingUp, AlertTriangle, Minus } from "lucide-react";
 
+// 사용자 핵심 지표 (default 노출). 나머지는 더보기 토글로 펼침.
+// 한국 주식 트레이더 관점 4종: 코스피·코스닥·나스닥 선물(아시아 시간대 movement)·환율.
+const DEFAULT_VISIBLE_CODES: ReadonlySet<string> = new Set([
+  "^KS11",
+  "^KQ11",
+  "NQ=F",
+  "KRW=X",
+]);
+
 export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { defaultList, restList } = useMemo(() => {
+    const pri: MarketIndicator[] = [];
+    const rest: MarketIndicator[] = [];
+    for (const i of indicators) {
+      if (DEFAULT_VISIBLE_CODES.has(i.code)) pri.push(i);
+      else rest.push(i);
+    }
+    // default 정렬 — DEFAULT_VISIBLE_CODES 등장 순서대로
+    const order = Array.from(DEFAULT_VISIBLE_CODES);
+    pri.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
+    return { defaultList: pri, restList: rest };
+  }, [indicators]);
+
+  const visible = expanded ? [...defaultList, ...restList] : defaultList;
+  const hiddenCount = restList.length;
+
   return (
     <Card>
       <CardHeader>
@@ -13,7 +43,7 @@ export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
       </CardHeader>
       <CardBody>
         <ul className="divide-y divide-border">
-          {indicators.map((i) => {
+          {visible.map((i) => {
             const fresh = priceFreshness(i.priceTime);
             const stateUpper = (i.marketState ?? "").toUpperCase();
             const isClosed =
@@ -52,6 +82,11 @@ export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
                     <div className="text-right">
                       <div className="text-sm font-semibold">
                         <PriceTicker value={i.value} decimals={decimals} />
+                        {unitSuffixFor(i.code) && (
+                          <span className="text-muted-foreground ml-0.5 text-[11px] font-normal">
+                            {unitSuffixFor(i.code)}
+                          </span>
+                        )}
                       </div>
                       <div
                         className={`tabular text-xs inline-flex items-center gap-1 ${changeColor(i.changeRate)}`}
@@ -103,6 +138,24 @@ export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
             );
           })}
         </ul>
+        {hiddenCount > 0 && !expanded && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="text-xs text-accent hover:underline mt-3 inline-flex items-center gap-1"
+          >
+            {hiddenCount}개 지표 더 보기
+          </button>
+        )}
+        {expanded && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="text-xs text-muted-foreground hover:underline mt-3"
+          >
+            접기
+          </button>
+        )}
       </CardBody>
     </Card>
   );
@@ -122,9 +175,16 @@ function iconFor(i: MarketIndicator) {
 }
 
 function decimalsFor(code: string): number {
-  // 환율·지수·메가캡 다 2자리면 충분. 별도 분기가 늘면 SymbolMeta로 옮긴다.
+  // ^TNX 는 % yield 라 소수 2자리 (예: 4.32). VIX/DXY/지수도 2자리 충분.
   if (code === "KRW=X") return 2;
   return 2;
+}
+
+// Yahoo는 ^TNX 의 value 를 percent 그대로 (4.32 = 4.32%) 반환.
+// MarketPanel 에서는 가격 뒤에 "%" 접미어를 붙여 단위를 명확히 한다.
+function unitSuffixFor(code: string): string {
+  if (code === "^TNX") return "%";
+  return "";
 }
 
 function fmtNum(v: number, digits: number): string {

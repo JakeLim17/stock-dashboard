@@ -4,11 +4,67 @@ import crypto from "node:crypto";
 import type { NewsItem } from "../types";
 import { RISK_KEYWORDS } from "../news/keywords";
 import { POSITIVE_KEYWORDS } from "../news/positiveKeywords";
+import { WATCHLIST_CANDIDATES } from "../symbols";
+import {
+  fetchNaverFinanceNews,
+  fetchNaverNewsSearch,
+  extractKrCode,
+} from "./naverNews";
+import { translateTitleToKo } from "../news/translation";
 
+// Google News RSS — 짧은 timeout. rss-parser 내장 timeout 이 503/HTML 응답에서
+// 끝나지 않는 사례가 있어 withHardTimeout(1.5s) 으로 한 번 더 보강.
 const parser = new Parser({
-  timeout: 6000,
+  timeout: 2500,
   headers: { "User-Agent": "Mozilla/5.0 stock-dashboard/0.1" },
 });
+
+// Google News RSS 차단(503/timeout) 감지 — 한 번 차단 잡히면 일정 시간 모든 Google
+// fetch 를 즉시 fail 시켜 snapshot 응답이 수십 초 hang 되는 사태를 막는다.
+// 차단 시간(10 분)이 지나면 다음 윈도우에서 자동 회복.
+const GOOGLE_BLOCK_WINDOW_MS = 10 * 60 * 1000;
+let googleBlockedUntil = 0;
+
+function shouldSkipGoogle(): boolean {
+  return Date.now() < googleBlockedUntil;
+}
+
+function markGoogleBlocked(): void {
+  googleBlockedUntil = Date.now() + GOOGLE_BLOCK_WINDOW_MS;
+  console.warn(
+    `[news] Google News RSS blocked → skip for ${GOOGLE_BLOCK_WINDOW_MS / 60_000} min`
+  );
+}
+
+// Google fetch 한 건당 hard timeout. parser timeout 이 실제 안 끝나는 사례(503 HTML
+// 응답 + parseString hang)가 관찰됨 → Promise.race 로 강제 종료.
+const GOOGLE_HARD_TIMEOUT_MS = 1500;
+
+async function withHardTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`hard-timeout ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function fetchGoogleFeed(cfg: { q: string; lang: "ko" | "en"; symbol?: string }) {
+  if (shouldSkipGoogle()) throw new Error("google-skipped");
+  try {
+    const feed = await withHardTimeout(
+      parser.parseURL(feedUrl(cfg.q, cfg.lang)),
+      GOOGLE_HARD_TIMEOUT_MS
+    );
+    return (feed.items ?? []).slice(0, 8).map((item) => toNewsItem(item, cfg.symbol));
+  } catch (e) {
+    markGoogleBlocked();
+    throw e;
+  }
+}
 
 // 한국어 검색 (네이버 인덱스 기반) + 영어/글로벌 (Google News English)
 function feedUrl(query: string, lang: "ko" | "en"): string {
@@ -17,6 +73,12 @@ function feedUrl(query: string, lang: "ko" | "en"): string {
     return `https://news.google.com/rss/search?q=${q}&hl=ko&gl=KR&ceid=KR:ko`;
   }
   return `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`;
+}
+
+function yahooRssUrl(symbol: string): string {
+  return `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(
+    symbol
+  )}&region=US&lang=en-US`;
 }
 
 // 종목/시장 키워드별 fetch.
@@ -125,29 +187,357 @@ const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
   { q: "Fed rate", lang: "en" },
 ];
 
+// 동시성 제한 헬퍼 — Google News RSS 가 burst 호출에 차단되는 사례가 보고돼
+// 전체 동시성을 3 으로 보수적으로 둔다 (워커A: 8 → 워커B: 3 머지 결과).
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (it: T) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.max(1, concurrency) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      try {
+        results[i] = { status: "fulfilled", value: await worker(items[i]) };
+      } catch (e) {
+        results[i] = { status: "rejected", reason: e };
+      }
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+// Yahoo Finance RSS — 종목 단위 헤드라인 피드.
+// Google News RSS 가 일시 차단(HTTP 503)되어도 종목 뉴스를 채울 수 있는 폴백 소스.
+const SYMBOLS_FOR_YAHOO_RSS = WATCHLIST_CANDIDATES
+  .filter((s) => s.kind === "us-stock" || s.kind === "kr-stock")
+  .map((s) => s.code);
+
+const yahooParser = new Parser({
+  timeout: 6000,
+  headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+});
+
+async function fetchYahooHeadlines(symbol: string): Promise<NewsItem[]> {
+  const feed = await yahooParser.parseURL(yahooRssUrl(symbol));
+  return (feed.items ?? []).slice(0, 8).map((item) => toNewsItem(item, symbol));
+}
+
+// process 메모리 캐시 — buildSnapshot/api/news 가 짧은 시간 안에 여러 번 호출돼도
+// Google/Yahoo RSS 를 매번 다 두드리지 않도록. TTL 90s.
+let allNewsMemoCache: { items: NewsItem[]; at: number } | null = null;
+const ALL_NEWS_MEMO_TTL_MS = 90_000;
+
+// 제목 정규화 — dedup 키.
+function normalizeTitleKey(t: string): string {
+  return t.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 export async function fetchAllNews(limit = 40): Promise<NewsItem[]> {
-  const results = await Promise.allSettled(
-    QUERIES.map(async (cfg) => {
-      const feed = await parser.parseURL(feedUrl(cfg.q, cfg.lang));
-      return (feed.items ?? []).slice(0, 8).map((item) => toNewsItem(item, cfg.symbol));
-    })
-  );
+  if (allNewsMemoCache && Date.now() - allNewsMemoCache.at < ALL_NEWS_MEMO_TTL_MS) {
+    return allNewsMemoCache.items.slice(0, limit);
+  }
+  // 1) Google News RSS (한·영 쿼리) — 시장 전반 + 한국 종목 헤드라인의 주력 소스.
+  // 2) Yahoo Finance 헤드라인 RSS — 미국 종목별 폴백. Google 차단 시에도 미국 뉴스 확보.
+  const [googleResults, yahooResults] = await Promise.all([
+    shouldSkipGoogle()
+      ? Promise.resolve([] as PromiseSettledResult<NewsItem[]>[])
+      : runWithConcurrency(QUERIES, 3, fetchGoogleFeed),
+    runWithConcurrency(SYMBOLS_FOR_YAHOO_RSS, 3, fetchYahooHeadlines),
+  ]);
 
   const merged: NewsItem[] = [];
-  for (const r of results) {
-    if (r.status === "fulfilled") merged.push(...r.value);
+  let gOk = 0;
+  let gFail = 0;
+  let yOk = 0;
+  let yFail = 0;
+  for (const r of googleResults) {
+    if (r.status === "fulfilled") {
+      gOk++;
+      merged.push(...r.value);
+    } else gFail++;
+  }
+  for (const r of yahooResults) {
+    if (r.status === "fulfilled") {
+      yOk++;
+      merged.push(...r.value);
+    } else yFail++;
+  }
+  if (merged.length === 0) {
+    console.warn(
+      `[news] fetchAllNews: 0 items (google ok=${gOk} fail=${gFail}, yahoo ok=${yOk} fail=${yFail})`
+    );
+  } else if (gOk === 0 && yOk > 0) {
+    console.warn(
+      `[news] fetchAllNews: Google RSS all failed (${gFail}); using Yahoo only (${yOk} ok)`
+    );
   }
 
-  // 중복 제거 (id 기준), 시간 역순, 상위 limit
-  const seen = new Set<string>();
+  // 중복 제거 (id + 제목 정규화) — 같은 기사가 매체별로 중복되는 것을 한 번에 1건으로.
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
   const dedup: NewsItem[] = [];
   for (const n of merged.sort((a, b) => b.publishedAt - a.publishedAt)) {
-    if (seen.has(n.id)) continue;
-    seen.add(n.id);
+    if (seenIds.has(n.id)) continue;
+    const titleKey = normalizeTitleKey(n.title);
+    if (seenTitles.has(titleKey)) continue;
+    seenIds.add(n.id);
+    seenTitles.add(titleKey);
     dedup.push(n);
     if (dedup.length >= limit) break;
   }
+  if (dedup.length > 0) {
+    allNewsMemoCache = { items: dedup, at: Date.now() };
+  }
   return dedup;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 종목별 뉴스 fetch — 다중 소스 폴백 + 영어 제목 한국어 번역.
+//
+// 한국 종목:
+//   1) 네이버 금융 종목 뉴스 스크래핑 (10~20건, 한국어 원문)
+//   2) Google News RSS 한국어
+//   3) Yahoo Finance RSS (영문, 번역 적용)
+//
+// 미국 종목:
+//   1) 네이버 뉴스 검색 (한국명 키워드, 한국어 매체 결과)
+//   2) Google News RSS 한국어 (한국명 키워드로 한국어 매체 한정)
+//   3) Yahoo Finance RSS (영문, 번역 적용)
+//
+// 영어 제목은 직후 titleKo 에 번역을 채워 UI 가 한국어 위주로 표시 가능하게 한다.
+// Google 호출은 shouldSkipGoogle() 체크 + hard timeout 1.5s 로 워커A 의 보호 로직과
+// 양립한다. Google 차단 시 자연스럽게 네이버 → Yahoo 로 폴백.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 미국 티커 → 한국명 매핑. 검색 키워드용. naver search / google news 한국어에 사용.
+const US_TICKER_TO_KO: Record<string, string> = {
+  NVDA: "엔비디아",
+  AAPL: "애플",
+  MSFT: "마이크로소프트",
+  GOOGL: "알파벳",
+  GOOG: "알파벳",
+  META: "메타",
+  AMZN: "아마존",
+  TSLA: "테슬라",
+  AMD: "AMD",
+  TSM: "TSMC",
+  PLTR: "팔란티어",
+  AVGO: "브로드컴",
+  QCOM: "퀄컴",
+  MU: "마이크론",
+  ARM: "ARM",
+  MRVL: "마벨",
+  SMCI: "슈퍼마이크로",
+  ORCL: "오라클",
+  CRM: "세일즈포스",
+  NOW: "서비스나우",
+  ADBE: "어도비",
+  LLY: "일라이 릴리",
+  UNH: "유나이티드헬스",
+  V: "비자카드",
+  MA: "마스터카드",
+  COST: "코스트코",
+  WMT: "월마트",
+  HD: "홈디포",
+  BABA: "알리바바",
+  PDD: "테무",
+  XOM: "엑손모빌",
+  CVX: "셰브론",
+  MSTR: "마이크로스트래티지",
+  COIN: "코인베이스",
+};
+
+// 종목 코드별 한국어 사명 — 한국 종목용.
+const KR_SYMBOL_TO_NAME: Record<string, string> = {
+  "005930.KS": "삼성전자",
+  "000660.KS": "SK하이닉스",
+  "009150.KS": "삼성전기",
+  "066570.KS": "LG전자",
+  "005380.KS": "현대차",
+  "000270.KS": "기아",
+  "373220.KS": "LG에너지솔루션",
+  "035420.KS": "네이버",
+  "035720.KS": "카카오",
+  "012450.KS": "한화에어로스페이스",
+  "047810.KS": "한국항공우주",
+  "034020.KS": "두산에너빌리티",
+  "003490.KS": "대한항공",
+  "207940.KS": "삼성바이오로직스",
+  "454910.KS": "두산로보틱스",
+  "112610.KS": "씨에스윈드",
+  "145020.KQ": "휴젤",
+  "051900.KS": "LG생활건강",
+  "003230.KS": "삼양식품",
+  "253450.KQ": "스튜디오드래곤",
+  "000720.KS": "현대건설",
+  "012510.KS": "더존비즈온",
+  "034220.KS": "LG디스플레이",
+  "000120.KS": "CJ대한통운",
+};
+
+function looksKorean(s: string): boolean {
+  // 한글 음절 1자라도 포함되면 한국어로 간주.
+  return /[\uAC00-\uD7A3]/.test(s);
+}
+
+// 종목별 Google 폴백 — shouldSkipGoogle() + hard timeout 으로 워커A 보호 로직 적용.
+// 실패해도 throw 하지 않고 빈 배열 반환 (호출자가 다음 소스로 폴백).
+async function fromGoogleRss(
+  query: string,
+  lang: "ko" | "en",
+  symbol: string | undefined,
+  maxItems: number
+): Promise<NewsItem[]> {
+  if (shouldSkipGoogle()) return [];
+  try {
+    const feed = await withHardTimeout(
+      parser.parseURL(feedUrl(query, lang)),
+      GOOGLE_HARD_TIMEOUT_MS
+    );
+    return (feed.items ?? [])
+      .slice(0, maxItems)
+      .map((item) => toNewsItem(item, symbol));
+  } catch {
+    markGoogleBlocked();
+    return [];
+  }
+}
+
+async function fromYahooRss(
+  ticker: string,
+  symbol: string,
+  maxItems: number
+): Promise<NewsItem[]> {
+  try {
+    const feed = await yahooParser.parseURL(yahooRssUrl(ticker));
+    return (feed.items ?? [])
+      .slice(0, maxItems)
+      .map((item) => {
+        const n = toNewsItem(item, symbol);
+        // Yahoo RSS 는 source 가 비는 경우가 많아 매체 라벨 보강.
+        if (!n.source || n.source === "News") n.source = "Yahoo Finance";
+        return n;
+      });
+  } catch {
+    return [];
+  }
+}
+
+// 영어 제목인 항목들에 한해 titleKo 를 채움. 한국어 원문은 건너뜀.
+async function enrichTitleKo(items: NewsItem[]): Promise<NewsItem[]> {
+  for (const it of items) {
+    if (looksKorean(it.title)) continue;
+    if (it.titleKo) continue;
+    const ko = await translateTitleToKo(it.title);
+    if (ko && ko !== it.title) it.titleKo = ko;
+  }
+  return items;
+}
+
+export interface FetchSymbolNewsOptions {
+  // 결과 상한. dedup·정렬 이후 잘림.
+  maxItems?: number;
+  // 24h 이내 항목만 받을지 — UI 매칭 기본값과 일치(true).
+  withinHours?: number;
+}
+
+export async function fetchNewsForSymbol(
+  symbol: string,
+  options: FetchSymbolNewsOptions = {}
+): Promise<NewsItem[]> {
+  const max = options.maxItems ?? 20;
+  const withinHours = options.withinHours ?? 24;
+  const cutoff = Date.now() - withinHours * 60 * 60 * 1000;
+
+  const isKr = !!extractKrCode(symbol);
+  const collected: NewsItem[] = [];
+
+  if (isKr) {
+    // 1) 네이버 금융 종목 뉴스 스크래핑 — 가장 풍부, 한국어 원문.
+    const naverFin = await fetchNaverFinanceNews(symbol, { symbol, maxItems: max });
+    collected.push(...naverFin);
+
+    // 2) Google News RSS (한국어) — 보강. Google 차단 시 자동 skip.
+    const name = KR_SYMBOL_TO_NAME[symbol];
+    if (name) {
+      collected.push(...(await fromGoogleRss(name, "ko", symbol, 10)));
+    }
+  } else {
+    // 미국 종목 (또는 그 외 영문)
+    const koName = US_TICKER_TO_KO[symbol];
+    if (koName) {
+      // 1) 네이버 뉴스 검색 (한국명) — 한국 매체 기사.
+      collected.push(...(await fetchNaverNewsSearch(koName, { symbol, maxItems: 10 })));
+      // 2) Google News RSS 한국어 (한국명) — 한국어 매체 결과 한정.
+      collected.push(...(await fromGoogleRss(koName, "ko", symbol, 10)));
+    }
+    // 3) Yahoo Finance RSS — 영문, 번역 적용.
+    collected.push(...(await fromYahooRss(symbol, symbol, 10)));
+  }
+
+  // 24h 컷 + 정규화 dedup + 시간 역순 + sentiment 분류 + symbol 보강.
+  for (const n of collected) {
+    if (!n.symbol) n.symbol = symbol;
+    if (!n.sentiment) n.sentiment = classifySentiment(n.title, n.titleKo);
+    if (!n.keywords || n.keywords.length === 0) n.keywords = extractKeywords(n.title);
+  }
+
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
+  const dedup: NewsItem[] = [];
+  for (const n of collected.sort((a, b) => b.publishedAt - a.publishedAt)) {
+    if (n.publishedAt < cutoff) continue;
+    if (seenIds.has(n.id)) continue;
+    const titleKey = normalizeTitleKey(n.title);
+    if (seenTitles.has(titleKey)) continue;
+    seenIds.add(n.id);
+    seenTitles.add(titleKey);
+    dedup.push(n);
+    if (dedup.length >= max) break;
+  }
+
+  // 영문 제목 → 한국어 번역. throttle 이 있어 직렬 처리.
+  await enrichTitleKo(dedup);
+  // Round 4: enrichTitleKo 결과(titleKo) 활용해 sentiment 재분류.
+  //   neutral 로 박혔지만 한국어 번역에 강 키워드("급락", "어닝쇼크" 등) 가 매칭되면
+  //   재분류로 호재/악재 판정이 가능해진다. 이미 positive/negative 인 건은 유지.
+  reclassifyWithTitleKo(dedup);
+  return dedup;
+}
+
+// 번역(titleKo) 채워진 직후 sentiment 재분류.
+// title 만으로 neutral 이었던 항목이 한국어 사전 매칭으로 호재/악재가 되는 경우를 잡는다.
+// 이미 호재/악재로 판정된 항목은 건드리지 않는다 (보수적: 번역 노이즈로 등급 변동 방지).
+export function reclassifyWithTitleKo(items: NewsItem[]): void {
+  for (const n of items) {
+    if (!n.titleKo) continue;
+    if (n.sentiment === "positive" || n.sentiment === "negative") continue;
+    const next = classifySentiment(n.title, n.titleKo);
+    if (next && next !== "neutral") n.sentiment = next;
+  }
+}
+
+// 여러 종목 동시 fetch — concurrency 2 로 외부 차단 최소화.
+export async function fetchNewsForSymbols(
+  symbols: string[],
+  options: FetchSymbolNewsOptions = {}
+): Promise<Record<string, NewsItem[]>> {
+  const out: Record<string, NewsItem[]> = {};
+  const results = await runWithConcurrency(symbols, 2, async (sym) => {
+    const items = await fetchNewsForSymbol(sym, options);
+    return { sym, items };
+  });
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      out[r.value.sym] = r.value.items;
+    }
+  }
+  return out;
 }
 
 function toNewsItem(
@@ -182,18 +572,52 @@ function toNewsItem(
 // sentiment 분류는 RISK_KEYWORDS / POSITIVE_KEYWORDS 의 정규식+가중치를 그대로 재사용.
 // 두 사전이 단일 진실의 소스(SSOT)이므로 키워드 추가/수정이 sentiment 분류에도 즉시 반영된다.
 //
-// 가중치 합계가 큰 쪽으로 결론. 비슷하면 neutral.
-function classifySentiment(text: string): NewsItem["sentiment"] {
+// Round 4 강화:
+//   - title + (있으면) titleKo 양쪽 매칭 — 영문 헤드라인이 한국어로 번역된 경우
+//     한국어 사전이 더 풍부하므로 titleKo 도 검사한다.
+//   - 차이 임계값을 1.5 로 낮춤 (약 키워드 2개 또는 weight=2 키워드 1개 단독 분류 가능).
+//   - 강 키워드(weight ≥4) 가 한쪽에만 있으면 양쪽 합 차이 무관하게 그쪽으로 분류 (양쪽
+//     모두 강 키워드면 합 비교).
+//   - 같은 라벨(예: "급락"·"plunge")이 한·영 양쪽 다 매칭되어도 1번만 카운트(라벨 dedupe).
+function classifySentiment(
+  title: string,
+  titleKo?: string | null
+): NewsItem["sentiment"] {
+  // title + titleKo 합쳐 매칭 — \b 영어 word boundary 가 양쪽 모두에서 정확히 동작.
+  // titleKo 가 비거나 동일하면 title 만.
+  const haystack =
+    titleKo && titleKo !== title ? `${title}\n${titleKo}` : title;
+
   let posWeight = 0;
   let negWeight = 0;
+  let posStrong = 0;
+  let negStrong = 0;
+  const seenPos = new Set<string>();
+  const seenNeg = new Set<string>();
+
   for (const kw of RISK_KEYWORDS) {
-    if (kw.pattern.test(text)) negWeight += kw.weight;
+    if (seenNeg.has(kw.label)) continue;
+    if (kw.pattern.test(haystack)) {
+      seenNeg.add(kw.label);
+      negWeight += kw.weight;
+      if (kw.weight >= 4) negStrong += 1;
+    }
   }
   for (const kw of POSITIVE_KEYWORDS) {
-    if (kw.pattern.test(text)) posWeight += kw.weight;
+    if (seenPos.has(kw.label)) continue;
+    if (kw.pattern.test(haystack)) {
+      seenPos.add(kw.label);
+      posWeight += kw.weight;
+      if (kw.weight >= 4) posStrong += 1;
+    }
   }
-  // 차이가 2점 미만이면 neutral — 호재/악재 양쪽이 비슷하면 판단 보류.
-  if (Math.abs(posWeight - negWeight) < 2) return "neutral";
+
+  // 강 키워드(≥4) 가 한쪽에만 있으면 즉시 그쪽으로.
+  if (posStrong > 0 && negStrong === 0) return "positive";
+  if (negStrong > 0 && posStrong === 0) return "negative";
+
+  // 차이 1.5 미만 → neutral (호재/악재 양쪽이 비슷하면 판단 보류).
+  if (Math.abs(posWeight - negWeight) < 1.5) return "neutral";
   return posWeight > negWeight ? "positive" : "negative";
 }
 

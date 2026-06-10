@@ -46,7 +46,7 @@ export function LoadingScreen() {
         <div className="flex items-center justify-center gap-2 text-muted-foreground">
           <Activity className="h-4 w-4 text-accent" />
           <span className="text-xs uppercase tracking-wider">
-            실시간 주식 대시보드
+            Ticker
           </span>
         </div>
 

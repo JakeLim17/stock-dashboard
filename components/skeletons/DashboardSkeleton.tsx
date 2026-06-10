@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "./Skeleton";
 import { SummaryBarSkeleton } from "./SummaryBarSkeleton";
-import { PredictionHeroSkeleton } from "./PredictionHeroSkeleton";
 import { StockCardSkeleton } from "./StockCardSkeleton";
 import { MarketPanelSkeleton } from "./MarketPanelSkeleton";
 import { NewsPanelSkeleton } from "./NewsPanelSkeleton";
@@ -61,11 +60,9 @@ export function DashboardSkeleton({
       {/* 테마 그룹 (접힘) */}
       <PanelSkeleton title height="h-14" />
 
-      {/* PredictionHero */}
-      <PredictionHeroSkeleton />
-
-      {/* StockDetailPanel — 탭 구조 */}
-      <div className="bg-card border border-border rounded-2xl shadow-sm p-5 md:p-6 space-y-4">
+      {/* StockDetailPanel — 탭 구조. 데스크탑(lg+) 전용 고정 노출 — 모바일은 카드 탭 시 sheet 모달.
+          Round2 Fix7: 카드 그리드 위로 이동해 실제 layout 과 동일 순서. */}
+      <div className="hidden lg:block bg-card border border-border rounded-2xl shadow-sm p-5 md:p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Skeleton className="h-7 w-20 rounded-full" />
           <Skeleton className="h-7 w-24 rounded-full" />
@@ -78,7 +75,7 @@ export function DashboardSkeleton({
         </div>
       </div>
 
-      {/* 종목 카드 grid */}
+      {/* 종목 카드 grid — 카드 자체에 예측·강도·손익비를 흡수했다 (PredictionHero 제거됨) */}
       <StockCardSkeleton />
 
       {/* 차트 + 마켓 패널 + 이벤트 캘린더

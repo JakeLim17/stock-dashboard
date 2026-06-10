@@ -18,6 +18,8 @@ import {
   Check,
   Target,
   Hourglass,
+  Newspaper,
+  AlertTriangle,
 } from "lucide-react";
 import {
   changeColor,
@@ -75,6 +77,8 @@ const CATEGORY_VARIANT: Record<
 // - 기본 접힘. 헤더 클릭 시 펼침.
 // - 펼치면 컨텍스트 한 줄 → 섹터 탭 → 추천 카드 그리드.
 // - 첫 fetch 는 ~30-50초 가능 (콘센·시장경보 미캐시), 그래서 안내 문구 추가.
+// - 각 카드 하단에는 "이유 보기" 토글이 있어 펼치면 단·장기 reason / 컨센서스 / 카탈리스트 뉴스 /
+//   외부 위험·시장경보를 함께 본다.
 export function RecommendationsPanel({
   watchlist,
   onAddToWatchlist,
@@ -462,6 +466,10 @@ function RecommendationCard({
     rec.currency === "USD" || rec.currency === "KRW" ? rec.currency : undefined;
   const currency = currencyOf(rec.code, explicit);
 
+  // "왜 이 종목인가" 펼침. 기본 접힘 — 카드가 그리드라 모두 펼치면 길어진다.
+  // 사용자가 관심 가는 카드만 펼쳐서 reason을 확인하는 패턴.
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2.5 space-y-2 hover:border-foreground/20 transition-colors">
       {/* 상단: 종목명·티커 + verdict 배지 + 현재가/등락률 */}
@@ -492,7 +500,9 @@ function RecommendationCard({
         </div>
         <div className="text-right shrink-0">
           <div className="text-sm font-semibold tabular">
-            {rec.price.toLocaleString("ko-KR")}
+            {currency === "USD"
+              ? `$${rec.price.toFixed(2)}`
+              : rec.price.toLocaleString("ko-KR")}
           </div>
           {/* USD 종목 — 환율 적용 원화 보조. 없으면 자동 생략. */}
           {currency === "USD" && (
@@ -502,6 +512,7 @@ function RecommendationCard({
                 currency={currency}
                 krwRate={krwRate ?? null}
                 prefix=""
+                size="xs"
               />
             </div>
           )}
@@ -542,8 +553,24 @@ function RecommendationCard({
         />
       </div>
 
-      {/* 하단: 추가 버튼 (단/장기 시그널은 위 미니배지로 노출) */}
-      <div className="flex items-center justify-end gap-2 pt-1">
+      {/* "이유 보기" 펼친 영역 */}
+      {expanded && <CardReasonSection rec={rec} currency={currency} />}
+
+      {/* 하단: 펼침 토글 + 관심종목 추가 버튼 */}
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          aria-expanded={expanded}
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition-transform ${
+              expanded ? "rotate-180" : ""
+            }`}
+          />
+          {expanded ? "이유 접기" : "왜 이 종목인가"}
+        </button>
         {inWatchlist ? (
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground px-2 py-1 rounded-md border border-border bg-muted/40">
             <Check className="h-3 w-3" />
@@ -562,6 +589,146 @@ function RecommendationCard({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// 카드 펼침 영역 — analyzer가 이미 만든 단·장기 reasons + consensus + 카탈리스트 뉴스 +
+// 외부 위험 드라이버 + 시장경보를 한 카드 안에 정리한다. 새 분석은 추가하지 않고
+// 이미 계산된 값만 노출.
+function CardReasonSection({
+  rec,
+  currency,
+}: {
+  rec: Recommendation;
+  currency: "USD" | "KRW";
+}) {
+  const stReasons = rec.shortTerm.reasons ?? [];
+  const ltReasons = rec.longTerm.reasons ?? [];
+  const cs = rec.consensusSnap;
+  const news = rec.catalystNews ?? [];
+  const risk = rec.externalRisk;
+  const riskDrivers = (risk?.drivers ?? []).slice(0, 2);
+  const showRisk = risk && risk.score >= 25 && riskDrivers.length > 0;
+  const alert = rec.marketAlert;
+
+  const hasConsensus =
+    cs && (cs.targetMean != null || cs.opinionLabel || cs.upsidePercent != null);
+
+  return (
+    <div className="border-t border-border/50 pt-2 space-y-2">
+      <p className="text-[10px] font-semibold text-foreground/80">
+        왜 이 종목인가
+      </p>
+
+      <ReasonBlock title="단기" reasons={stReasons} />
+      <ReasonBlock title="장기" reasons={ltReasons} />
+
+      {hasConsensus && (
+        <div className="flex items-start gap-1.5 text-[10px] leading-snug">
+          <Target className="h-3 w-3 mt-0.5 text-muted-foreground shrink-0" />
+          <span className="text-foreground/85">
+            <span className="text-muted-foreground">목표가</span>{" "}
+            {cs!.targetMean != null
+              ? currency === "USD"
+                ? `$${cs!.targetMean.toFixed(2)}`
+                : cs!.targetMean.toLocaleString("ko-KR")
+              : "—"}
+            {cs!.upsidePercent != null && (
+              <span
+                className={`ml-1 ${
+                  cs!.upsidePercent >= 0 ? "text-up" : "text-down"
+                }`}
+              >
+                ({cs!.upsidePercent >= 0 ? "+" : ""}
+                {(cs!.upsidePercent * 100).toFixed(1)}%)
+              </span>
+            )}
+            {cs!.opinionLabel && (
+              <span className="ml-1 text-muted-foreground">
+                · {cs!.opinionLabel}
+                {cs!.analystCount != null && cs!.analystCount > 0
+                  ? ` ${cs!.analystCount}명`
+                  : ""}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
+
+      {news.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-semibold text-foreground/80 flex items-center gap-1">
+            <Newspaper className="h-3 w-3" />
+            최근 카탈리스트
+          </p>
+          <ul className="space-y-0.5">
+            {news.map((n, i) => (
+              <li
+                key={i}
+                className="text-[10px] text-foreground/85 leading-snug line-clamp-2"
+              >
+                · {n.title}
+                <span className="ml-1 text-[9px] text-muted-foreground">
+                  ({n.source})
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {showRisk && (
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-semibold text-down/85 flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            위험 신호
+          </p>
+          <ul className="space-y-0.5">
+            {riskDrivers.map((d, i) => (
+              <li
+                key={i}
+                className="text-[10px] text-foreground/85 leading-snug line-clamp-2"
+              >
+                · [{d.category}] {d.headline}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {alert && (
+        <p className="text-[10px] text-warn flex items-center gap-1">
+          <AlertTriangle className="h-3 w-3" />
+          시장경보 · {alert.label}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// 단/장기 reasons를 한 블록으로 — analyzer가 만든 최대 3줄 메시지를 그대로 노출.
+function ReasonBlock({
+  title,
+  reasons,
+}: {
+  title: string;
+  reasons: string[];
+}) {
+  if (!reasons || reasons.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground mb-0.5">{title}</p>
+      <ul className="space-y-0.5">
+        {reasons.slice(0, 3).map((r, i) => (
+          <li
+            key={i}
+            className="text-[10px] text-foreground/85 leading-snug"
+          >
+            · {r}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

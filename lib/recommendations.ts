@@ -12,6 +12,7 @@ import { isKrStock } from "./providers/naver";
 import { analyze, evaluateSignalMarks, pickTopSignalMarks } from "./analyzer";
 import { assessNewsRisk, emptyRiskAssessment } from "./news/riskScore";
 import { MARKET_INDICATORS, WATCHLIST_CANDIDATES } from "./symbols";
+import { buildConsensusSnap, pickCatalystNews } from "./recommendationExtras";
 import type {
   ActionRecommendation,
   MarketContext,
@@ -426,6 +427,8 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
         headline: analysis.verdict.headline,
         marketAlert,
         signalMarks,
+        consensusSnap: buildConsensusSnap(consensus, quote.price),
+        catalystNews: pickCatalystNews(relatedNews, meta.code, meta.name, 2),
       };
       return rec;
     } catch (e) {

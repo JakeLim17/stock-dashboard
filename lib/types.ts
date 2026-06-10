@@ -53,7 +53,8 @@ export type SectorTag =
   | "글로벌소비재"       // COST/WMT/HD
   | "중국ADR"            // BABA/PDD
   | "글로벌에너지"       // XOM/CVX
-  | "글로벌암호화폐";    // MSTR/COIN (BTC 노출)
+  | "글로벌암호화폐"     // MSTR/COIN (BTC 노출)
+  | "글로벌AI인프라";    // VRT/DELL (AI 데이터센터 전력·냉각·서버)
 
 export interface SymbolMeta {
   // 내부 표준 코드 (예: 005930.KS)
@@ -218,6 +219,10 @@ export interface NewsItem {
   symbol?: string | null; // 연결된 종목
   sentiment?: "positive" | "negative" | "neutral" | null;
   keywords?: string[];
+  // 영어 원문 헤드라인의 한국어 번역. 미국 종목·영문 매체 뉴스만 채움.
+  // 한국 매체 원문이 이미 한국어인 경우 undefined.
+  // UI 는 (titleKo || title) 을 우선 표시하고 원문은 보조 라인으로 노출.
+  titleKo?: string;
 }
 
 // 단기 / 장기 각각의 점수·신호·헤드라인·근거를 분리한 갈래.
@@ -467,6 +472,33 @@ export interface Predictions {
     eventLabel: string;
     shortLabel: string;
     daysToEvent: number;
+  } | null;
+
+  // ─── Round3 B: 매크로 베타 회귀 (60일 OLS) ────────────────────
+  // 종목 일별 수익률을 매크로 변수(KOSPI/IXIC/SOX/DXY)에 단순 회귀해서
+  // 추정한 β·R²·잔차표준편차. β는 1% 매크로 변동에 종목이 평균 몇 % 움직이는지.
+  //   beta      : 회귀 계수
+  //   r2        : 0~1 (시장 설명력)
+  //   residStd  : 회귀 잔차의 표준편차 (드리프트 신뢰도 가중에 사용)
+  //   samples   : 회귀에 사용된 표본 수
+  // 표본이 부족(<30) 하거나 회귀가 의미 없으면 해당 키는 빠짐.
+  macroBetas?: {
+    ixic?: { beta: number; r2: number; residStd: number; samples: number };
+    kospi?: { beta: number; r2: number; residStd: number; samples: number };
+    sox?: { beta: number; r2: number; residStd: number; samples: number };
+    dxy?: { beta: number; r2: number; residStd: number; samples: number };
+  } | null;
+
+  // ─── Round3 B: 베이지안 신뢰도 ───────────────────────────────
+  // 매크로 회귀 R²·VIX·표본수를 종합해 산출한 모델 신뢰도.
+  //   score    : 0~1 (0.7 이상 high, 0.4~0.7 medium, 그 이하 low)
+  //   label    : "high" | "medium" | "low"
+  //   factors  : 사람이 읽는 보정 사유 (예: "VIX 21 — confidence ×0.9")
+  // UI 카드/패널에서 신뢰도 배지·툴팁으로 노출.
+  modelConfidence?: {
+    score: number;
+    label: "high" | "medium" | "low";
+    factors: string[];
   } | null;
 }
 
@@ -754,7 +786,13 @@ export type EventKind =
   | "dividend"
   | "fomc"
   | "kospi_expiry"
-  | "holiday";
+  | "holiday"
+  // 매크로 추가 (Fix4)
+  | "bok_rate"   // 한국은행 금융통화위원회 기준금리 결정
+  | "us_cpi"     // 미국 소비자물가지수
+  | "us_ppi"     // 미국 생산자물가지수
+  | "us_nfp"     // 미국 비농업 고용지표
+  | "kr_trade";  // 한국 수출입 통계 (월초)
 
 export interface EventItem {
   kind: EventKind;
@@ -821,6 +859,10 @@ export interface DashboardSnapshot {
   // 종목별 이벤트(실적/배당)는 StockSnapshot.upcomingEvents 에 있다.
   // EventCalendar UI가 둘을 합쳐서 한 리스트로 노출.
   macroEvents?: EventItem[];
+  // KIS Open API 활성 여부 — 서버에서 환경변수(`KIS_APP_KEY`)로 판정.
+  // UI 의 "분 단위 실시간은 KIS API 필요" 안내 문구를 숨길지 여부 등
+  // 클라이언트가 KIS 활성 상태를 판단해야 할 때 사용한다.
+  kisActive?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -887,6 +929,29 @@ export interface Recommendation {
   // 시그널 마크 (이모지 배지) — StockSnapshot.signalMarks와 동일 스키마.
   // 추천 카드 헤더에도 노출하기 위해 함께 계산해 내려준다.
   signalMarks?: SignalMark[];
+  // 펼친 추천 카드용 컨센서스 한 줄 요약 — 목표가 / 상승여력 / 의견 분포.
+  // bundle.consensus 가 있을 때만 채워지고, 클라이언트에서 한 줄로 출력하기 좋게 가공해 둔다.
+  consensusSnap?: RecommendationConsensusSnap | null;
+  // 호재성/관련 최신 뉴스 헤드라인 (최대 2건). 카드 펼침 영역에 "최근 카탈리스트" 로 노출.
+  // analyzer 가 이미 본 relatedNews 에서 sentiment 우선순위로 잘라 담는다.
+  catalystNews?: RecommendationCatalystNews[];
+}
+
+// 펼친 카드용 컨센서스 미니 스냅샷.
+export interface RecommendationConsensusSnap {
+  targetMean: number | null;
+  upsidePercent: number | null;
+  analystCount: number | null;
+  opinionLabel: string | null; // 예: "강한매수" / "매수우위" / "중립" / "매도우위"
+  domesticMean?: number | null;
+  domesticUpsidePercent?: number | null;
+}
+
+export interface RecommendationCatalystNews {
+  title: string;
+  source: string;
+  publishedAt: number; // epoch ms
+  sentiment?: "positive" | "negative" | "neutral" | null;
 }
 
 export interface RecommendationsResponse {

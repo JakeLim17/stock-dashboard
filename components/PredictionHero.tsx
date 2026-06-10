@@ -116,15 +116,19 @@ export function PredictionHero({
             <div
               className={`text-2xl md:text-3xl font-bold ${changeColor(primary.changeRate)}`}
             >
-              <PriceTicker value={primary.price} decimals={0} />
+              <PriceTicker
+                value={primary.price}
+                decimals={currency === "USD" ? 2 : 0}
+              />
             </div>
-            {/* USD 종목 — 환율 적용 원화 보조. 환율 없으면 자동 생략. */}
+            {/* USD 종목 — 환율 적용 원화 병기. 헤로 영역에선 md 사이즈로 강조. */}
             {currency === "USD" && (
-              <div className="text-xs">
+              <div className="mt-1">
                 <PriceWithKrw
                   price={primary.price}
                   currency={currency}
                   krwRate={krwRate ?? null}
+                  size="md"
                 />
               </div>
             )}
@@ -243,10 +247,10 @@ export function PredictionHero({
                 <div className="rounded-md bg-muted/40 px-2 py-1.5">
                   <div className="text-muted-foreground">손절</div>
                   <div className="tabular font-semibold text-down">
-                    {fmtNumber(p.targets.stopLoss, 0)}
+                    {fmtNumber(p.targets.stopLoss, currency === "USD" ? 2 : 0)}
                   </div>
                   {currency === "USD" && (
-                    <div className="text-[10px] leading-tight mt-0.5">
+                    <div className="mt-0.5">
                       <PriceWithKrw
                         price={p.targets.stopLoss}
                         currency={currency}
@@ -259,10 +263,10 @@ export function PredictionHero({
                 <div className="rounded-md bg-muted/40 px-2 py-1.5">
                   <div className="text-muted-foreground">목표1</div>
                   <div className="tabular font-semibold text-up">
-                    {fmtNumber(p.targets.takeProfit1, 0)}
+                    {fmtNumber(p.targets.takeProfit1, currency === "USD" ? 2 : 0)}
                   </div>
                   {currency === "USD" && (
-                    <div className="text-[10px] leading-tight mt-0.5">
+                    <div className="mt-0.5">
                       <PriceWithKrw
                         price={p.targets.takeProfit1}
                         currency={currency}

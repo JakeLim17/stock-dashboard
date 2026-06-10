@@ -703,7 +703,9 @@ interface KisOverseasPriceResponse {
   output?: {
     last?: string; // 현재가
     base?: string; // 전일 종가
-    pvol?: string; // 거래량
+    pvol?: string; // 전일 거래량
+    tvol?: string; // 당일 거래량
+    tamt?: string; // 당일 거래대금
     diff?: string; // 전일 대비
     rate?: string; // 등락률 (%)
     sign?: string; // "1"~"5"
@@ -712,6 +714,13 @@ interface KisOverseasPriceResponse {
     low?: string;
     tomv?: string; // 시가총액
     curr?: string; // 통화
+    // ── HHDFS76200200 (price-detail) 전용 추가 필드 ──────────────
+    perx?: string; // PER
+    pbrx?: string; // PBR
+    epsx?: string; // EPS
+    bpsx?: string; // BPS
+    h52p?: string; // 52주 최고가
+    l52p?: string; // 52주 최저가
   };
 }
 
@@ -724,9 +733,12 @@ export async function fetchUsQuote(
   if (!exchange) return null;
 
   try {
+    // HHDFS00000300(price)는 last/base/diff/rate만 반환해 high/low/open 가 비어 카드 우측 컬럼이
+    // 항상 "—" 로 표시되는 사고가 있었다. HHDFS76200200(price-detail)은 동일 응답 비용으로
+    // open/high/low + PER/PBR/EPS/BPS + 시총까지 같이 주므로 이걸 1차로 사용한다.
     const json = await kisGet<KisOverseasPriceResponse>({
-      path: "/uapi/overseas-price/v1/quotations/price",
-      trId: "HHDFS00000300",
+      path: "/uapi/overseas-price/v1/quotations/price-detail",
+      trId: "HHDFS76200200",
       query: {
         AUTH: "",
         EXCD: exchange,
@@ -757,16 +769,23 @@ export async function fetchUsQuote(
       prevClose,
       changeAbs,
       changeRate,
-      volume: n(o.pvol),
+      // pvol=전일 거래량, tvol=당일 거래량 — 당일 기준이 맞다.
+      volume: n(o.tvol),
       high: n(o.high),
       low: n(o.low),
       open: n(o.open),
       marketCap,
       currency: o.curr ?? "USD",
-      valuation: null,
+      valuation: {
+        per: n(o.perx),
+        pbr: n(o.pbrx),
+        eps: n(o.epsx),
+        bps: n(o.bpsx),
+      },
       fetchedAt: Date.now(),
-      marketState: undefined,
-      priceTime: null,
+      marketState: "REGULAR",
+      // KIS HHDFS76200200 도 ~100ms 안에 실시간 last 를 주므로 priceTime = fetch 시각.
+      priceTime: Date.now(),
       extendedHours: null,
     };
   } catch {
@@ -1249,7 +1268,9 @@ export async function fetchKrIndex(
 interface KisRankingItem {
   data_rank?: string;
   hts_kor_isnm?: string;
+  // 거래량 랭킹은 mksc_shrn_iscd, 등락률(fluctuation)은 stck_shrn_iscd 로 키가 다르다.
   mksc_shrn_iscd?: string;
+  stck_shrn_iscd?: string;
   stck_prpr?: string;
   prdy_vrss?: string;
   prdy_vrss_sign?: string;
@@ -1277,8 +1298,10 @@ export async function fetchKrMarketLeaders(
 ): Promise<MarketLeadersData | null> {
   if (!kisEnabled()) return null;
   const isVolume = kind === "volume";
+  // KIS 공식 endpoint — 거래량은 /quotations/volume-rank, 등락률은 /ranking/fluctuation.
+  // (이전엔 거래량 path를 /ranking/volume-rank 로 잘못 적어 404 → UI에 빈 카드만 노출됐음.)
   const apiPath = isVolume
-    ? "/uapi/domestic-stock/v1/ranking/volume-rank"
+    ? "/uapi/domestic-stock/v1/quotations/volume-rank"
     : "/uapi/domestic-stock/v1/ranking/fluctuation";
   const trId = isVolume ? "FHPST01710000" : "FHPST01700000";
   const mktCode = marketToKisCode(market);
@@ -1303,13 +1326,15 @@ export async function fetchKrMarketLeaders(
         FID_INPUT_ISCD: mktCode,
         FID_RANK_SORT_CLS_CODE: kind === "rising" ? "0" : "1",
         FID_INPUT_CNT_1: "0",
-        FID_PRC_CLS_CODE: "0",
+        // 보통주만(="1") 보냄. "0"(전체)으로 보내면 우선주가 섞여 들어올 뿐 아니라,
+        // KIS 내부 정렬이 망가져서 +/- 가 뒤섞인 30건이 옴. "1"로 보내면 정상 등락률 내림순.
+        FID_PRC_CLS_CODE: "1",
         FID_INPUT_PRICE_1: "",
         FID_INPUT_PRICE_2: "",
         FID_VOL_CNT: "",
         FID_TRGT_CLS_CODE: "0",
         FID_TRGT_EXLS_CLS_CODE: "0",
-        FID_DIV_CLS_CODE: "0",
+        FID_DIV_CLS_CODE: "1",
         FID_RSFL_RATE1: "",
         FID_RSFL_RATE2: "",
       };
@@ -1325,17 +1350,21 @@ export async function fetchKrMarketLeaders(
     const list = json.output ?? [];
     if (list.length === 0) return null;
 
-    const items: MarketLeader[] = [];
-    for (const it of list.slice(0, count)) {
-      const code = (it.mksc_shrn_iscd ?? "").trim();
+    // 1) 응답 row 를 정규화 (부호 적용 · 우선주 가드).
+    const all: MarketLeader[] = [];
+    for (const it of list) {
+      const code = (it.mksc_shrn_iscd ?? it.stck_shrn_iscd ?? "").trim();
       const name = (it.hts_kor_isnm ?? "").trim();
       const price = n(it.stck_prpr);
       if (!code || !name || price == null) continue;
+      // 우선주/관리종목 안전망 — KIS 필터가 새 종목을 빠뜨리는 경우 마지막 가드.
+      // 종목명 suffix("우", "1우", "2우B" 등) 패턴은 가장 신뢰도 높음.
+      if (/(?:d?우[A-Z]?|우선)$/u.test(name)) continue;
       const sign = it.prdy_vrss_sign;
       const changeAbs = applySign(n(it.prdy_vrss), sign) ?? 0;
       const rateRaw = applySign(n(it.prdy_ctrt), sign);
-      items.push({
-        rank: n(it.data_rank) ?? items.length + 1,
+      all.push({
+        rank: n(it.data_rank) ?? all.length + 1,
         code,
         name,
         price,
@@ -1344,6 +1373,26 @@ export async function fetchKrMarketLeaders(
         volume: n(it.acml_vol),
       });
     }
+
+    // 2) 클라이언트 정렬·필터 — KIS 응답 정렬을 그대로 믿지 않고 우리 의도대로 재정렬.
+    //    rising  : 상승률 큰 순 (양수만)
+    //    falling : 하락률 큰 순 (음수만, 가장 작은(가장 큰 하락) 순)
+    //    volume  : 거래량 큰 순 — KIS 응답 그대로지만 안전하게 재정렬
+    let sorted: MarketLeader[];
+    if (kind === "rising") {
+      sorted = all
+        .filter((x) => x.changeRate > 0)
+        .sort((a, b) => b.changeRate - a.changeRate);
+    } else if (kind === "falling") {
+      sorted = all
+        .filter((x) => x.changeRate < 0)
+        .sort((a, b) => a.changeRate - b.changeRate);
+    } else {
+      sorted = all.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+    }
+
+    // 3) rank 재부여 + top N.
+    const items = sorted.slice(0, count).map((it, i) => ({ ...it, rank: i + 1 }));
     if (items.length === 0) return null;
 
     return {

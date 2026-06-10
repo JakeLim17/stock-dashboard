@@ -337,8 +337,9 @@ function ConsensusThreeWaySection({
 
   return (
     <Section
-      title="컨센서스 목표주가"
+      title="증권사 컨센서스 · 장기 목표가"
       icon={<Target className="h-3.5 w-3.5" />}
+      hint="애널리스트 12개월 시야 — 카드의 단기 시스템 예측과는 시계가 다름"
     >
       {/* 3-way 토글 */}
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
@@ -747,17 +748,25 @@ function Section({
   title,
   icon,
   children,
+  hint,
 }: {
   title: string;
   icon?: React.ReactNode;
   children: React.ReactNode;
+  /** 제목 아래 작은 보조 설명. 없으면 미노출 — 라벨 명확화에 사용. */
+  hint?: string;
 }) {
   return (
     <section>
-      <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+      <h4 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
         {icon}
         {title}
       </h4>
+      {hint && (
+        <p className="text-[10px] text-muted-foreground/70 leading-snug mb-2">
+          {hint}
+        </p>
+      )}
       {children}
     </section>
   );

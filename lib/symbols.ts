@@ -19,7 +19,9 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "005930.KS", name: "삼성전자", kind: "kr-stock", primary: true, sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "반도체 대장" },
   { code: "000660.KS", name: "SK하이닉스", kind: "kr-stock", primary: true, sector: "반도체" },
   { code: "009150.KS", name: "삼성전기", kind: "kr-stock", primary: true, sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "MLCC 대장" },
-  { code: "042700.KS", name: "한미반도체", kind: "kr-stock", sector: "반도체" },
+  { code: "042700.KS", name: "한미반도체", kind: "kr-stock", sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "HBM 본더 대장" },
+  { code: "007660.KS", name: "이수페타시스", kind: "kr-stock", sector: "반도체" },
+  { code: "399720.KQ", name: "가온칩스", kind: "kr-stock", sector: "반도체" },
   // IT가전
   { code: "066570.KS", name: "LG전자", kind: "kr-stock", sector: "IT가전", isSectorLeader: true, sectorLeaderLabel: "가전 대장" },
   // 자동차
@@ -63,6 +65,7 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "012450.KS", name: "한화에어로스페이스", kind: "kr-stock", sector: "방산", isSectorLeader: true, sectorLeaderLabel: "방산 대장" },
   { code: "047810.KS", name: "한국항공우주", kind: "kr-stock", sector: "방산", isSectorLeader: true, sectorLeaderLabel: "항우 대장" },
   { code: "064350.KS", name: "현대로템", kind: "kr-stock", sector: "방산" },
+  { code: "272210.KS", name: "한화시스템", kind: "kr-stock", sector: "방산" },
   // 조선 / 해운 (HMM은 해운이지만 동일 그룹)
   { code: "329180.KS", name: "HD현대중공업", kind: "kr-stock", sector: "조선" },
   { code: "010140.KS", name: "삼성중공업", kind: "kr-stock", sector: "조선" },
@@ -133,12 +136,14 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // ─── 미국 빅테크 (kind: "us-stock") ─────────────────────────────────────
   // 한국식 flow(외인/기관) 데이터는 fetchFlowOrMock에서 자동 mock 처리됨.
   // 야후 quote/chart/quoteSummary로 시세·컨센서스 모두 가능.
+  { code: "NVDA", name: "엔비디아", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "AI 칩 대장", currency: "USD" },
   { code: "AAPL", name: "애플", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "스마트폰 대장", currency: "USD" },
   { code: "MSFT", name: "마이크로소프트", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "클라우드 대장", currency: "USD" },
   { code: "GOOGL", name: "알파벳", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "검색 대장", currency: "USD" },
   { code: "META", name: "메타", kind: "us-stock", sector: "글로벌IT", currency: "USD" },
   { code: "AMZN", name: "아마존", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "이커머스 대장", currency: "USD" },
   { code: "TSLA", name: "테슬라", kind: "us-stock", sector: "글로벌EV", isSectorLeader: true, sectorLeaderLabel: "EV 대장", currency: "USD" },
+  { code: "NFLX", name: "넷플릭스", kind: "us-stock", sector: "글로벌IT", isSectorLeader: true, sectorLeaderLabel: "스트리밍 대장", currency: "USD" },
   { code: "AMD", name: "AMD", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "TSM", name: "TSMC", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "파운드리 대장", currency: "USD" },
   { code: "PLTR", name: "팔란티어", kind: "us-stock", sector: "글로벌AI", currency: "USD" },
@@ -175,20 +180,38 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "CVX", name: "셰브론", kind: "us-stock", sector: "글로벌에너지", currency: "USD" },
   // 핫 테마 — AI 서버(SMCI), BTC 노출(MSTR), 코인 거래소(COIN)
   { code: "SMCI", name: "슈퍼마이크로", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "ASML", name: "ASML", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "EUV 장비 대장", currency: "USD" },
+  // AI 데이터센터 인프라 (전력·냉각·서버)
+  { code: "VRT", name: "버티브", kind: "us-stock", sector: "글로벌AI인프라", isSectorLeader: true, sectorLeaderLabel: "데이터센터 전력·냉각 대장", currency: "USD" },
+  { code: "DELL", name: "델", kind: "us-stock", sector: "글로벌AI인프라", currency: "USD" },
   { code: "MSTR", name: "마이크로스트래티지(BTC)", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "BTC 노출 대장", currency: "USD" },
   { code: "COIN", name: "코인베이스", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "美 코인거래소 대장", currency: "USD" },
 ];
 
 // 시장 지표 패널
 // KOSPI/KOSDAQ는 KIS가 활성이면 우선 조회되고 Yahoo 폴백. 라우팅은 providers/index.ts.
+//
+// Round3 A — Toss 수준 풀 확장:
+//   기존 7개(코스피/코스닥/나스닥선물/필반/NVDA/USD원/VIX) + 신규 7개
+//   추가: 나스닥현물(^IXIC) / S&P현물(^GSPC) / S&P선물(ES=F) / 다우(^DJI) / 러셀선물(RTY=F)
+//        / DXY(DX-Y.NYB) / 미10년물(^TNX 단위 %)
+//   ^TNX 의 value 는 yield (%) 단위 — Yahoo 그대로 받아 그대로 표시 (예: 4.32 = 4.32%).
+//   DX-Y.NYB 가 일부 시간대 응답 빌 수 있음 — !r.ok 분기에서 errors 에 들어가고 indicators 에서 자동 제외(graceful).
 export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "^KS11", name: "코스피", kind: "index" },
   { code: "^KQ11", name: "코스닥", kind: "index" },
+  { code: "^IXIC", name: "나스닥", kind: "index" },
   { code: "NQ=F", name: "나스닥 선물", kind: "future" },
+  { code: "^GSPC", name: "S&P 500", kind: "index" },
+  { code: "ES=F", name: "S&P 500 선물", kind: "future" },
+  { code: "^DJI", name: "다우존스", kind: "index" },
+  { code: "RTY=F", name: "러셀 2000 선물", kind: "future" },
   { code: "^SOX", name: "필라델피아 반도체", kind: "index" },
   { code: "NVDA", name: "엔비디아", kind: "us-stock", isSectorLeader: true, sectorLeaderLabel: "AI 반도체 대장" },
-  { code: "KRW=X", name: "달러/원", kind: "fx" },
+  { code: "DX-Y.NYB", name: "달러 인덱스", kind: "index" },
   { code: "^VIX", name: "VIX 변동성", kind: "index" },
+  { code: "^TNX", name: "미 10년물 금리", kind: "index" },
+  { code: "KRW=X", name: "달러/원", kind: "fx" },
 ];
 
 // ─── 테마 그룹 ────────────────────────────────────────────────────────────
@@ -231,7 +254,13 @@ export type ThemeTag =
   | "us_consumer"
   | "us_china_adr"
   | "us_energy"
-  | "us_crypto";
+  | "us_crypto"
+  // ── 2026-06 AI narrative 테마 ──────────────────────────
+  | "ai_infra"
+  | "ai_cloud_app"
+  | "euv_equipment"
+  | "hbm_memory"
+  | "ai_power_dc";
 
 export interface ThemeDefinition {
   id: ThemeTag;
@@ -431,16 +460,17 @@ export const THEMES: ThemeDefinition[] = [
     emoji: "🇺🇸",
     description: "글로벌 시총 상위·AI 인프라",
     codes: [
+      "NVDA",
       "AAPL",
       "MSFT",
       "GOOGL",
       "META",
       "AMZN",
       "TSLA",
+      "NFLX",
       "AMD",
       "TSM",
       "PLTR",
-      "NVDA",
     ],
   },
   // ─── 2026-06 미국 카탈로그 확장 테마 ───────────────────────────────────
@@ -509,6 +539,42 @@ export const THEMES: ThemeDefinition[] = [
     emoji: "₿",
     description: "BTC 대량 보유·美 코인거래소",
     codes: ["MSTR", "COIN"],
+  },
+  // ─── 2026-06 AI narrative 테마 (시장 스토리 단위 묶음) ──────────────────
+  {
+    id: "ai_infra",
+    label: "AI 인프라",
+    emoji: "🏗️",
+    description: "AI 학습·추론용 칩·네트워킹·서버 핵심 공급망",
+    codes: ["NVDA", "VRT", "AMD", "AVGO", "TSM", "SMCI", "MRVL", "DELL"],
+  },
+  {
+    id: "ai_cloud_app",
+    label: "AI 클라우드·응용",
+    emoji: "☁️",
+    description: "하이퍼스케일러·엔터프라이즈 AI 응용",
+    codes: ["MSFT", "GOOGL", "META", "ORCL", "PLTR"],
+  },
+  {
+    id: "euv_equipment",
+    label: "EUV·반도체 장비",
+    emoji: "🔬",
+    description: "EUV 리소그래피·파운드리 장비 핵심",
+    codes: ["ASML", "ARM", "TSM"],
+  },
+  {
+    id: "hbm_memory",
+    label: "HBM·AI 메모리",
+    emoji: "💾",
+    description: "AI 가속기용 HBM 메모리·후공정",
+    codes: ["MU", "042700.KS", "000660.KS", "005930.KS"],
+  },
+  {
+    id: "ai_power_dc",
+    label: "AI 전력·데이터센터",
+    emoji: "⚡",
+    description: "AI 데이터센터 전력기기·원전·냉각",
+    codes: ["VRT", "267260.KS", "034020.KS"],
   },
 ];
 

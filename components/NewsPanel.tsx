@@ -110,10 +110,13 @@ export function NewsPanel({
 
   // 선택 종목과 매칭되는 뉴스(헤드라인에 종목명 또는 symbol 일치)는 상단으로 끌어올리고
   // 좌측에 accent 보더로 시각 강조한다. matchSelected가 true인 항목이 우선 정렬 키.
+  // 종목명 매칭은 한국어 원문(`title`) + 번역본(`titleKo`) 양쪽에서 검사해
+  // 영문 헤드라인이라도 한국어 종목명이 번역에 들어 있으면 매칭된다.
   const isSelectedMatch = (n: NewsItem): boolean => {
     if (!selectedSymbol) return false;
     if (n.symbol === selectedSymbol.code) return true;
-    return (n.title || "").includes(selectedSymbol.name);
+    const haystack = `${n.title ?? ""} ${n.titleKo ?? ""}`;
+    return haystack.includes(selectedSymbol.name);
   };
 
   const filtered = useMemo(() => {
@@ -124,7 +127,8 @@ export function NewsPanel({
         if (sentiment !== "all" && n.sentiment !== sentiment) return false;
         if (now - n.publishedAt > span) return false;
         if (onlySelected && selectedSymbol) {
-          const inTitle = (n.title || "").includes(selectedSymbol.name);
+          const haystack = `${n.title ?? ""} ${n.titleKo ?? ""}`;
+          const inTitle = haystack.includes(selectedSymbol.name);
           const symbolHit = n.symbol === selectedSymbol.code;
           if (!inTitle && !symbolHit) return false;
         }
@@ -241,8 +245,20 @@ export function NewsPanel({
                       rel="noopener noreferrer"
                       className="group flex items-start gap-2"
                     >
-                      <span className="flex-1 text-sm leading-snug group-hover:underline">
-                        {highlightKeywords(n.title)}
+                      {/* 한국어 번역(titleKo)이 있으면 우선 노출 + 영어 원문은 작은 회색 줄로 보조.
+                          번역이 없거나 원문이 이미 한국어면 원문만 표시. */}
+                      <span className="flex-1 min-w-0 group-hover:underline">
+                        <span className="block text-sm leading-snug">
+                          {highlightKeywords(n.titleKo || n.title)}
+                        </span>
+                        {n.titleKo && n.titleKo !== n.title && (
+                          <span
+                            className="mt-0.5 block text-[11px] leading-snug text-muted-foreground/80 line-clamp-2"
+                            title={n.title}
+                          >
+                            {n.title}
+                          </span>
+                        )}
                       </span>
                       <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
                     </a>

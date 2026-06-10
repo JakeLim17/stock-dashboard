@@ -32,6 +32,14 @@ const EVENT_CONFIG: Record<EventKind, EventConfig> = {
   dividend: { before: 1, after: 1, maxAlpha: 0.05, shortLabel: "배당락" },
   // 휴장은 σ 부풀림 영향 미미 — 단순 정보 노출만 하고 σ는 그대로.
   holiday: { before: 0, after: 0, maxAlpha: 0, shortLabel: "휴장" },
+  // 새 매크로 이벤트(Fix4) — 발표 직후 한국·미국 시장 변동성이 평소보다 커진다.
+  // 다만 실적·FOMC 만큼은 아니라서 maxAlpha 는 보수적으로.
+  bok_rate: { before: 1, after: 1, maxAlpha: 0.35, shortLabel: "금통위" },
+  us_cpi: { before: 1, after: 1, maxAlpha: 0.4, shortLabel: "CPI" },
+  us_ppi: { before: 0, after: 0, maxAlpha: 0, shortLabel: "PPI" },
+  us_nfp: { before: 1, after: 1, maxAlpha: 0.3, shortLabel: "고용" },
+  // 한국 수출입은 지수에 큰 영향이지만 개별종목 σ 부풀림은 작음 — 정보만.
+  kr_trade: { before: 0, after: 0, maxAlpha: 0, shortLabel: "수출입" },
 };
 
 function singleEventFactor(event: EventItem, today: number): number {

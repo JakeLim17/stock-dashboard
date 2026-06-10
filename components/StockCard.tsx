@@ -12,6 +12,8 @@ import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { CardSparkline } from "./CardSparkline";
+import { PredictionBlock } from "./PredictionBlock";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { dnLabel } from "./EventCalendar";
 import {
@@ -37,6 +39,16 @@ const SIGNAL_LABEL: Record<string, string> = {
   SELL: "비중 축소",
 };
 
+// 카드 가로 폭 제약 안에서 H/L 라벨을 한 줄로 유지하기 위한 컴팩트 가격 포맷.
+// KRW: 6자리 가격 → "319.5K" / "1.81M". USD: 2자리 그대로(짧음).
+function fmtCompactPrice(v: number | null | undefined, currency: string): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (currency === "USD") return v.toFixed(2);
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(2) + "M";
+  if (v >= 1_000) return (v / 1_000).toFixed(1) + "K";
+  return v.toLocaleString("ko-KR");
+}
+
 const SIGNAL_VARIANT = {
   BUY: "buy",
   ADD: "add",
@@ -47,12 +59,14 @@ const SIGNAL_VARIANT = {
 
 type SignalKey = keyof typeof SIGNAL_VARIANT;
 
-export function StockCard({ snap, onSelect, selected, krwRate }: {
+export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
   selected?: boolean;
   /** USDKRW 환율 — USD 종목 원화 병기에 사용. null이면 보조 표시 생략. */
   krwRate?: number | null;
+  /** KIS Open API 활성 여부. DashboardSnapshot.kisActive 미러 — 펀더멘털 안내 분기. */
+  kisActive?: boolean;
 }) {
   const { meta, quote, tech, analysis, consensus } = snap;
 
@@ -101,25 +115,47 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
         </Badge>
       </CardHeader>
       <CardBody className="space-y-4">
-        {/* 가격 — 메인은 항상 "지금 진행 중인 거래". 시간외 거래중이면 시간외가 메인. */}
-        <div className="flex items-end justify-between">
-          <div>
-            <div className={`text-3xl font-bold ${changeColor(primary.changeRate)}`}>
-              <PriceTicker value={primary.price} decimals={0} />
+        {/* 가격 + 인라인 sparkline.
+            큰 가격 숫자 우측에 가로로 길게 늘어난 미니 라인 → Toss 증권 카드 스타일.
+            sparkline 색상은 오늘 시가 vs 현재가 기준으로 자동 (var(--color-up)/down). */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-end gap-3">
+            <div
+              className={`text-xl font-bold tabular leading-none shrink-0 ${changeColor(primary.changeRate)}`}
+            >
+              <PriceTicker
+                value={primary.price}
+                decimals={currency === "USD" ? 2 : 0}
+              />
             </div>
-            {/* USD 종목 — 환율 적용 원화 보조 표시. 환율 없으면 자동 생략. */}
+            <CardSparkline
+              code={meta.code}
+              currentPrice={quote.price}
+              height={32}
+              className="flex-1 min-w-[140px]"
+            />
+          </div>
+            {/* USD 종목 — 환율 적용 원화 병기. 잘 보이도록 본문 톤 medium + md 사이즈. */}
             {currency === "USD" && (
-              <div className="text-[11px] mt-0.5">
+              <div className="mt-1">
                 <PriceWithKrw
                   price={primary.price}
                   currency={currency}
                   krwRate={krwRate ?? null}
+                  size="md"
                 />
               </div>
             )}
-            <div className={`tabular text-sm mt-1 inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
-              {trendIcon}
-              {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <div className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
+                {trendIcon}
+                {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
+              </div>
+              <div className="text-[10px] text-muted-foreground tabular shrink-0 whitespace-nowrap">
+                H <span className="text-foreground">{fmtCompactPrice(quote.high, currency)}</span>
+                <span className="mx-1 opacity-50">·</span>
+                L <span className="text-foreground">{fmtCompactPrice(quote.low, currency)}</span>
+              </div>
             </div>
             {primary.isExtended && primary.isLive ? (
               <div className="text-[11px] mt-1 tabular flex items-center gap-1.5 flex-wrap">
@@ -165,16 +201,16 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
                 );
               })()
             ) : null}
-          </div>
-          <div className="text-right text-xs text-muted-foreground space-y-1">
-            <div>고가 <span className="tabular text-foreground">{fmtNumber(quote.high, 0)}</span></div>
-            <div>저가 <span className="tabular text-foreground">{fmtNumber(quote.low, 0)}</span></div>
-          </div>
         </div>
 
         {/* 펀더멘털 블록 — 시간외 secondary + 거래량/RSI + 수급(외인/기관/개인 당일·5일·출처).
             StockDetailPanel "수급" 탭과 동일 컴포넌트 재사용. */}
-        <StockFundamentalsBlock snap={snap} krwRate={krwRate} variant="card" />
+        <StockFundamentalsBlock
+          snap={snap}
+          krwRate={krwRate}
+          variant="card"
+          kisActive={kisActive}
+        />
         
 
         {/* 분석 — 메인 결론(verdict)을 위로 크게, 단기/장기 상세는 접힘으로 정리.
@@ -246,67 +282,10 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
           </details>
         </div>
 
-        {/* 예상 변동 범위 — 1일/1주 horizon을 stack으로 노출. 카드만 보고도 즉시 판단 가능.
-            오늘(1일) 진폭은 ATR/분봉 가중 intradayRange를 우선 사용해 더 현실에 가깝게. */}
-        {(() => {
-          const ranges = snap.predictions?.ranges;
-          const intradayRange = snap.predictions?.intradayRange;
-          if (!ranges || quote.price <= 0) return null;
-          const oneDay = ranges.find((r) => r.horizonDays === 1);
-          const oneWeek = ranges.find((r) => r.horizonDays === 5);
-          if (!oneWeek) return null;
-          const rows: { label: string; low: number; high: number; suffix?: string }[] = [];
-          if (intradayRange && intradayRange.expectedRangePct > 0) {
-            rows.push({
-              label: "오늘",
-              low: intradayRange.expectedLow / quote.price - 1,
-              high: intradayRange.expectedHigh / quote.price - 1,
-              suffix:
-                intradayRange.source === "intraday-blend" ? "분봉" : "ATR",
-            });
-          } else if (oneDay) {
-            rows.push({
-              label: "1일",
-              low: oneDay.low / quote.price - 1,
-              high: oneDay.high / quote.price - 1,
-            });
-          }
-          rows.push({
-            label: "1주",
-            low: oneWeek.low / quote.price - 1,
-            high: oneWeek.high / quote.price - 1,
-          });
-          return (
-            <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">예상 변동 범위</span>
-                <span className="text-muted-foreground text-[10px]">68%</span>
-              </div>
-              <div className="space-y-0.5">
-                {rows.map((r) => (
-                  <div
-                    key={r.label}
-                    className="flex items-center justify-between"
-                  >
-                    <span className="text-muted-foreground">
-                      {r.label}
-                      {r.suffix && (
-                        <span className="ml-1 text-[9px] opacity-70">
-                          · {r.suffix}
-                        </span>
-                      )}
-                    </span>
-                    <span className="font-medium">
-                      <span className="text-down">{fmtPercent(r.low, 1)}</span>
-                      {" ~ "}
-                      <span className="text-up">{fmtPercent(r.high, 1)}</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
+        {/* 예측 블록 — 기존 상단 PredictionHero 의 핵심(1일/1주 범위 막대 · 매수/매도 강도 ·
+            손익비 · 손절·목표가 · 오늘 진폭 · 변동성 점수 · 변동성 모델 · 이벤트 부풀림)
+            을 카드 안으로 흡수. 모바일에서 카드 자체로 결정 가능하도록. */}
+        <PredictionBlock snap={snap} krwRate={krwRate} />
 
         {/* 컨센서스 한 줄 — 평균 목표가, 상승여력, Strong Buy / Buy / Hold 분포.
             한국 종목인 경우 국내(국내 N사) 평균 + 통합 평균 두 줄로 분리 노출. */}

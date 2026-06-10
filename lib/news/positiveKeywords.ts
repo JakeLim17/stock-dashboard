@@ -206,6 +206,53 @@ export const POSITIVE_KEYWORDS: OpportunityKeyword[] = [
     category: "M&A",
     label: "파트너십",
   },
+
+  // ── 한국어 약·중간 호재 보강 (Round 4) ────────────────────
+  // 단독으로 호재 분류가 가능하도록 weight 2~3 범위. 너무 일반적인 단어("성공",
+  // "확대")는 weight 1 로 차등. classifySentiment 임계값(1.5)과 맞물려 약 신호도 잡힘.
+  { pattern: /(신고가\s*경신|신고가)/i, weight: 4, category: "실적호조", label: "신고가" },
+  { pattern: /(흑자|흑자\s*기록)/i, weight: 3, category: "실적호조", label: "흑자" },
+  { pattern: /(컨센서스\s*상회|컨센\s*상회)/i, weight: 4, category: "실적호조", label: "컨센 상회" },
+  { pattern: /(가이던스\s*상향|가이던스\s*올림)/i, weight: 4, category: "실적호조", label: "가이던스 상향" },
+  { pattern: /(자사주\s*매입|자사주\s*소각|자사주\s*소각|buyback)/i, weight: 3, category: "정책호재", label: "자사주" },
+  { pattern: /(배당\s*인상|배당\s*확대|배당금\s*증액)/i, weight: 3, category: "정책호재", label: "배당 인상" },
+  { pattern: /(주가\s*급등|급등|폭등)/i, weight: 3, category: "실적호조", label: "급등" },
+  { pattern: /(반등|회복세|회복)/i, weight: 2, category: "실적호조", label: "반등" },
+  { pattern: /(강세|호조|호황)/i, weight: 2, category: "실적호조", label: "강세" },
+  { pattern: /(수혜주?|수혜\s*기대)/i, weight: 2, category: "정책호재", label: "수혜" },
+  { pattern: /(매수\s*추천|비중\s*확대)/i, weight: 4, category: "목표가 상향", label: "매수 추천" },
+  { pattern: /(분기\s*최대|분기\s*역대)/i, weight: 3, category: "실적호조", label: "분기 최대" },
+  { pattern: /(시장\s*진출|해외\s*진출|글로벌\s*진출)/i, weight: 2, category: "신제품/기술", label: "진출" },
+  { pattern: /(증가|성장)/i, weight: 1, category: "실적호조", label: "증가" },
+  { pattern: /(확대)/i, weight: 1, category: "실적호조", label: "확대" },
+  { pattern: /(성공)/i, weight: 1, category: "실적호조", label: "성공" },
+
+  // ── 영어 호재 (Round 4) — word boundary 사용 ──────────────
+  // 단어 경계(\b)로 substring 오탐 방지. 예: "miss" 가 "mission" 안에 매칭되는 일은 없음.
+  // 한국어 substring 매칭과 달리 영어는 형태소 변형이 많아 \b 필수.
+  { pattern: /\b(surge|surges|surged|surging)\b/i, weight: 3, category: "실적호조", label: "surge" },
+  { pattern: /\b(jump|jumps|jumped|jumping)\b/i, weight: 3, category: "실적호조", label: "jump" },
+  { pattern: /\b(soar|soars|soared|soaring)\b/i, weight: 4, category: "실적호조", label: "soar" },
+  { pattern: /\b(rally|rallies|rallied)\b/i, weight: 3, category: "실적호조", label: "rally" },
+  { pattern: /\bbeat(s|ing)?\b/i, weight: 4, category: "실적호조", label: "beat" },
+  { pattern: /\b(exceed|exceeds|exceeded)\b/i, weight: 3, category: "실적호조", label: "exceed" },
+  { pattern: /\b(record|all-time)\s+(high|profit|quarter|revenue|earnings)\b/i, weight: 4, category: "실적호조", label: "record high" },
+  { pattern: /\b(top-line|topline)\s+(growth|beat)\b/i, weight: 3, category: "실적호조", label: "top-line beat" },
+  { pattern: /\b(raised|raises|raise)\s+(guidance|outlook|target)\b/i, weight: 4, category: "실적호조", label: "guidance raise" },
+  { pattern: /\b(upgrade|upgraded|upgrades)\b/i, weight: 4, category: "목표가 상향", label: "upgrade" },
+  { pattern: /\b(outperform|outperforms|outperformed|outperforming)\b/i, weight: 3, category: "목표가 상향", label: "outperform" },
+  { pattern: /\b(buy\s+rating|strong\s+buy)\b/i, weight: 4, category: "목표가 상향", label: "buy rating" },
+  { pattern: /\b(bullish)\b/i, weight: 3, category: "목표가 상향", label: "bullish" },
+  { pattern: /\b(breakthrough)\b/i, weight: 3, category: "신제품/기술", label: "breakthrough" },
+  { pattern: /\b(partnership|partnerships)\b/i, weight: 2, category: "M&A", label: "partnership" },
+  { pattern: /\b(acquire|acquires|acquired|acquisition)\b/i, weight: 3, category: "M&A", label: "acquisition" },
+  { pattern: /\b(expansion|expanding|expand)\b/i, weight: 2, category: "신제품/기술", label: "expansion" },
+  { pattern: /\b(contract\s+win|wins\s+contract|awarded)\b/i, weight: 4, category: "수주/계약", label: "contract win" },
+  { pattern: /\b(profit|profits|profitable)\b/i, weight: 2, category: "실적호조", label: "profit" },
+  { pattern: /\b(growth|growing|grew)\b/i, weight: 2, category: "실적호조", label: "growth" },
+  { pattern: /\b(gain|gains|gained|gaining)\b/i, weight: 2, category: "실적호조", label: "gain" },
+  { pattern: /\b(rise|rises|rose|rising)\b/i, weight: 1, category: "실적호조", label: "rise" },
+  { pattern: /\b(stock\s+split|dividend\s+(hike|increase|raise|boost))\b/i, weight: 3, category: "정책호재", label: "dividend hike" },
 ];
 
 // 헤드라인 1개에서 매칭된 키워드 전부 반환. 같은 라벨 dedupe.

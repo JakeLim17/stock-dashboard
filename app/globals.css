@@ -49,6 +49,9 @@
 html, body {
   background: var(--background);
   color: var(--foreground);
+  /* 모바일에서 어떤 자식이 viewport 폭을 넘기더라도 페이지가 가로 스크롤·우측 잘림으로 깨지지 않게 가드.
+     진짜 overflow 원인은 별도 진단 — 일단 시각적 안정성 확보. */
+  overflow-x: hidden;
   font-family: var(--font-sans), -apple-system, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -127,8 +130,26 @@ html, body {
   animation: login-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 종목 카드 mount 시 순차 fade-in — DashboardClient 가 카드별로 animationDelay 부여.
+   "한꺼번에 다 떠 보이는" 인지 부담을 줄이고 스켈레톤 → 실데이터 전환을 매끄럽게.
+   forwards (=both) 로 종료 상태 유지 — 폴링으로 데이터가 갱신돼도 다시 fade 되지 않는다. */
+@keyframes card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-fade-in {
+  animation: card-fade-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .login-fade-up {
+  .login-fade-up,
+  .card-fade-in {
     animation: none !important;
   }
 }

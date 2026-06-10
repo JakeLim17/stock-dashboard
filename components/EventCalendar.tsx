@@ -34,6 +34,12 @@ const STYLE_BY_KIND: Record<EventKind, EventStyle> = {
   fomc: { emoji: "🇺🇸", variant: "warn", shortKindLabel: "FOMC" },
   kospi_expiry: { emoji: "🔁", variant: "neutral", shortKindLabel: "만기" },
   holiday: { emoji: "🌙", variant: "neutral", shortKindLabel: "휴장" },
+  // Fix4 — 매크로 이벤트 추가 (한국 금통위/미 CPI·PPI·NFP/한국 수출입)
+  bok_rate: { emoji: "🏦", variant: "warn", shortKindLabel: "금통위" },
+  us_cpi: { emoji: "📈", variant: "warn", shortKindLabel: "CPI" },
+  us_ppi: { emoji: "🏭", variant: "neutral", shortKindLabel: "PPI" },
+  us_nfp: { emoji: "💼", variant: "warn", shortKindLabel: "고용" },
+  kr_trade: { emoji: "🚢", variant: "neutral", shortKindLabel: "수출입" },
 };
 
 export function EventCalendar({ snapshot }: Props) {
@@ -53,9 +59,12 @@ export function EventCalendar({ snapshot }: Props) {
     });
   }, [snapshot.primaries, snapshot.macroEvents]);
 
-  // 7일/30일 컷
-  const cutoffMs = Date.now() + (expanded ? 30 : 7) * 86_400_000;
-  const visible = allEvents.filter((e) => e.date <= cutoffMs);
+  // 기본 4건 + 더보기로 60일 전체. 사용자 요청: "각각 3~4개씩만 보여주고 더보기로".
+  // 좌(시장신호 default 4개) 와 행 높이 매칭.
+  const DEFAULT_LIMIT = 4;
+  const cutoffMs = Date.now() + (expanded ? 60 : 30) * 86_400_000;
+  const filtered = allEvents.filter((e) => e.date <= cutoffMs);
+  const visible = expanded ? filtered : filtered.slice(0, DEFAULT_LIMIT);
   const hiddenCount = allEvents.length - visible.length;
 
   if (allEvents.length === 0) {
@@ -96,7 +105,7 @@ export function EventCalendar({ snapshot }: Props) {
         <CardBody className="space-y-1.5">
           {visible.length === 0 ? (
             <p className="text-xs text-muted-foreground py-2">
-              {expanded ? "30일" : "7일"} 이내 이벤트 없음
+              {expanded ? "60일" : "30일"} 이내 이벤트 없음
             </p>
           ) : (
             visible.map((e, i) => <EventRow key={rowKey(e, i)} event={e} />)
@@ -107,21 +116,16 @@ export function EventCalendar({ snapshot }: Props) {
               onClick={() => setExpanded(true)}
               className="text-xs text-accent hover:underline mt-1 inline-flex items-center gap-1"
             >
-              30일까지 {hiddenCount}건 더 보기
+              {hiddenCount}건 더 보기 (60일 기준)
             </button>
           )}
-          {expanded && allEvents.length > visible.length && (
-            <p className="text-[11px] text-muted-foreground mt-1">
-              · 30일 초과 이벤트는 카드에 따로 노출됩니다.
-            </p>
-          )}
-          {expanded && hiddenCount === 0 && allEvents.length > 0 && (
+          {expanded && (
             <button
               type="button"
               onClick={() => setExpanded(false)}
               className="text-xs text-muted-foreground hover:underline mt-1"
             >
-              7일만 보기
+              접기
             </button>
           )}
           <p className="text-[10px] text-muted-foreground/80 leading-snug pt-1">

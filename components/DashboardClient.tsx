@@ -11,12 +11,11 @@ import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
-import { PredictionHero } from "./PredictionHero";
 import {
   StockDetailPanel,
   type StockDetailPanelHandle,
 } from "./StockDetailPanel";
-import { PriceChart } from "./PriceChart";
+import { MobileDetailSheet } from "./MobileDetailSheet";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
@@ -108,6 +107,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [useOverseasNight, setUseOverseasNight] = useState(false);
+  // 모바일(lg 미만)에서 카드 탭 시 띄우는 상세 sheet 모달 open 여부.
+  // 데스크탑에서도 setSheetOpen(true) 자체는 호출되지만, MobileDetailSheet 컴포넌트가
+  // `lg:hidden` 으로 자기 자신을 가리므로 화면엔 영향 없음.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>("");
@@ -115,7 +118,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const bootedRef = useRef(false);
   const watchCodesRef = useRef(watchCodes);
   const overseasNightRef = useRef(useOverseasNight);
-  // PredictionHero 클릭 시 StockDetailPanel "예측" 탭으로 이동.
+  // 모바일 sheet "예측" 탭 점프 등 외부 제어용 ref. 데스크탑/모바일 양쪽 동일 사용.
   const detailRef = useRef<StockDetailPanelHandle>(null);
   useEffect(() => {
     watchCodesRef.current = watchCodes;
@@ -343,10 +346,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">
-            실시간 주식 대시보드
+            Ticker
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            반도체 중심 · 룰 기반 판단 보조
+            룰 기반 판단 보조
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -518,10 +521,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
       />
 
-      {/* 시장 순위 — KIS 활성 시 거래량/상승/하락 TOP. 기본 접힘. */}
-      <MarketLeadersPanel />
-
-      {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
+      {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시.
+          Round2 Fix8: 시장순위 위로 이동 (사용자가 테마 → 순위 흐름으로 보고 싶어함). */}
       <ThemeGroupView
         indicators={snap.indicators}
         watchlist={watchCodes}
@@ -529,31 +530,47 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         maxWatch={MAX_WATCH}
       />
 
-      {/* 예측 Hero — 선택 종목 단기 예측을 큰 시각으로. 클릭하면 아래 상세 패널 "예측" 탭으로 이동. */}
-      <PredictionHero
-        snap={selectedSnap}
-        onJumpToPrediction={() => detailRef.current?.jumpTo("prediction")}
-        krwRate={krwRate}
-      />
+      {/* 시장 순위 — KIS 활성 시 거래량/상승/하락 TOP. 기본 접힘.
+          Round2 Fix8: 테마별 보기 아래로 이동. */}
+      <MarketLeadersPanel />
 
-      {/* 종목 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급·뉴스]. 기존 PredictionPanel + ConsensusPanel 통합 */}
-      <StockDetailPanel
-        ref={detailRef}
-        snap={selectedSnap}
-        allNews={snap.news}
-        krwRate={krwRate}
-      />
+      {/* 종목 디테일 패널 (데스크탑 전용 고정) — 탭 구조 [예측 | 컨센서스 | 수급 | 호가 | 뉴스].
+          Round2 Fix7: 카드 그리드 위로 이동 — 사용자가 카드 클릭하면 위에서 바로 상세분석이 보이도록.
+          첫 진입에는 selectedSnap 이 첫 카드로 폴백되어 빈 패널 깜빡임 없음.
+          모바일(lg 미만)에서는 별도 MobileDetailSheet 모달이 카드 탭 시 슬라이드 업한다. */}
+      <div className="hidden lg:block">
+        <StockDetailPanel
+          ref={detailRef}
+          snap={selectedSnap}
+          allNews={snap.news}
+          krwRate={krwRate}
+          kisActive={snap.kisActive}
+        />
+      </div>
 
-      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용. 모바일·데스크탑 동일 노출. */}
+      {/* 종목 카드 grid — 카드 자체에 예측·강도·손익비 등 PredictionHero 의 핵심을 흡수했다.
+          데스크탑은 위쪽 StockDetailPanel(고정) 노출 + 카드는 비교용. 모바일은 카드 탭 시 sheet 모달.
+          카드별 mount 시 짧은 fade-in + slide(60ms 간격) 시각 효과. */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {snap.primaries.map((p) => (
-          <StockCard
+        {snap.primaries.map((p, i) => (
+          <div
             key={p.meta.code}
-            snap={p}
-            selected={p.meta.code === selected}
-            onSelect={setSelected}
-            krwRate={krwRate}
-          />
+            className="card-fade-in"
+            style={{ animationDelay: `${i * 60}ms` }}
+          >
+            <StockCard
+              snap={p}
+              selected={p.meta.code === selected}
+              onSelect={(code) => {
+                setSelected(code);
+                // 모바일에서는 모달 오픈. 데스크탑에선 MobileDetailSheet 컴포넌트가 lg:hidden
+                // 자체 가드라 setSheetOpen(true) 호출이 화면에 영향 없음.
+                setSheetOpen(true);
+              }}
+              krwRate={krwRate}
+              kisActive={snap.kisActive}
+            />
+          </div>
         ))}
         {snap.primaries.length === 0 && (
           <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
@@ -562,30 +579,27 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         )}
       </div>
 
+      {/* 모바일 sheet 모달 — 자체적으로 lg:hidden 가드 + open 상태에 따라 슬라이드 인/아웃 */}
+      <MobileDetailSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        snap={selectedSnap ?? null}
+        allNews={snap.news}
+        krwRate={krwRate}
+        kisActive={snap.kisActive}
+      />
+
       {error && (
         <div className="rounded-xl border border-down/30 bg-down/10 text-down text-sm px-4 py-3">
           {error}
         </div>
       )}
 
-      {/* 차트 + 마켓 시장신호 (예측은 아래 별도 행) */}
-      {/* grid items-stretch(기본) + 왼쪽 wrapper flex로 PriceChart 카드와 차트 영역을 오른쪽 컬럼 높이까지 stretch. */}
-      {/* PriceChart는 autoSize:true 이므로 컨테이너가 자라면 차트도 자동 follow. 컴포넌트 내부 수정 없이 outer wrapper만 조정. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col [&>div>div:last-child]:flex-1 [&>div>div:last-child]:!h-auto [&>div>div:last-child]:min-h-[280px]">
-          {selectedSnap && (
-            <PriceChart
-              code={selectedSnap.meta.code}
-              name={selectedSnap.meta.name}
-              currentPrice={selectedSnap.quote.price}
-            />
-          )}
-        </div>
-        <div className="flex flex-col gap-4">
-          <MarketPanel indicators={snap.indicators} />
-          {/* 이벤트 캘린더 — 실적·배당·FOMC·KOSPI 만기·휴장 D-N. 마켓 패널 아래 같은 우측 컬럼. */}
-          <EventCalendar snapshot={snap} />
-        </div>
+      {/* 시장 신호 + 이벤트 캘린더 — 차트는 카드별 sparkline 으로 대체되어 메인에서 제거됐다.
+          (selected 종목의 풀 차트는 StockDetailPanel "예측" 탭에서 별도 노출 가능.) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MarketPanel indicators={snap.indicators} />
+        <EventCalendar snapshot={snap} />
       </div>
 
       {/* 뉴스 */}

@@ -24,7 +24,7 @@ export function BrandHeader() {
             </div>
           </div>
           <h1 className="text-xl font-semibold tracking-tight">
-            실시간 주식 대시보드
+            Ticker
           </h1>
         </div>
 

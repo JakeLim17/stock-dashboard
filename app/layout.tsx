@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "실시간 주식 대시보드",
-  description: "삼성전자 · SK하이닉스 · 삼성전기 + 반도체 시장 신호",
+  title: "Ticker — 룰 기반 판단 보조",
+  description: "실시간 주식 시세 + 룰 기반 매매 판단 보조 대시보드",
 };
 
 // FOUC 방지: hydration 전에 .dark 클래스 적용

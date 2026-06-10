@@ -181,6 +181,92 @@ const FOMC_DATES_2026: Array<[number, number, number]> = [
 // 2027년 1월까지 (연말~연초 사용자 노출용)
 const FOMC_DATES_2027: Array<[number, number, number]> = [[2027, 1, 27]];
 
+// ── 한국은행 금융통화위원회 (BOK) 2026 기준금리 결정 일정 ─────────────────────
+// 출처: bok.or.kr 통화정책방향 결정회의 일정.
+// 시간대: 한국 오전 (10:00~11:00). 발표 직후 KOSPI·USDKRW 변동성 확대.
+const BOK_DATES_2026: Array<[number, number, number]> = [
+  [2026, 1, 22],
+  [2026, 2, 26],
+  [2026, 4, 9],
+  [2026, 5, 28],
+  [2026, 7, 9],
+  [2026, 8, 27],
+  [2026, 10, 15],
+  [2026, 11, 26],
+];
+
+// ── 미국 CPI (소비자물가지수) 발표 일정 ────────────────────────────────────
+// 출처: bls.gov "Consumer Price Index" — 매월 둘째 또는 셋째 화·수요일 (월별).
+// 시간대: 미 동부 08:30 = KST 21:30 → 한국 야간 시장·환율 즉시 반응.
+// 2026 일정 (BLS scheduled releases, dates may shift ±1 day if revised).
+const US_CPI_DATES_2026: Array<[number, number, number]> = [
+  [2026, 1, 14],
+  [2026, 2, 11],
+  [2026, 3, 11],
+  [2026, 4, 14],
+  [2026, 5, 12],
+  [2026, 6, 10],
+  [2026, 7, 14],
+  [2026, 8, 12],
+  [2026, 9, 10],
+  [2026, 10, 14],
+  [2026, 11, 12],
+  [2026, 12, 10],
+];
+
+// ── 미국 PPI (생산자물가지수) 발표 일정 ────────────────────────────────────
+// 보통 CPI 다음 날 또는 같은 주 후반. 2026 일정 (BLS).
+const US_PPI_DATES_2026: Array<[number, number, number]> = [
+  [2026, 1, 15],
+  [2026, 2, 12],
+  [2026, 3, 12],
+  [2026, 4, 15],
+  [2026, 5, 13],
+  [2026, 6, 11],
+  [2026, 7, 15],
+  [2026, 8, 13],
+  [2026, 9, 11],
+  [2026, 10, 15],
+  [2026, 11, 13],
+  [2026, 12, 11],
+];
+
+// ── 미국 NFP (비농업 고용지표 + 실업률) 발표 일정 ──────────────────────────
+// 매월 첫째 금요일 (BLS Employment Situation Report). 미 동부 08:30 = KST 21:30.
+// 2026 첫째 금요일 (1/2 = 새해 직후라 1/9로 이동되는 경우 있음, BLS 공식 schedule).
+const US_NFP_DATES_2026: Array<[number, number, number]> = [
+  [2026, 1, 9],
+  [2026, 2, 6],
+  [2026, 3, 6],
+  [2026, 4, 3],
+  [2026, 5, 1],
+  [2026, 6, 5],
+  [2026, 7, 2],   // 7/3 독립기념일 직전이라 7/2 발표
+  [2026, 8, 7],
+  [2026, 9, 4],
+  [2026, 10, 2],
+  [2026, 11, 6],
+  [2026, 12, 4],
+];
+
+// ── 한국 수출입 통계 (관세청) 매월 초 발표 ────────────────────────────────
+// 매월 1일 (휴장 시 직전 영업일) 09:00 KST 발표. 무역수지·반도체 수출 등이 KOSPI 즉시 영향.
+// 2026 — 1일이 토·일·휴장이면 직전 영업일로.
+const KR_TRADE_DATES_2026: Array<[number, number, number]> = [
+  [2026, 1, 2],   // 1/1 신정 → 1/2
+  [2026, 2, 2],   // 2/1 일요일 → 2/2
+  [2026, 3, 2],   // 3/1 일요일 → 3/2
+  [2026, 4, 1],
+  [2026, 5, 1],
+  [2026, 6, 1],
+  [2026, 7, 1],
+  [2026, 8, 3],   // 8/1 토요일 → 8/3
+  [2026, 9, 1],
+  [2026, 10, 1],
+  [2026, 11, 2],  // 11/1 일요일 → 11/2
+  [2026, 12, 1],
+];
+
 // ── KRX 2026 휴장일 (정규장 휴장) ──────────────────────────────────────────
 // 출처: krx.co.kr 휴장일 공시 + 한국 공휴일 정상 추정.
 // 휴장일 = 공휴일 + 대체공휴일 + 12월 31일 연말 휴장.
@@ -230,6 +316,61 @@ function buildMacroEvents(): EventItem[] {
       date: kstMidnight(y, m, d),
       importance: "high",
       detail: "미 연준 정책금리·점도표 — 한국 정규장 당일 변동성 확대",
+    });
+  }
+
+  // 한국은행 금통위 (Fix4)
+  for (const [y, m, d] of BOK_DATES_2026) {
+    items.push({
+      kind: "bok_rate",
+      label: "한국은행 금통위 (기준금리)",
+      date: kstMidnight(y, m, d),
+      importance: "high",
+      detail: "한은 통화정책방향 — KOSPI·USDKRW 즉시 반응",
+    });
+  }
+
+  // 미국 CPI
+  for (const [y, m, d] of US_CPI_DATES_2026) {
+    items.push({
+      kind: "us_cpi",
+      label: "미국 CPI (소비자물가)",
+      date: kstMidnight(y, m, d),
+      importance: "high",
+      detail: "미 동부 08:30 (KST 21:30) — 인플레 지표, 미국 시장 강한 반응",
+    });
+  }
+
+  // 미국 PPI
+  for (const [y, m, d] of US_PPI_DATES_2026) {
+    items.push({
+      kind: "us_ppi",
+      label: "미국 PPI (생산자물가)",
+      date: kstMidnight(y, m, d),
+      importance: "medium",
+      detail: "미 동부 08:30 (KST 21:30) — CPI 선행지표 성격",
+    });
+  }
+
+  // 미국 NFP
+  for (const [y, m, d] of US_NFP_DATES_2026) {
+    items.push({
+      kind: "us_nfp",
+      label: "미국 고용보고서 (NFP)",
+      date: kstMidnight(y, m, d),
+      importance: "high",
+      detail: "비농업 고용·실업률·시간당 임금 — 미 동부 08:30 (KST 21:30)",
+    });
+  }
+
+  // 한국 수출입
+  for (const [y, m, d] of KR_TRADE_DATES_2026) {
+    items.push({
+      kind: "kr_trade",
+      label: "한국 수출입 통계",
+      date: kstMidnight(y, m, d),
+      importance: "medium",
+      detail: "관세청 09:00 KST — 반도체·자동차 수출 KOSPI 영향",
     });
   }
 

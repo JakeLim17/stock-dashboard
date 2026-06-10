@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, Trophy } from "lucide-react";
 import type {
   MarketLeader,
   MarketLeadersData,
   MarketLeadersKind,
   MarketLeadersMarket,
 } from "@/lib/types";
-import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
+import { Card, CardBody } from "./ui/Card";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 거래량 / 상승 / 하락 TOP — KIS 활성 시만 동작. 30s 캐시.
@@ -66,21 +67,37 @@ export function MarketLeadersPanel() {
   }, [open, fetchData]);
 
   return (
-    <Card>
-      <CardHeader className="flex items-start justify-between gap-3 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-2 text-left"
-        >
-          <CardTitle>시장 순위 (KIS)</CardTitle>
-          <span className="text-xs text-muted-foreground">
-            {open ? "▴ 접기" : "▾ 펴기"}
-          </span>
-        </button>
-        {open && (
+    <Card className="border-accent/20">
+      {/* 헤더 — ThemeGroupView / RecommendationsPanel 와 동일한 패턴
+          (아이콘 + 제목 + 보조설명 + 우측 ChevronDown). */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-muted/30 transition-colors rounded-2xl"
+        aria-expanded={open}
+      >
+        <Trophy className="h-4 w-4 text-accent shrink-0" />
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {/* kind 토글 */}
+            <span className="text-sm font-semibold">시장 순위 (KIS)</span>
+            <span className="text-[11px] text-muted-foreground">
+              {open
+                ? `${KIND_LABEL[kind]} · ${MARKET_LABEL[market]}`
+                : "거래량·상승·하락 TOP 10 (KIS 실시간)"}
+            </span>
+          </div>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${
+            open ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+
+      {open && (
+        <CardBody className="pt-0">
+          {/* kind / market 토글 — 펼침 후 본문 상단에 한 줄로 배치 */}
+          <div className="flex items-center gap-2 flex-wrap mb-3">
             <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
               {(Object.keys(KIND_LABEL) as MarketLeadersKind[]).map((k) => {
                 const active = kind === k;
@@ -100,7 +117,6 @@ export function MarketLeadersPanel() {
                 );
               })}
             </div>
-            {/* market 토글 */}
             <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
               {(Object.keys(MARKET_LABEL) as MarketLeadersMarket[]).map((m) => {
                 const active = market === m;
@@ -121,11 +137,7 @@ export function MarketLeadersPanel() {
               })}
             </div>
           </div>
-        )}
-      </CardHeader>
 
-      {open && (
-        <CardBody>
           {loading && !data && (
             <div className="text-center py-6 text-sm text-muted-foreground">
               불러오는 중…
