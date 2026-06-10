@@ -572,7 +572,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       {/* grid items-stretch(기본) + 왼쪽 wrapper flex로 PriceChart 카드와 차트 영역을 오른쪽 컬럼 높이까지 stretch. */}
       {/* PriceChart는 autoSize:true 이므로 컨테이너가 자라면 차트도 자동 follow. 컴포넌트 내부 수정 없이 outer wrapper만 조정. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col [&>div>div:last-child]:flex-1 [&>div>div:last-child]:!h-auto [&>div>div:last-child]:min-h-[280px]">
+        <div className="lg:col-span-2 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col [&>div>div:last-child]:flex-1 [&>div>div:last-child]:!h-auto [&>div>div:last-child]:min-h-[320px]">
           {selectedSnap && (
             <PriceChart
               code={selectedSnap.meta.code}

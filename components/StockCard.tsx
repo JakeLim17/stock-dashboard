@@ -13,6 +13,7 @@ import { SignalMarkBadges } from "./SignalMarkBadges";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
+import { Sparkline } from "./Sparkline";
 import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
@@ -102,7 +103,7 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
       </CardHeader>
       <CardBody className="space-y-4">
         {/* 가격 — 메인은 항상 "지금 진행 중인 거래". 시간외 거래중이면 시간외가 메인. */}
-        <div className="flex items-end justify-between">
+        <div className="flex items-end justify-between gap-3">
           <div>
             <div className={`text-3xl font-bold ${changeColor(primary.changeRate)}`}>
               <PriceTicker value={primary.price} decimals={0} />
@@ -166,9 +167,24 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
               })()
             ) : null}
           </div>
-          <div className="text-right text-xs text-muted-foreground space-y-1">
-            <div>고가 <span className="tabular text-foreground">{fmtNumber(quote.high, 0)}</span></div>
-            <div>저가 <span className="tabular text-foreground">{fmtNumber(quote.low, 0)}</span></div>
+          <div className="shrink-0 text-right space-y-2">
+            {snap.closeHistory && snap.closeHistory.length >= 2 && (
+              <div className="rounded-lg border border-border/70 bg-muted/25 px-2.5 py-2">
+                <div className="mb-1 text-[10px] text-muted-foreground">30일 추세</div>
+                <Sparkline
+                  data={snap.closeHistory}
+                  width={96}
+                  height={30}
+                  up={primary.changeRate >= 0}
+                  strokeWidth={1.8}
+                  className="opacity-95"
+                />
+              </div>
+            )}
+            <div className="text-xs text-muted-foreground space-y-1">
+              <div>고가 <span className="tabular text-foreground">{fmtNumber(quote.high, 0)}</span></div>
+              <div>저가 <span className="tabular text-foreground">{fmtNumber(quote.low, 0)}</span></div>
+            </div>
           </div>
         </div>
 

@@ -462,6 +462,10 @@ export async function fetchWatchlistSnapshots(
         }),
         4
       );
+      const closeHistory = hist
+        .map((p) => p.close)
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .slice(-30);
 
       return {
         meta,
@@ -478,6 +482,7 @@ export async function fetchWatchlistSnapshots(
         upcomingEvents,
         programTrade,
         shortBalance,
+        closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
       };
     })
   );

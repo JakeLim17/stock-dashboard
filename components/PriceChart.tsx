@@ -83,7 +83,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     bucketMs: number;
   } | null>(null);
 
-  const [tf, setTf] = useState<Timeframe>("1m");
+  const [tf, setTf] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ChartMode>("domestic");
   const [loading, setLoading] = useState(true);
   const [empty, setEmpty] = useState(false);
@@ -118,11 +118,17 @@ export function PriceChart({ code, name, currentPrice }: Props) {
         fontFamily: "inherit",
       },
       grid: {
-        vertLines: { color: dark ? "#1a1f2b" : "#eef0f3" },
-        horzLines: { color: dark ? "#1a1f2b" : "#eef0f3" },
+        vertLines: { color: dark ? "#202637" : "#e7ebf0" },
+        horzLines: { color: dark ? "#202637" : "#e7ebf0" },
       },
-      rightPriceScale: { borderColor: "transparent" },
-      timeScale: { borderColor: "transparent", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: dark ? "#273042" : "#d9dee7" },
+      timeScale: {
+        borderColor: dark ? "#273042" : "#d9dee7",
+        timeVisible: true,
+        secondsVisible: false,
+        barSpacing: 10,
+        minBarSpacing: 6,
+      },
       crosshair: { mode: 1 },
     });
     chartRef.current = chart;
@@ -368,9 +374,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     }
   }, [currentPrice]);
 
-  const tfButtons: Timeframe[] = isKr
-    ? ["1m", "5m", "15m", "1D", "tick"]
-    : ["1D"];
+  const tfButtons: Timeframe[] = isKr ? ["5m", "15m", "1D"] : ["1D"];
 
   return (
     <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
@@ -426,7 +430,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
           </div>
         </div>
       </div>
-      <div className="relative h-[280px]">
+      <div className="relative h-[340px] min-h-[320px]">
         <div ref={ref} className="absolute inset-0" />
         {loading && (
           <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
