@@ -37,12 +37,15 @@ npm run start
 | 키 | 필수 | 설명 |
 |---|---|---|
 | `DASHBOARD_PASS` | 권장 | 비밀번호. 설정 시 `/login`에서 1회 입력 후 30일 자동 통과 |
+| `KIS_ENABLED` | 선택 | `0`/`false`로 두면 KIS 호출 비활성화. 기본값은 활성 |
 | `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
 | `KIS_APP_SECRET` | 선택 | 동 시크릿 |
 | `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |
 
 **Vercel 공개 배포에선 `DASHBOARD_PASS` 설정 권장** — 봇 크롤로 인한 함수 호출 폭주를 막아줍니다. 한 번 로그인하면 같은 브라우저에서 30일 동안 비번을 다시 묻지 않습니다.
-**KIS 키를 비워두면 외인/기관 수급은 mock data로 표시** (UI 깨짐 방지). 시세·뉴스는 무료 소스만으로 정상 동작.
+**KIS 토큰은 발급 시 알림톡/SMS가 올 수 있습니다.** 앱은 토큰을 `data/kis-token.json`에 저장해 만료 전까지 재사용합니다.
+KIS는 한국/미국 현재가에만 사용하고, 지수·일봉·수급·부가데이터는 빠른 기존 경로를 사용합니다.
+문자 폭주 등 장애 대응이 필요할 때만 `KIS_ENABLED=0`으로 끄면 됩니다.
 
 ## 디렉토리 구조
 
@@ -152,10 +155,10 @@ DashboardClient (60s polling)
 # 1) Vercel 대시보드에서 "New Project" → GitHub repo "stock-dashboard" import
 # 2) Framework Preset: Next.js (자동 감지)
 # 3) Build / Output / Install 기본값 그대로
-# 4) Environment Variables (선택)에 KIS 키 입력 (없어도 동작)
-#    - KIS_APP_KEY
-#    - KIS_APP_SECRET
-#    - KIS_BASE_URL  (예: https://openapivts.koreainvestment.com:29443 — 모의)
+# 4) Environment Variables (선택)
+#    - DASHBOARD_PASS
+#    - KIS_ENABLED=0 은 장애 대응용 비활성화 스위치
+#    - KIS_APP_KEY / KIS_APP_SECRET / KIS_BASE_URL
 # 5) Deploy
 ```
 

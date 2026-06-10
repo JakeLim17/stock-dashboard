@@ -10,17 +10,14 @@ import {
   fetchNewsForSymbols,
   reclassifyWithTitleKo,
   riskKeywords,
+  fetchYahooQuotesBatch,
 } from "./providers";
 import { translateTitleToKo } from "./news/translation";
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
-import {
-  getProgramTradeCached,
-  getShortBalanceCached,
-} from "./providers/kisExtraCache";
-import { kisEnabled } from "./providers/kis";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
+import { kisEnabled } from "./providers/kis";
 import {
   fetchEventsForSymbol,
   getMacroEventsCached,
@@ -100,7 +97,7 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
   // history는 (1) KRW=X 변동성 σ 계산, (2) 모든 카드의 Sparkline 렌더에 사용.
   // 실패한 심볼은 빈 배열로 fallback — 시세는 살아 있을 수 있으므로 카드 자체는 그대로 노출.
   const [indicatorResults, historyResults] = await Promise.all([
-    fetchQuotesBatch(MARKET_INDICATORS),
+    fetchYahooQuotesBatch(MARKET_INDICATORS),
     Promise.all(
       MARKET_INDICATORS.map((meta) =>
         fetchHistorical(meta.code, 35).catch(() => [])
@@ -437,16 +434,12 @@ export async function fetchWatchlistSnapshots(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      // 한국 종목 + KIS 활성 시: 프로그램 매매 + 공매도 잔고 병렬 fetch (각각 60s/5min 캐시).
-      const wantsKisExtras = kisEnabled() && isKrStock(meta.code);
       const [
         quoteRes,
         hist,
         bundle,
         marketAlert,
         upcomingEvents,
-        programTrade,
-        shortBalance,
       ] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
@@ -459,12 +452,6 @@ export async function fetchWatchlistSnapshots(
           ? getMarketAlertCached(meta.code).catch(() => null)
           : Promise.resolve(null),
         fetchEventsForSymbol(meta).catch(() => []),
-        wantsKisExtras
-          ? getProgramTradeCached(meta.code).catch(() => null)
-          : Promise.resolve(null),
-        wantsKisExtras
-          ? getShortBalanceCached(meta.code).catch(() => null)
-          : Promise.resolve(null),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
@@ -608,6 +595,10 @@ export async function fetchWatchlistSnapshots(
         }),
         4
       );
+      const closeHistory = hist
+        .map((p) => p.close)
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .slice(-30);
 
       return {
         meta,
@@ -622,8 +613,9 @@ export async function fetchWatchlistSnapshots(
         researches,
         signalMarks,
         upcomingEvents,
-        programTrade,
-        shortBalance,
+        programTrade: null,
+        shortBalance: null,
+        closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
       };
     })
   );

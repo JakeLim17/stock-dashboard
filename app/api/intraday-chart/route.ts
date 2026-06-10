@@ -3,7 +3,10 @@ import { kisEnabled } from "@/lib/providers/kis";
 import { getIntradayCandlesCached } from "@/lib/providers/kisExtraCache";
 import type { HistoricalPoint } from "@/lib/providers/yahoo";
 import { isKrStock } from "@/lib/providers/naver";
-import { fetchNaverExtendedCandles } from "@/lib/providers/naverExtended";
+import {
+  fetchNaverExtendedCandles,
+  type ExtendedHoursCandle,
+} from "@/lib/providers/naverExtended";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +50,7 @@ export async function GET(req: Request) {
     const [raw, extendedRaw] = await Promise.all([
       getIntradayCandlesCached(code),
       // 시간외 캔들은 정규장이 비어 있어도 fetch — 사용자가 앱장 시각에 차트 열면 시간외만 보일 수 있음.
-      fetchNaverExtendedCandles(code).catch(() => []),
+      fetchNaverExtendedCandles(code).catch((): ExtendedHoursCandle[] => []),
     ]);
     const points = aggregate(raw ?? [], BUCKET_MIN[interval]);
     const extendedPoints = (extendedRaw ?? []).map((c) => ({

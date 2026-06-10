@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import {
-  fetchKrAskingPrice,
-  fetchKrExecutions,
-  kisEnabled,
-} from "@/lib/providers/kis";
-import { isKrStock } from "@/lib/providers/naver";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// 선택 종목 한정 — 호가(10단계) + 실시간 체결 30건.
-// 카드별로 호출하면 throttle 부담이 크므로 선택 종목만 클라이언트가 폴링하도록 별도 endpoint.
-// KIS 미활성 또는 한국 종목 아니면 빈 응답.
+// 호가/체결 폴링 비활성화.
+//
+// 이전 클라이언트 번들이 남아 있으면 이 라우트를 1.5초마다 계속 호출할 수 있다.
+// KIS 토큰 발급 알림(카톡/SMS) 폭주를 막기 위해 서버에서 KIS 호출을 완전히 차단한다.
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -22,21 +17,14 @@ export async function GET(req: Request) {
         { status: 400 }
       );
     }
-    if (!kisEnabled() || !isKrStock(code)) {
-      return NextResponse.json(
-        { asking: null, executions: null },
-        { headers: { "Cache-Control": "no-store" } }
-      );
-    }
-
-    // 호가 + 체결 병렬. 각각 graceful null.
-    const [asking, executions] = await Promise.all([
-      fetchKrAskingPrice(code).catch(() => null),
-      fetchKrExecutions(code, 30).catch(() => null),
-    ]);
 
     return NextResponse.json(
-      { asking, executions },
+      {
+        asking: null,
+        executions: null,
+        disabled: true,
+        reason: "호가/체결 폴링 비활성화",
+      },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (e) {

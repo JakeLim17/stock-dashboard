@@ -662,6 +662,8 @@ export interface StockSnapshot {
   programTrade?: ProgramTradeData | null;
   // 공매도 잔고/거래 정보 — 한국 종목 + KIS 활성 시만 채워짐.
   shortBalance?: ShortBalanceData | null;
+  // 최근 일별 close — 카드 안 미니 추세 차트 렌더용. 최대 ~30개.
+  closeHistory?: number[];
 }
 
 // ─── KIS 신규 데이터 타입 ────────────────────────────────────────────────────
