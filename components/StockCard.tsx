@@ -91,6 +91,8 @@ export function StockCard({ snap, onSelect, selected, krwRate }: {
             <SignalMarkBadges marks={snap.signalMarks} size="sm" />
             {/* 7일 이내 가격 이벤트(실적/배당) D-N — 임박 알림용. 7일 초과는 EventCalendar에서만. */}
             <UpcomingEventBadges events={snap.upcomingEvents} />
+            {/* 공매도 잔고 — KIS 활성 시. 비율 ≥ 2% 면 warn 톤, 그 외 neutral. */}
+            <ShortBalanceBadge short={snap.shortBalance} />
           </div>
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}
@@ -394,6 +396,35 @@ function SignalRow({
         </div>
       )}
     </div>
+  );
+}
+
+// 공매도 잔고 배지 — 비율 ≥ 2.5% 이면 warn, ≥ 1% 이면 neutral, 그 미만 미노출.
+// 데이터 자체가 없으면 미노출 (KIS 비활성 / 응답 실패).
+function ShortBalanceBadge({
+  short,
+}: {
+  short: import("@/lib/types").ShortBalanceData | null | undefined;
+}) {
+  if (!short || short.ratio == null) return null;
+  const pct = short.ratio * 100;
+  if (pct < 1) return null;
+  const tone: "warn" | "neutral" = pct >= 2.5 ? "warn" : "neutral";
+  return (
+    <Badge
+      variant={tone}
+      size="sm"
+      title={`공매도 잔고 비율 ${pct.toFixed(2)}%${
+        short.asOf
+          ? ` · 기준 ${new Date(short.asOf).toLocaleDateString("ko-KR", {
+              month: "2-digit",
+              day: "2-digit",
+            })}`
+          : ""
+      }`}
+    >
+      공매도 {pct.toFixed(1)}%
+    </Badge>
   );
 }
 

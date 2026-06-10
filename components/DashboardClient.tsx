@@ -18,6 +18,7 @@ import {
 } from "./StockDetailPanel";
 import { PriceChart } from "./PriceChart";
 import { RecommendationsPanel } from "./RecommendationsPanel";
+import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
@@ -516,6 +517,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         maxWatch={MAX_WATCH}
         krwRate={krwRate}
       />
+
+      {/* 시장 순위 — KIS 활성 시 거래량/상승/하락 TOP. 기본 접힘. */}
+      <MarketLeadersPanel />
 
       {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
       <ThemeGroupView

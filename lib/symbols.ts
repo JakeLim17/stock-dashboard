@@ -180,7 +180,10 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
 ];
 
 // 시장 지표 패널
+// KOSPI/KOSDAQ는 KIS가 활성이면 우선 조회되고 Yahoo 폴백. 라우팅은 providers/index.ts.
 export const MARKET_INDICATORS: SymbolMeta[] = [
+  { code: "^KS11", name: "코스피", kind: "index" },
+  { code: "^KQ11", name: "코스닥", kind: "index" },
   { code: "NQ=F", name: "나스닥 선물", kind: "future" },
   { code: "^SOX", name: "필라델피아 반도체", kind: "index" },
   { code: "NVDA", name: "엔비디아", kind: "us-stock", isSectorLeader: true, sectorLeaderLabel: "AI 반도체 대장" },

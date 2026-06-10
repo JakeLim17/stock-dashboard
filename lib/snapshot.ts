@@ -11,6 +11,11 @@ import {
 } from "./providers";
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
+import {
+  getProgramTradeCached,
+  getShortBalanceCached,
+} from "./providers/kisExtraCache";
+import { kisEnabled } from "./providers/kis";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import {
@@ -295,20 +300,35 @@ export async function fetchWatchlistSnapshots(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      const [quoteRes, hist, bundle, marketAlert, upcomingEvents] =
-        await Promise.all([
-          fetchQuotesBatch([meta]).then((r) => r[0]),
-          fetchHistorical(meta.code, 90),
-          getConsensusBundle(meta.code).catch(() => ({
-            consensus: null,
-            valuation: null,
-            researches: [],
-          })),
-          isKrStock(meta.code)
-            ? getMarketAlertCached(meta.code).catch(() => null)
-            : Promise.resolve(null),
-          fetchEventsForSymbol(meta).catch(() => []),
-        ]);
+      // 한국 종목 + KIS 활성 시: 프로그램 매매 + 공매도 잔고 병렬 fetch (각각 60s/5min 캐시).
+      const wantsKisExtras = kisEnabled() && isKrStock(meta.code);
+      const [
+        quoteRes,
+        hist,
+        bundle,
+        marketAlert,
+        upcomingEvents,
+        programTrade,
+        shortBalance,
+      ] = await Promise.all([
+        fetchQuotesBatch([meta]).then((r) => r[0]),
+        fetchHistorical(meta.code, 90),
+        getConsensusBundle(meta.code).catch(() => ({
+          consensus: null,
+          valuation: null,
+          researches: [],
+        })),
+        isKrStock(meta.code)
+          ? getMarketAlertCached(meta.code).catch(() => null)
+          : Promise.resolve(null),
+        fetchEventsForSymbol(meta).catch(() => []),
+        wantsKisExtras
+          ? getProgramTradeCached(meta.code).catch(() => null)
+          : Promise.resolve(null),
+        wantsKisExtras
+          ? getShortBalanceCached(meta.code).catch(() => null)
+          : Promise.resolve(null),
+      ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote: typeof quoteRes.quote = {
@@ -456,6 +476,8 @@ export async function fetchWatchlistSnapshots(
         researches,
         signalMarks,
         upcomingEvents,
+        programTrade,
+        shortBalance,
       };
     })
   );

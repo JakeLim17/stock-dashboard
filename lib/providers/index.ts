@@ -10,9 +10,11 @@ import {
   fetchKrQuote,
   fetchKrHistorical,
   fetchKrFlow,
+  fetchKrIndex,
   fetchUsQuote,
   fetchUsHistorical,
   kisEnabled,
+  yahooIndexToKisCode,
 } from "./kis";
 import { mockFlow } from "./mock";
 import type { FlowData, Quote } from "../types";
@@ -38,6 +40,31 @@ function isUsTicker(code: string): boolean {
 }
 
 async function fetchQuote(code: string, name: string): Promise<Quote> {
+  // 한국 지수(^KS11, ^KQ11, ^KS200) — KIS inquire-index-price 우선 → Yahoo 폴백.
+  if (kisEnabled() && yahooIndexToKisCode(code) != null) {
+    const kisIdx = await fetchKrIndex(code, name);
+    if (kisIdx) {
+      // IndexQuote → Quote 변환. 지수는 거래량 외 valuation/marketCap 없음.
+      const prevClose = kisIdx.value - kisIdx.changeAbs;
+      return {
+        code,
+        name,
+        price: kisIdx.value,
+        prevClose,
+        changeAbs: kisIdx.changeAbs,
+        changeRate: kisIdx.changeRate,
+        volume: kisIdx.volume,
+        currency: "KRW",
+        marketCap: null,
+        valuation: null,
+        fetchedAt: kisIdx.fetchedAt,
+        marketState: undefined,
+        priceTime: kisIdx.fetchedAt,
+        extendedHours: null,
+      };
+    }
+  }
+
   if (isKrStock(code)) {
     if (kisEnabled()) {
       const kis = await fetchKrQuote(code, name);

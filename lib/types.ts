@@ -626,6 +626,118 @@ export interface StockSnapshot {
   // 이 종목과 관련된 다가올 가격 이벤트 (실적·배당). 다음 60일 이내, 날짜 오름차순.
   // 매크로 이벤트(FOMC/KOSPI 만기/휴장)는 DashboardSnapshot.macroEvents에만 노출한다.
   upcomingEvents?: EventItem[];
+  // 프로그램 매매 (당일 누적) — 한국 종목 + KIS 활성 시만 채워짐.
+  programTrade?: ProgramTradeData | null;
+  // 공매도 잔고/거래 정보 — 한국 종목 + KIS 활성 시만 채워짐.
+  shortBalance?: ShortBalanceData | null;
+}
+
+// ─── KIS 신규 데이터 타입 ────────────────────────────────────────────────────
+// KIS Open API가 활성일 때만 채워지는 추가 데이터들. KIS 미사용 시 모두 null.
+
+// 프로그램 매매 (당일 누적) — 차익/비차익 매수·매도·순매수.
+// 단위는 원(KRW). 거래대금 데이터가 없으면 null.
+export interface ProgramTradeData {
+  // 차익거래 (Arbitrage)
+  arbitrageBuy: number | null;
+  arbitrageSell: number | null;
+  arbitrageNet: number | null;
+  // 비차익거래 (Non-Arbitrage)
+  nonArbitrageBuy: number | null;
+  nonArbitrageSell: number | null;
+  nonArbitrageNet: number | null;
+  // 합계 순매수 — 프로그램 매매 전체 임팩트
+  totalNet: number | null;
+  fetchedAt: number;
+}
+
+// 호가 한 레벨 — 1호가가 가장 가까운 가격
+export interface AskingPriceLevel {
+  // 매도호가
+  askPrice: number;
+  askQty: number;
+  // 매수호가
+  bidPrice: number;
+  bidQty: number;
+}
+
+// 10단계 호가 + 체결강도.
+// levels[0] = 1호가(가장 가까운), levels[9] = 10호가.
+export interface AskingPriceData {
+  levels: AskingPriceLevel[];
+  totalAskQty: number;
+  totalBidQty: number;
+  // 체결강도 — KIS cttr(체결강도) 응답 우선, 없으면 (총매수잔량/총매도잔량)×100 폴백.
+  // 100 = 중립, > 100 = 매수 우위, < 100 = 매도 우위.
+  ccldStrength: number | null;
+  // 예상체결가/예상거래량 (장중 동시호가 시) — 있으면 채움
+  expectedPrice?: number | null;
+  expectedVolume?: number | null;
+  fetchedAt: number;
+}
+
+// 실시간 체결 한 건
+export interface ExecutionTick {
+  // HHMMSS → epoch ms (오늘 KST 기준 합성)
+  time: number;
+  price: number;
+  // 체결 거래량 (주)
+  volume: number;
+  // 매수/매도 체결 구분 — KIS는 별도 플래그 안 줘서 sign 으로만 추정 (가능하면)
+  side: "buy" | "sell" | "neutral";
+  changeAbs: number | null;
+  changeRate: number | null;
+}
+
+// 지수 시세 — KOSPI/KOSDAQ 등 KIS 지수 API 응답.
+export interface IndexQuote {
+  // KIS 지수 코드: 0001 KOSPI, 1001 KOSDAQ
+  code: string;
+  name: string;
+  value: number;
+  changeAbs: number;
+  changeRate: number;
+  volume: number | null;
+  source: "kis" | "yahoo";
+  fetchedAt: number;
+}
+
+// 시장 순위 종목 한 건
+export interface MarketLeader {
+  rank: number;
+  // 6자리 단축 코드 (예: "005930")
+  code: string;
+  name: string;
+  price: number;
+  changeAbs: number;
+  changeRate: number;
+  volume: number | null;
+}
+
+// 거래량/등락 순위 묶음
+export type MarketLeadersKind = "volume" | "rising" | "falling";
+export type MarketLeadersMarket = "all" | "kospi" | "kosdaq";
+
+export interface MarketLeadersData {
+  kind: MarketLeadersKind;
+  market: MarketLeadersMarket;
+  items: MarketLeader[];
+  fetchedAt: number;
+}
+
+// 공매도 잔고/거래 정보.
+// 종목별 잔고는 KRX 주간 공시 기반이라 API 응답이 일~수일 지연될 수 있다.
+// asOf는 데이터 기준 영업일 epoch ms.
+export interface ShortBalanceData {
+  // 공매도 잔고 비율 (상장주식 대비) — 0.012 = 1.2%
+  ratio: number | null;
+  // 공매도 잔고 수량 (주)
+  qty: number | null;
+  // 공매도 잔고 금액 (원)
+  amount: number | null;
+  // 데이터 기준일 (epoch ms, KST 자정). KIS가 응답 시 채움.
+  asOf: number | null;
+  fetchedAt: number;
 }
 
 // ─── 이벤트 캘린더 ───────────────────────────────────────────────────────────

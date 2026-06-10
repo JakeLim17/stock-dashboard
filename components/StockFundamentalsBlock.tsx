@@ -118,6 +118,17 @@ export function StockFundamentalsBlock({
 
       {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 */}
       <FlowSection flow={flow} variant={variant} />
+
+      {/* 프로그램 매매 — KIS 활성 시 종목별 차익/비차익. 데이터 없으면 미노출. */}
+      {snap.programTrade && (
+        <ProgramTradeSection program={snap.programTrade} variant={variant} />
+      )}
+
+      {/* 공매도 잔고 — KIS 활성 시. detail 변형에만 줄 노출, card에서는 헤더 배지로 대체.
+          여기서는 detail 한정으로 한 줄 노출. */}
+      {variant === "detail" && snap.shortBalance && (
+        <ShortBalanceSection short={snap.shortBalance} />
+      )}
     </div>
   );
 }
@@ -159,6 +170,110 @@ function freshnessLabel(ts: number): string {
   if (min < 60) return `조회 ${min}분 전`;
   const hr = Math.round(min / 60);
   return `조회 ${hr}시간 전`;
+}
+
+function ProgramTradeSection({
+  program,
+  variant,
+}: {
+  program: import("@/lib/types").ProgramTradeData;
+  variant: Variant;
+}) {
+  const isDetail = variant === "detail";
+  const fresh = freshnessLabel(program.fetchedAt);
+  const totalLabel = flowLabel(program.totalNet);
+  const arbLabel = flowLabel(program.arbitrageNet);
+  const nabLabel = flowLabel(program.nonArbitrageNet);
+  return (
+    <div
+      className={
+        isDetail
+          ? "rounded-lg border border-border bg-muted/20 p-3 space-y-1.5"
+          : "border-t border-border pt-3 space-y-1.5"
+      }
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          프로그램 매매 (당일 누적, 억)
+        </span>
+        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1.5">
+          <span>{fresh}</span>
+          <span>KIS</span>
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="text-muted-foreground">합계</span>
+        <span
+          className={`tabular font-semibold ${
+            program.totalNet != null ? changeColor(program.totalNet) : ""
+          }`}
+        >
+          {totalLabel}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[11px] tabular">
+        <div className="flex items-center justify-between rounded px-2 py-1 bg-muted/40">
+          <span className="text-muted-foreground">차익</span>
+          <span
+            className={
+              program.arbitrageNet != null ? changeColor(program.arbitrageNet) : ""
+            }
+          >
+            {arbLabel}
+          </span>
+        </div>
+        <div className="flex items-center justify-between rounded px-2 py-1 bg-muted/40">
+          <span className="text-muted-foreground">비차익</span>
+          <span
+            className={
+              program.nonArbitrageNet != null
+                ? changeColor(program.nonArbitrageNet)
+                : ""
+            }
+          >
+            {nabLabel}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShortBalanceSection({
+  short,
+}: {
+  short: import("@/lib/types").ShortBalanceData;
+}) {
+  const ratioPct = short.ratio != null ? (short.ratio * 100).toFixed(2) : "—";
+  const qty =
+    short.qty != null ? short.qty.toLocaleString("ko-KR") : "—";
+  const asOf =
+    short.asOf != null
+      ? new Date(short.asOf).toLocaleDateString("ko-KR", {
+          month: "2-digit",
+          day: "2-digit",
+        })
+      : null;
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
+          공매도 잔고
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {asOf ? `기준 ${asOf} · ` : ""}KIS
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">잔고 비율</span>
+        <span className="tabular font-semibold">{ratioPct}%</span>
+      </div>
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular">
+        <span>잔고 수량</span>
+        <span>{qty}</span>
+      </div>
+    </div>
+  );
 }
 
 function FlowSection({

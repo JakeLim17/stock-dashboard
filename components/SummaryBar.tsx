@@ -14,6 +14,8 @@ interface Props {
 export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
   const fx = snapshot.indicators.find((i) => i.code === "KRW=X");
   const nq = snapshot.indicators.find((i) => i.code === "NQ=F");
+  const kospi = snapshot.indicators.find((i) => i.code === "^KS11");
+  const kosdaq = snapshot.indicators.find((i) => i.code === "^KQ11");
   const newsCount = snapshot.news.length;
   const mood = snapshot.marketMood;
   // 한국장 상태는 한국 종목 중 첫 번째 quote 기준 (시간외 활성도 함께 반영)
@@ -21,6 +23,17 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
     snapshot.primaries.find((p) => p.meta.kind === "kr-stock")?.quote ??
     snapshot.primaries[0]?.quote;
   const krMarket = marketDisplayLabel(krQuote ?? {});
+
+  // 지수 신선도 — KIS는 priceTime을 즉시(방금) 박아주고 Yahoo는 거래소 시각.
+  // 차이가 작으면 "방금", 크면 "N분 전". MarketPanel과 동일 로직을 짧게 노출.
+  function freshLabel(ind: typeof kospi): string | null {
+    if (!ind?.priceTime) return null;
+    const diff = Date.now() - ind.priceTime;
+    if (diff < 30_000) return "방금";
+    if (diff < 60_000) return "1분 전";
+    if (diff < 60 * 60_000) return `${Math.round(diff / 60_000)}분 전`;
+    return null;
+  }
 
   return (
     <div className="bg-card border border-border rounded-2xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3 shadow-sm">
@@ -37,6 +50,46 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
         }
       />
       <Stat label="시장 분위기" value={<MoodBadge mood={mood.label} />} />
+      {kospi && (
+        <Stat
+          label="코스피"
+          value={
+            <span className="inline-flex items-baseline gap-1">
+              <span className={`tabular text-base font-semibold ${changeColor(kospi.changeRate)}`}>
+                {fmtNumber(kospi.value, 2)}
+              </span>
+              <span className={`text-xs tabular ${changeColor(kospi.changeRate)}`}>
+                ({fmtPercent(kospi.changeRate)})
+              </span>
+              {freshLabel(kospi) && (
+                <span className="text-[10px] text-muted-foreground ml-1">
+                  · {freshLabel(kospi)}
+                </span>
+              )}
+            </span>
+          }
+        />
+      )}
+      {kosdaq && (
+        <Stat
+          label="코스닥"
+          value={
+            <span className="inline-flex items-baseline gap-1">
+              <span className={`tabular text-base font-semibold ${changeColor(kosdaq.changeRate)}`}>
+                {fmtNumber(kosdaq.value, 2)}
+              </span>
+              <span className={`text-xs tabular ${changeColor(kosdaq.changeRate)}`}>
+                ({fmtPercent(kosdaq.changeRate)})
+              </span>
+              {freshLabel(kosdaq) && (
+                <span className="text-[10px] text-muted-foreground ml-1">
+                  · {freshLabel(kosdaq)}
+                </span>
+              )}
+            </span>
+          }
+        />
+      )}
       <Stat
         label="반도체 과열도"
         value={

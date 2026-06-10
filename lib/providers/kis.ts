@@ -1,7 +1,20 @@
 import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { FlowData, Quote } from "../types";
+import type {
+  AskingPriceData,
+  AskingPriceLevel,
+  ExecutionTick,
+  FlowData,
+  IndexQuote,
+  MarketLeader,
+  MarketLeadersData,
+  MarketLeadersKind,
+  MarketLeadersMarket,
+  ProgramTradeData,
+  Quote,
+  ShortBalanceData,
+} from "../types";
 import { toKisCode } from "../symbols";
 import type { HistoricalPoint } from "./yahoo";
 
@@ -823,6 +836,593 @@ export async function fetchUsHistorical(
 
     return points;
   } catch {
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 프로그램 매매 — /uapi/domestic-stock/v1/quotations/program-trade-by-stock
+// TR_ID: FHPST04540000 (당일 누적, 종목별)
+// 응답 키는 KIS 공식 명세: arbt_smtn_*, nabt_smtn_*, whol_smtn_*.
+// ────────────────────────────────────────────────────────────────────
+
+interface KisProgramTradeItem {
+  arbt_smtn_seln_vol?: string;
+  arbt_smtn_shnu_vol?: string;
+  arbt_smtn_ntby_qty?: string;
+  arbt_smtn_seln_tr_pbmn?: string;
+  arbt_smtn_shnu_tr_pbmn?: string;
+  arbt_smtn_ntby_tr_pbmn?: string;
+  nabt_smtn_seln_vol?: string;
+  nabt_smtn_shnu_vol?: string;
+  nabt_smtn_ntby_qty?: string;
+  nabt_smtn_seln_tr_pbmn?: string;
+  nabt_smtn_shnu_tr_pbmn?: string;
+  nabt_smtn_ntby_tr_pbmn?: string;
+  whol_smtn_seln_vol?: string;
+  whol_smtn_shnu_vol?: string;
+  whol_smtn_ntby_qty?: string;
+  whol_smtn_seln_tr_pbmn?: string;
+  whol_smtn_shnu_tr_pbmn?: string;
+  whol_smtn_ntby_tr_pbmn?: string;
+  stck_cntg_hour?: string;
+  stck_prpr?: string;
+}
+
+interface KisProgramTradeResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output?: KisProgramTradeItem[] | KisProgramTradeItem;
+}
+
+function programNet(
+  qty: number | null,
+  tradeValue: number | null,
+  price: number | null
+): number | null {
+  if (tradeValue != null) return tradeValue;
+  if (qty == null) return null;
+  const px = price ?? 0;
+  if (px <= 0) return null;
+  return qty * px;
+}
+
+export async function fetchKrProgramTrade(
+  code: string
+): Promise<ProgramTradeData | null> {
+  const six = toKisCode(code);
+  if (!six) return null;
+  if (!kisEnabled()) return null;
+
+  try {
+    const json = await kisGet<KisProgramTradeResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
+      trId: "FHPST04540000",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: six,
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const raw = Array.isArray(json.output) ? json.output[0] : json.output;
+    if (!raw) return null;
+
+    const price = n(raw.stck_prpr);
+
+    const arbBuy = programNet(
+      n(raw.arbt_smtn_shnu_vol),
+      n(raw.arbt_smtn_shnu_tr_pbmn),
+      price
+    );
+    const arbSell = programNet(
+      n(raw.arbt_smtn_seln_vol),
+      n(raw.arbt_smtn_seln_tr_pbmn),
+      price
+    );
+    const arbNet = programNet(
+      n(raw.arbt_smtn_ntby_qty),
+      n(raw.arbt_smtn_ntby_tr_pbmn),
+      price
+    );
+
+    const nabBuy = programNet(
+      n(raw.nabt_smtn_shnu_vol),
+      n(raw.nabt_smtn_shnu_tr_pbmn),
+      price
+    );
+    const nabSell = programNet(
+      n(raw.nabt_smtn_seln_vol),
+      n(raw.nabt_smtn_seln_tr_pbmn),
+      price
+    );
+    const nabNet = programNet(
+      n(raw.nabt_smtn_ntby_qty),
+      n(raw.nabt_smtn_ntby_tr_pbmn),
+      price
+    );
+
+    const totalNet =
+      programNet(
+        n(raw.whol_smtn_ntby_qty),
+        n(raw.whol_smtn_ntby_tr_pbmn),
+        price
+      ) ??
+      (arbNet != null && nabNet != null ? arbNet + nabNet : (arbNet ?? nabNet));
+
+    if (
+      arbBuy == null &&
+      arbSell == null &&
+      arbNet == null &&
+      nabBuy == null &&
+      nabSell == null &&
+      nabNet == null &&
+      totalNet == null
+    ) {
+      return null;
+    }
+
+    return {
+      arbitrageBuy: arbBuy,
+      arbitrageSell: arbSell,
+      arbitrageNet: arbNet,
+      nonArbitrageBuy: nabBuy,
+      nonArbitrageSell: nabSell,
+      nonArbitrageNet: nabNet,
+      totalNet,
+      fetchedAt: Date.now(),
+    };
+  } catch (e) {
+    dbg("[program] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 10단계 호가 + 체결강도 — /uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn
+// TR_ID: FHKST01010200
+// ────────────────────────────────────────────────────────────────────
+
+type KisAskingOutput1 = Record<string, string | undefined>;
+type KisAskingOutput2 = Record<string, string | undefined>;
+
+interface KisAskingResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output1?: KisAskingOutput1;
+  output2?: KisAskingOutput2;
+}
+
+export async function fetchKrAskingPrice(
+  code: string
+): Promise<AskingPriceData | null> {
+  const six = toKisCode(code);
+  if (!six) return null;
+  if (!kisEnabled()) return null;
+
+  try {
+    const json = await kisGet<KisAskingResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
+      trId: "FHKST01010200",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: six,
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const o1 = json.output1;
+    if (!o1) return null;
+
+    const levels: AskingPriceLevel[] = [];
+    for (let i = 1; i <= 10; i++) {
+      const askPrice = n(o1[`askp${i}`]);
+      const askQty = n(o1[`askp_rsqn${i}`]);
+      const bidPrice = n(o1[`bidp${i}`]);
+      const bidQty = n(o1[`bidp_rsqn${i}`]);
+      if (askPrice == null && bidPrice == null) continue;
+      levels.push({
+        askPrice: askPrice ?? 0,
+        askQty: askQty ?? 0,
+        bidPrice: bidPrice ?? 0,
+        bidQty: bidQty ?? 0,
+      });
+    }
+    if (levels.length === 0) return null;
+
+    const totalAskQty =
+      n(o1.total_askp_rsqn) ??
+      levels.reduce((acc, l) => acc + (l.askQty || 0), 0);
+    const totalBidQty =
+      n(o1.total_bidp_rsqn) ??
+      levels.reduce((acc, l) => acc + (l.bidQty || 0), 0);
+
+    // 체결강도 — KIS 일부 응답에 tday_rltv(체결강도)가 있고, 없으면 잔량 비율 폴백.
+    let ccldStrength: number | null = null;
+    const o2 = json.output2;
+    if (o2) {
+      const cttr = n(o2.tday_rltv);
+      if (cttr != null) ccldStrength = cttr;
+    }
+    if (ccldStrength == null) {
+      ccldStrength = totalAskQty > 0 ? (totalBidQty / totalAskQty) * 100 : null;
+    }
+
+    const expectedPrice = o2 ? n(o2.antc_cnpr) : null;
+    const expectedVolume = o2 ? n(o2.antc_vol) : null;
+
+    return {
+      levels,
+      totalAskQty,
+      totalBidQty,
+      ccldStrength,
+      expectedPrice,
+      expectedVolume,
+      fetchedAt: Date.now(),
+    };
+  } catch (e) {
+    dbg("[asking] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 국내 지수 — /uapi/domestic-stock/v1/quotations/inquire-index-price
+// TR_ID: FHPUP02100000 (KOSPI=0001, KOSDAQ=1001, KOSPI200=2001 등)
+// ────────────────────────────────────────────────────────────────────
+
+interface KisIndexResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output?: {
+    bstp_nmix_prpr?: string;
+    bstp_nmix_prdy_vrss?: string;
+    prdy_vrss_sign?: string;
+    bstp_nmix_prdy_ctrt?: string;
+    acml_vol?: string;
+    acml_tr_pbmn?: string;
+    bstp_nmix_oprc?: string;
+    bstp_nmix_hgpr?: string;
+    bstp_nmix_lwpr?: string;
+  };
+}
+
+// 야후 지수 코드(^KS11, ^KQ11) → KIS 지수 코드(0001, 1001).
+export function yahooIndexToKisCode(code: string): string | null {
+  if (code === "^KS11") return "0001";
+  if (code === "^KQ11") return "1001";
+  if (code === "^KS200") return "2001";
+  return null;
+}
+
+export async function fetchKrIndex(
+  yahooCode: string,
+  name: string
+): Promise<IndexQuote | null> {
+  if (!kisEnabled()) return null;
+  const kisCode = yahooIndexToKisCode(yahooCode);
+  if (!kisCode) return null;
+
+  try {
+    const json = await kisGet<KisIndexResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/inquire-index-price",
+      trId: "FHPUP02100000",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "U",
+        FID_INPUT_ISCD: kisCode,
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const o = json.output;
+    if (!o) return null;
+
+    const value = n(o.bstp_nmix_prpr);
+    if (value == null) return null;
+    const sign = o.prdy_vrss_sign;
+    const changeAbs = applySign(n(o.bstp_nmix_prdy_vrss), sign) ?? 0;
+    const rateRaw = applySign(n(o.bstp_nmix_prdy_ctrt), sign);
+    const changeRate = rateRaw != null ? rateRaw / 100 : 0;
+
+    return {
+      code: kisCode,
+      name,
+      value,
+      changeAbs,
+      changeRate,
+      volume: n(o.acml_vol),
+      source: "kis",
+      fetchedAt: Date.now(),
+    };
+  } catch (e) {
+    dbg("[index] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 시장 순위 — 등락률 / 거래량
+// 등락률: /uapi/domestic-stock/v1/ranking/fluctuation (FHPST01700000)
+// 거래량: /uapi/domestic-stock/v1/ranking/volume-rank (FHPST01710000)
+// ────────────────────────────────────────────────────────────────────
+
+interface KisRankingItem {
+  data_rank?: string;
+  hts_kor_isnm?: string;
+  mksc_shrn_iscd?: string;
+  stck_prpr?: string;
+  prdy_vrss?: string;
+  prdy_vrss_sign?: string;
+  prdy_ctrt?: string;
+  acml_vol?: string;
+}
+
+interface KisRankingResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output?: KisRankingItem[];
+}
+
+// "all"→"0000", "kospi"→"0001", "kosdaq"→"1001"
+function marketToKisCode(market: MarketLeadersMarket): string {
+  if (market === "kospi") return "0001";
+  if (market === "kosdaq") return "1001";
+  return "0000";
+}
+
+export async function fetchKrMarketLeaders(
+  kind: MarketLeadersKind,
+  market: MarketLeadersMarket = "all",
+  count = 20
+): Promise<MarketLeadersData | null> {
+  if (!kisEnabled()) return null;
+  const isVolume = kind === "volume";
+  const apiPath = isVolume
+    ? "/uapi/domestic-stock/v1/ranking/volume-rank"
+    : "/uapi/domestic-stock/v1/ranking/fluctuation";
+  const trId = isVolume ? "FHPST01710000" : "FHPST01700000";
+  const mktCode = marketToKisCode(market);
+
+  const query: Record<string, string> = isVolume
+    ? {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_COND_SCR_DIV_CODE: "20171",
+        FID_INPUT_ISCD: mktCode,
+        FID_DIV_CLS_CODE: "0",
+        FID_BLNG_CLS_CODE: "0",
+        FID_TRGT_CLS_CODE: "111111111",
+        FID_TRGT_EXLS_CLS_CODE: "0000000000",
+        FID_INPUT_PRICE_1: "0",
+        FID_INPUT_PRICE_2: "0",
+        FID_VOL_CNT: "0",
+        FID_INPUT_DATE_1: "0",
+      }
+    : {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_COND_SCR_DIV_CODE: "20170",
+        FID_INPUT_ISCD: mktCode,
+        FID_RANK_SORT_CLS_CODE: kind === "rising" ? "0" : "1",
+        FID_INPUT_CNT_1: "0",
+        FID_PRC_CLS_CODE: "0",
+        FID_INPUT_PRICE_1: "",
+        FID_INPUT_PRICE_2: "",
+        FID_VOL_CNT: "",
+        FID_TRGT_CLS_CODE: "0",
+        FID_TRGT_EXLS_CLS_CODE: "0",
+        FID_DIV_CLS_CODE: "0",
+        FID_RSFL_RATE1: "",
+        FID_RSFL_RATE2: "",
+      };
+
+  try {
+    const json = await kisGet<KisRankingResponse>({
+      path: apiPath,
+      trId,
+      query,
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const list = json.output ?? [];
+    if (list.length === 0) return null;
+
+    const items: MarketLeader[] = [];
+    for (const it of list.slice(0, count)) {
+      const code = (it.mksc_shrn_iscd ?? "").trim();
+      const name = (it.hts_kor_isnm ?? "").trim();
+      const price = n(it.stck_prpr);
+      if (!code || !name || price == null) continue;
+      const sign = it.prdy_vrss_sign;
+      const changeAbs = applySign(n(it.prdy_vrss), sign) ?? 0;
+      const rateRaw = applySign(n(it.prdy_ctrt), sign);
+      items.push({
+        rank: n(it.data_rank) ?? items.length + 1,
+        code,
+        name,
+        price,
+        changeAbs,
+        changeRate: rateRaw != null ? rateRaw / 100 : 0,
+        volume: n(it.acml_vol),
+      });
+    }
+    if (items.length === 0) return null;
+
+    return {
+      kind,
+      market,
+      items,
+      fetchedAt: Date.now(),
+    };
+  } catch (e) {
+    dbg("[leaders] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 실시간 체결 내역 — /uapi/domestic-stock/v1/quotations/inquire-ccnl
+// TR_ID: FHKST01010300 (최근 체결 30건)
+// ────────────────────────────────────────────────────────────────────
+
+interface KisCcnlItem {
+  stck_cntg_hour?: string;
+  stck_prpr?: string;
+  prdy_vrss?: string;
+  prdy_vrss_sign?: string;
+  prdy_ctrt?: string;
+  cntg_vol?: string;
+  tday_rltv?: string;
+}
+
+interface KisCcnlResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output?: KisCcnlItem[];
+}
+
+// "HHMMSS" → epoch ms (오늘 KST 기준).
+function parseKisHHMMSS(s: string | undefined): number | null {
+  if (!s || s.length < 4) return null;
+  const padded = s.padStart(6, "0");
+  const hh = Number(padded.slice(0, 2));
+  const mm = Number(padded.slice(2, 4));
+  const ss = Number(padded.slice(4, 6));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss))
+    return null;
+  const now = new Date();
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const y = kstNow.getUTCFullYear();
+  const m = kstNow.getUTCMonth();
+  const d = kstNow.getUTCDate();
+  return Date.UTC(y, m, d, hh - 9, mm, ss);
+}
+
+export async function fetchKrExecutions(
+  code: string,
+  limit = 30
+): Promise<ExecutionTick[] | null> {
+  const six = toKisCode(code);
+  if (!six) return null;
+  if (!kisEnabled()) return null;
+
+  try {
+    const json = await kisGet<KisCcnlResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/inquire-ccnl",
+      trId: "FHKST01010300",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: six,
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const list = json.output ?? [];
+    if (list.length === 0) return null;
+
+    const ticks: ExecutionTick[] = [];
+    for (const it of list.slice(0, limit)) {
+      const time = parseKisHHMMSS(it.stck_cntg_hour) ?? Date.now();
+      const price = n(it.stck_prpr);
+      if (price == null) continue;
+      const sign = it.prdy_vrss_sign;
+      const changeAbs = applySign(n(it.prdy_vrss), sign);
+      const rateRaw = applySign(n(it.prdy_ctrt), sign);
+      ticks.push({
+        time,
+        price,
+        volume: n(it.cntg_vol) ?? 0,
+        // KIS inquire-ccnl 은 매수/매도 체결 구분이 명시적이지 않다.
+        // sign 으로만 추정: 상승(1,2)→매수, 하락(4,5)→매도, 보합(3)→neutral.
+        side:
+          sign === "1" || sign === "2"
+            ? "buy"
+            : sign === "4" || sign === "5"
+              ? "sell"
+              : "neutral",
+        changeAbs,
+        changeRate: rateRaw != null ? rateRaw / 100 : null,
+      });
+    }
+    if (ticks.length === 0) return null;
+    return ticks;
+  } catch (e) {
+    dbg("[ccnl] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 공매도 잔고 — /uapi/domestic-stock/v1/quotations/inquire-short-stock-quantity
+// TR_ID: FHPST04830000 (KRX 공매도 잔고 일별 추이).
+// ────────────────────────────────────────────────────────────────────
+
+interface KisShortItem {
+  stck_bsop_date?: string;
+  ssts_cntg_qty?: string;
+  ssts_cntg_tr_pbmn?: string;
+  ssts_cntg_qty_rate?: string;
+  ssts_rsqn?: string;
+  ssts_tr_pbmn?: string;
+  ssts_qty_rate?: string;
+}
+
+interface KisShortResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output1?: KisShortItem | KisShortItem[];
+  output2?: KisShortItem[];
+}
+
+export async function fetchKrShortBalance(
+  code: string
+): Promise<ShortBalanceData | null> {
+  const six = toKisCode(code);
+  if (!six) return null;
+  if (!kisEnabled()) return null;
+
+  try {
+    const json = await kisGet<KisShortResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/inquire-short-stock-quantity",
+      trId: "FHPST04830000",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: six,
+        FID_INPUT_DATE_1: daysAgoYyyymmdd(14),
+        FID_INPUT_DATE_2: todayYyyymmdd(),
+        FID_PERIOD_DIV_CODE: "D",
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+
+    const list: KisShortItem[] =
+      json.output2 && json.output2.length > 0
+        ? json.output2
+        : Array.isArray(json.output1)
+          ? json.output1
+          : json.output1
+            ? [json.output1]
+            : [];
+    if (list.length === 0) return null;
+
+    const latest = list[0];
+    const qty = n(latest.ssts_cntg_qty) ?? n(latest.ssts_rsqn);
+    const amount = n(latest.ssts_cntg_tr_pbmn) ?? n(latest.ssts_tr_pbmn);
+    const ratioRaw =
+      n(latest.ssts_cntg_qty_rate) ?? n(latest.ssts_qty_rate);
+    const ratio = ratioRaw != null ? ratioRaw / 100 : null;
+    const asOf = parseYyyymmdd(latest.stck_bsop_date);
+
+    if (qty == null && amount == null && ratio == null) return null;
+
+    return {
+      ratio,
+      qty,
+      amount,
+      asOf,
+      fetchedAt: Date.now(),
+    };
+  } catch (e) {
+    dbg("[short] throw:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }

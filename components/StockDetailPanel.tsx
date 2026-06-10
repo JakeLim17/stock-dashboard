@@ -12,19 +12,39 @@ import { VolatilityBadge } from "./VolatilityBadge";
 import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
+import { AskingPricePanel } from "./AskingPricePanel";
 import { fmtRelative } from "@/lib/utils";
-import { ExternalLink, LineChart, ScrollText, Users, Newspaper } from "lucide-react";
 
-// 선택된 종목 1개의 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급 | 뉴스].
+// 한국 종목 여부 — 클라이언트에서도 쓰는 단순 정규식 판정.
+// (lib/providers/naver.ts 의 isKrStock 은 server-only 라 client component에서 사용 불가.)
+function isKrStockCode(code: string): boolean {
+  return /^\d{6}\.K[SQ]$/.test(code);
+}
+import {
+  ExternalLink,
+  LayoutList,
+  LineChart,
+  ScrollText,
+  Users,
+  Newspaper,
+} from "lucide-react";
+
+// 선택된 종목 1개의 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급 | 호가 | 뉴스].
 //   - PredictionPanel + ConsensusPanel을 한 카드 안에 통합
 //   - "수급" 탭은 카드의 펀더멘털 블록(시간외/거래량/RSI/외인·기관·개인 당일·5일)을 흡수해
 //     모바일에서 선택 종목 카드가 숨겨져도 정보 손실이 없도록 한다.
+//   - "호가" 탭은 KIS 활성 + 한국 종목 한정 — 10단계 호가 + 체결강도 + 최근 체결.
 //   - "뉴스" 탭은 종목 한정 24시간 뉴스.
 //
 // 부모(DashboardClient)에서 활성 탭을 제어할 수 있도록 ref + jumpToPrediction 노출.
 // PredictionHero 클릭 시 부모가 ref로 "예측" 탭으로 전환하고 스크롤한다.
 
-export type DetailTabKey = "prediction" | "consensus" | "flow" | "news";
+export type DetailTabKey =
+  | "prediction"
+  | "consensus"
+  | "flow"
+  | "asking"
+  | "news";
 
 export interface StockDetailPanelHandle {
   jumpTo: (tab: DetailTabKey) => void;
@@ -45,6 +65,7 @@ const TAB_META: Record<
   prediction: { label: "예측", icon: <LineChart className="h-3.5 w-3.5" /> },
   consensus: { label: "컨센서스", icon: <Users className="h-3.5 w-3.5" /> },
   flow: { label: "수급", icon: <ScrollText className="h-3.5 w-3.5" /> },
+  asking: { label: "호가", icon: <LayoutList className="h-3.5 w-3.5" /> },
   news: { label: "뉴스", icon: <Newspaper className="h-3.5 w-3.5" /> },
 };
 
@@ -108,27 +129,29 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
               {verdict.headline}
             </p>
           </div>
-          {/* 탭 */}
+          {/* 탭 — 호가 탭은 한국 종목에만 노출. KIS 미활성도 동일하게 노출하되 안에서 빈 메시지. */}
           <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5 self-start">
-            {(Object.keys(TAB_META) as DetailTabKey[]).map((k) => {
-              const m = TAB_META[k];
-              const active = tab === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setTab(k)}
-                  className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors ${
-                    active
-                      ? "bg-foreground text-background font-medium"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {m.icon}
-                  {m.label}
-                </button>
-              );
-            })}
+            {(Object.keys(TAB_META) as DetailTabKey[])
+              .filter((k) => k !== "asking" || isKrStockCode(snap.meta.code))
+              .map((k) => {
+                const m = TAB_META[k];
+                const active = tab === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setTab(k)}
+                    className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md transition-colors ${
+                      active
+                        ? "bg-foreground text-background font-medium"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {m.icon}
+                    {m.label}
+                  </button>
+                );
+              })}
           </div>
         </CardHeader>
         <CardBody>
@@ -142,6 +165,9 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
           )}
           {tab === "consensus" && <ConsensusPanel snap={snap} embedded />}
           {tab === "flow" && <FlowTab snap={snap} krwRate={krwRate} />}
+          {tab === "asking" && (
+            <AskingPricePanel code={snap.meta.code} active={tab === "asking"} />
+          )}
           {tab === "news" && <NewsTab snap={snap} allNews={allNews} />}
         </CardBody>
       </Card>
