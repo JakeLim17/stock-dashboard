@@ -544,17 +544,19 @@ interface KisInvestorResponse {
   output?: KisInvestorItem[];
 }
 
-// 수량×종가 → 원화 환산. 거래대금이 응답에 있으면 그걸 우선 사용.
+// 수량×종가 → 원화 환산.
+// KIS inquire-investor 의 *_tr_pbmn 필드는 **백만원 단위**.
+// 수량(*_ntby_qty, 주) × 종가(원/주) = 원이라 수량 경로가 가장 직관적.
+// qty 우선, 없으면 tradeValue × 1,000,000 폴백.
 function toKrwNet(
   qty: number | null,
   tradeValue: number | null,
   closePrice: number | null
 ): number | null {
-  if (tradeValue != null) return tradeValue;
-  if (qty == null) return null;
   const px = closePrice ?? 0;
-  if (px <= 0) return null;
-  return qty * px;
+  if (qty != null && px > 0) return qty * px;
+  if (tradeValue != null) return tradeValue * 1_000_000;
+  return null;
 }
 
 export async function fetchKrFlow(code: string): Promise<FlowData | null> {
@@ -875,16 +877,17 @@ interface KisProgramTradeResponse {
   output?: KisProgramTradeItem[] | KisProgramTradeItem;
 }
 
+// KIS 거래대금(*_tr_pbmn) 은 일관되게 **백만원 단위**.
+// 수량 × 현재가가 가장 직관적이므로 그 경로 우선, 거래대금은 ×1,000,000 폴백.
 function programNet(
   qty: number | null,
   tradeValue: number | null,
   price: number | null
 ): number | null {
-  if (tradeValue != null) return tradeValue;
-  if (qty == null) return null;
   const px = price ?? 0;
-  if (px <= 0) return null;
-  return qty * px;
+  if (qty != null && px > 0) return qty * px;
+  if (tradeValue != null) return tradeValue * 1_000_000;
+  return null;
 }
 
 export async function fetchKrProgramTrade(

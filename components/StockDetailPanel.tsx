@@ -185,11 +185,14 @@ function FlowTab({
   snap: StockSnapshot;
   krwRate?: number | null;
 }) {
+  const isKisLive = snap.flow.source === "kis";
   return (
     <div className="space-y-3">
       <StockFundamentalsBlock snap={snap} krwRate={krwRate} variant="detail" />
       <p className="text-[11px] text-muted-foreground/90 leading-snug">
-        ※ 일별 누적 데이터입니다. 실시간 외인·프로그램 매매는 KIS API가 필요합니다.
+        {isKisLive
+          ? "※ KIS Open API 거의 실시간 (당일 누적 · 분~초 단위 갱신). 프로그램 매매·공매도도 함께 노출."
+          : "※ 일별 누적 데이터입니다. 실시간 외인·프로그램 매매는 KIS API가 필요합니다."}
       </p>
     </div>
   );

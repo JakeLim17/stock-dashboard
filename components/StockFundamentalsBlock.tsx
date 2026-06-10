@@ -276,6 +276,17 @@ function ShortBalanceSection({
   );
 }
 
+function flowSubtitle(source: import("@/lib/types").FlowData["source"]): string {
+  if (source === "kis") return "수급 (당일 누적 · 거의 실시간, 억)";
+  return "수급 (당일 누적 · 종일치, 억)";
+}
+
+function flowSourceLabel(source: import("@/lib/types").FlowData["source"]): string {
+  if (source === "kis") return "KIS 실시간";
+  if (source === "naver") return "네이버";
+  return "mock";
+}
+
 function FlowSection({
   flow,
   variant,
@@ -308,19 +319,11 @@ function FlowSection({
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
-          수급 (당일 누적 · 종일치, 억)
+          {flowSubtitle(flow.source)}
         </span>
         <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1.5">
           {fresh && <span>{fresh}</span>}
-          {flow.source && (
-            <span>
-              {flow.source === "naver"
-                ? "네이버"
-                : flow.source === "kis"
-                  ? "KIS"
-                  : "mock"}
-            </span>
-          )}
+          {flow.source && <span>{flowSourceLabel(flow.source)}</span>}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-sm">
@@ -352,9 +355,11 @@ function FlowSection({
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
-      <div className="text-[10px] text-muted-foreground/80 leading-snug">
-        ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
-      </div>
+      {flow.source !== "kis" && (
+        <div className="text-[10px] text-muted-foreground/80 leading-snug">
+          ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
+        </div>
+      )}
     </div>
   );
 }
