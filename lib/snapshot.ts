@@ -12,11 +12,6 @@ import {
 } from "./providers";
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
-import {
-  getProgramTradeCached,
-  getShortBalanceCached,
-} from "./providers/kisExtraCache";
-import { kisEnabled } from "./providers/kis";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import {
@@ -86,11 +81,6 @@ export interface WatchlistDeps {
   context?: MarketContextSnapshot;
   usdKrw?: number | null;
   options?: BuildSnapshotOptions;
-}
-
-function envEnabled(name: string): boolean {
-  const v = (process.env[name] ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -306,17 +296,12 @@ export async function fetchWatchlistSnapshots(
   const primaries: StockSnapshot[] = [];
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
-      // 프로그램 매매/공매도는 보조 정보라 첫 로딩 병목을 피하기 위해 opt-in.
-      const wantsKisExtras =
-        envEnabled("KIS_EXTRAS_ENABLED") && kisEnabled() && isKrStock(meta.code);
       const [
         quoteRes,
         hist,
         bundle,
         marketAlert,
         upcomingEvents,
-        programTrade,
-        shortBalance,
       ] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
@@ -329,12 +314,6 @@ export async function fetchWatchlistSnapshots(
           ? getMarketAlertCached(meta.code).catch(() => null)
           : Promise.resolve(null),
         fetchEventsForSymbol(meta).catch(() => []),
-        wantsKisExtras
-          ? getProgramTradeCached(meta.code).catch(() => null)
-          : Promise.resolve(null),
-        wantsKisExtras
-          ? getShortBalanceCached(meta.code).catch(() => null)
-          : Promise.resolve(null),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
@@ -487,8 +466,8 @@ export async function fetchWatchlistSnapshots(
         researches,
         signalMarks,
         upcomingEvents,
-        programTrade,
-        shortBalance,
+        programTrade: null,
+        shortBalance: null,
         closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
       };
     })

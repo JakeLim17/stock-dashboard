@@ -7,47 +7,26 @@ import {
   ColorType,
   type IChartApi,
   type ISeriesApi,
-  type CandlestickData,
   type UTCTimestamp,
   AreaSeries,
-  CandlestickSeries,
 } from "lightweight-charts";
 
 // 차트 모드:
-//   intraday : 1m/5m/15m 캔들 (KIS 분봉 + 마지막 캔들 실시간 갱신)
-//   daily    : 1D 라인/에어리어 (기존 동작)
-type Timeframe = "1m" | "5m" | "15m" | "1D";
+//   daily : 1D 라인/에어리어. KIS는 현재가에만 쓰고 차트는 가볍게 유지한다.
+type Timeframe = "1D";
 type ChartMode = "domestic" | "overseas";
-
-interface OhlcPoint {
-  date: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-}
 
 interface DailyPoint {
   date: number;
   close: number;
 }
 
-interface IntradayApiResp {
-  points: OhlcPoint[];
-  interval: string;
-  error?: string;
-}
-
 const TF_LABEL: Record<Timeframe, string> = {
-  "1m": "1분",
-  "5m": "5분",
-  "15m": "15분",
   "1D": "1일",
 };
 
 // 부모는 polling 주기로 selectedSnap 을 새로 받아 currentPrice 도 자동 흐른다.
-// 이 prop 으로 분봉 모드의 "마지막 캔들 실시간 갱신" 을 수행.
+// KIS 현재가는 카드/예측에 표시하고, 차트 마지막 일봉 점만 가볍게 따라간다.
 interface Props {
   code: string;
   name: string;
@@ -57,22 +36,9 @@ interface Props {
 export function PriceChart({ code, name, currentPrice }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<
-    ISeriesApi<"Area"> | ISeriesApi<"Candlestick"> | null
-  >(null);
-  // 현재 시리즈 종류 — re-create 여부 판단용
-  const seriesKindRef = useRef<"area" | "candle" | null>(null);
-  // 분봉 모드에서 마지막 캔들의 timestamp(초) — currentPrice 도착 시 어떤 캔들을 update 할지 결정.
-  const lastCandleRef = useRef<{
-    time: UTCTimestamp;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    bucketMs: number;
-  } | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+  const lastDailyTimeRef = useRef<UTCTimestamp | null>(null);
 
-  const [tf, setTf] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ChartMode>("domestic");
   const [loading, setLoading] = useState(true);
   const [empty, setEmpty] = useState(false);
@@ -83,14 +49,6 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     mode === "overseas" && overseasProxy ? overseasProxy.proxyCode : code;
   const activeName =
     mode === "overseas" && overseasProxy ? overseasProxy.name : name;
-  const isKr = /^\d{6}\.K[SQ]$/.test(activeCode);
-
-  // 해외 모드에서는 분봉/틱 불가 — 강제로 1D.
-  const effectiveTf: Timeframe = useMemo(() => {
-    if (mode === "overseas" || !isKr) return "1D";
-    return tf;
-  }, [mode, isKr, tf]);
-
   useEffect(() => {
     if (!overseasProxy && mode === "overseas") setMode("domestic");
   }, [mode, overseasProxy]);
@@ -125,100 +83,31 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
-      seriesKindRef.current = null;
     };
   }, []);
 
-  // 데이터 로드 — timeframe / activeCode 변경 시
+  // 데이터 로드 — activeCode 변경 시. 현재가는 상위 스냅샷에서 실시간 반영된다.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     let aborted = false;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
     setLoading(true);
     setEmpty(false);
     setError(null);
 
-    const ensureSeries = (kind: "area" | "candle") => {
-      if (seriesKindRef.current === kind && seriesRef.current) {
+    const ensureSeries = () => {
+      if (seriesRef.current) {
         return seriesRef.current;
       }
-      if (seriesRef.current) {
-        try {
-          chart.removeSeries(seriesRef.current);
-        } catch {
-          // 시리즈 이미 제거됨 — 무시
-        }
-      }
-      let next:
-        | ISeriesApi<"Area">
-        | ISeriesApi<"Candlestick">;
-      if (kind === "candle") {
-        next = chart.addSeries(CandlestickSeries, {
-          upColor: "#ef4444",
-          downColor: "#3b82f6",
-          borderUpColor: "#ef4444",
-          borderDownColor: "#3b82f6",
-          wickUpColor: "#ef4444",
-          wickDownColor: "#3b82f6",
-        });
-      } else {
-        next = chart.addSeries(AreaSeries, {
-          lineColor: "#4d8dff",
-          topColor: "rgba(77, 141, 255, 0.35)",
-          bottomColor: "rgba(77, 141, 255, 0.0)",
-          lineWidth: 2,
-        });
-      }
+      const next = chart.addSeries(AreaSeries, {
+        lineColor: "#4d8dff",
+        topColor: "rgba(77, 141, 255, 0.35)",
+        bottomColor: "rgba(77, 141, 255, 0.0)",
+        lineWidth: 2,
+      });
       seriesRef.current = next;
-      seriesKindRef.current = kind;
       return next;
-    };
-
-    const loadIntraday = async (interval: "1m" | "5m" | "15m") => {
-      const r = await fetch(
-        `/api/intraday-chart?code=${encodeURIComponent(activeCode)}&interval=${interval}`,
-        { cache: "no-store" }
-      );
-      const j = (await r.json()) as IntradayApiResp;
-      if (aborted) return;
-      if (j.error) {
-        setError(j.error);
-        setEmpty(true);
-        return;
-      }
-      const series = ensureSeries("candle") as ISeriesApi<"Candlestick">;
-      const data: CandlestickData[] = (j.points ?? []).map((p) => ({
-        time: Math.floor(p.date / 1000) as UTCTimestamp,
-        open: p.open,
-        high: p.high,
-        low: p.low,
-        close: p.close,
-      }));
-      series.setData(data);
-      chart.timeScale().fitContent();
-      setEmpty(data.length === 0);
-      // 마지막 캔들 추적 — currentPrice 도착 시 update.
-      const last = j.points?.[j.points.length - 1];
-      if (last) {
-        const bucketMs =
-          interval === "1m"
-            ? 60_000
-            : interval === "5m"
-              ? 5 * 60_000
-              : 15 * 60_000;
-        lastCandleRef.current = {
-          time: Math.floor(last.date / 1000) as UTCTimestamp,
-          open: last.open,
-          high: last.high,
-          low: last.low,
-          close: last.close,
-          bucketMs,
-        };
-      } else {
-        lastCandleRef.current = null;
-      }
     };
 
     const loadDaily = async () => {
@@ -233,24 +122,20 @@ export function PriceChart({ code, name, currentPrice }: Props) {
         setEmpty(true);
         return;
       }
-      const series = ensureSeries("area") as ISeriesApi<"Area">;
+      const series = ensureSeries();
       const data = (j.points ?? []).map((p) => ({
         time: Math.floor(p.date / 1000) as UTCTimestamp,
         value: p.close,
       }));
       series.setData(data);
+      lastDailyTimeRef.current = data[data.length - 1]?.time ?? null;
       chart.timeScale().fitContent();
       setEmpty(data.length === 0);
-      lastCandleRef.current = null;
     };
 
     const runOnce = async () => {
       try {
-        if (effectiveTf === "1D") {
-          await loadDaily();
-        } else {
-          await loadIntraday(effectiveTf);
-        }
+        await loadDaily();
       } catch (e) {
         if (!aborted) {
           setError(e instanceof Error ? e.message : String(e));
@@ -263,59 +148,22 @@ export function PriceChart({ code, name, currentPrice }: Props) {
 
     void runOnce();
 
-    // 폴링:
-    //   - 분봉: 15초 (서버 30s 캐시지만 새 분봉 도착을 빠르게 반영)
-    //   - 1D: 폴링 없음 (일봉은 정규장 종료까지 의미 변동 적음)
-    if (effectiveTf !== "1D") {
-      pollTimer = setInterval(() => void runOnce(), 15_000);
-    }
-
     return () => {
       aborted = true;
-      if (pollTimer) clearInterval(pollTimer);
     };
-  }, [activeCode, effectiveTf]);
+  }, [activeCode]);
 
-  // currentPrice 가 흐를 때 — 분봉 모드의 마지막 캔들 high/low/close 를 series.update 로 갱신.
-  // (재렌더 X, 부드럽게 박힘.) 새 minute boundary 를 넘어가면 다음 fetch 가 새 캔들을 추가하기 전까지
-  // 임시로 새 캔들 한 개를 추가.
+  // 현재가가 바뀌면 일봉 마지막 점을 가볍게 갱신한다.
   useEffect(() => {
+    if (mode === "overseas") return;
     if (currentPrice == null || currentPrice <= 0) return;
     const series = seriesRef.current;
-    if (!series || seriesKindRef.current !== "candle") return;
-    const last = lastCandleRef.current;
-    if (!last) return;
-    const nowMs = Date.now();
-    const lastEndMs = last.time * 1000 + last.bucketMs;
-    if (nowMs < lastEndMs) {
-      // 같은 버킷 — 마지막 캔들 갱신
-      const next = {
-        time: last.time,
-        open: last.open,
-        high: Math.max(last.high, currentPrice),
-        low: Math.min(last.low, currentPrice),
-        close: currentPrice,
-      };
-      lastCandleRef.current = { ...last, ...next };
-      (series as ISeriesApi<"Candlestick">).update(next);
-    } else {
-      // 새 버킷 — 새 캔들 1개 추가 (open=last close 가 자연)
-      const newBucketStart =
-        Math.floor(nowMs / last.bucketMs) * last.bucketMs;
-      const t = Math.floor(newBucketStart / 1000) as UTCTimestamp;
-      const next = {
-        time: t,
-        open: last.close,
-        high: Math.max(last.close, currentPrice),
-        low: Math.min(last.close, currentPrice),
-        close: currentPrice,
-      };
-      lastCandleRef.current = { ...next, bucketMs: last.bucketMs };
-      (series as ISeriesApi<"Candlestick">).update(next);
-    }
-  }, [currentPrice]);
+    const time = lastDailyTimeRef.current;
+    if (!series || !time) return;
+    series.update({ time, value: currentPrice });
+  }, [currentPrice, mode]);
 
-  const tfButtons: Timeframe[] = isKr ? ["5m", "15m", "1D"] : ["1D"];
+  const tfButtons: Timeframe[] = ["1D"];
 
   return (
     <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
@@ -328,11 +176,9 @@ export function PriceChart({ code, name, currentPrice }: Props) {
               {overseasProxy.exchange} · {overseasProxy.proxyCode}
             </div>
           )}
-          {effectiveTf !== "1D" && isKr && (
-            <div className="text-[10px] text-muted-foreground mt-0.5">
-              KIS 분봉 · {TF_LABEL[effectiveTf]} · 실시간 갱신
-            </div>
-          )}
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            일봉 차트 · 현재가는 상단 카드에서 실시간 갱신
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           {overseasProxy && (
@@ -356,9 +202,9 @@ export function PriceChart({ code, name, currentPrice }: Props) {
             {tfButtons.map((t) => (
               <button
                 key={t}
-                onClick={() => setTf(t)}
+                onClick={() => undefined}
                 className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                  effectiveTf === t
+                  t === "1D"
                     ? "bg-foreground text-background border-foreground"
                     : "border-border text-muted-foreground hover:bg-muted"
                 }`}

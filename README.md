@@ -38,17 +38,14 @@ npm run start
 |---|---|---|
 | `DASHBOARD_PASS` | 권장 | 비밀번호. 설정 시 `/login`에서 1회 입력 후 30일 자동 통과 |
 | `KIS_ENABLED` | 선택 | `0`/`false`로 두면 KIS 호출 비활성화. 기본값은 활성 |
-| `KIS_INDEX_ENABLED` | 선택 | `1`이면 한국 지수도 KIS로 조회. 기본은 빠른 Yahoo |
-| `KIS_HISTORY_ENABLED` | 선택 | `1`이면 일봉 히스토리도 KIS로 조회. 기본은 빠른 Yahoo |
-| `KIS_EXTRAS_ENABLED` | 선택 | `1`이면 프로그램매매/공매도 보조 데이터 조회 |
-| `KIS_FLOW_ENABLED` | 선택 | `1`이면 외인/기관 수급도 KIS 우선 조회. 기본은 빠른 네이버/mock |
 | `KIS_APP_KEY` | 선택 | 한국투자증권 KIS Developers App Key |
 | `KIS_APP_SECRET` | 선택 | 동 시크릿 |
 | `KIS_BASE_URL` | 선택 | KIS API base URL (실전 / 모의) |
 
 **Vercel 공개 배포에선 `DASHBOARD_PASS` 설정 권장** — 봇 크롤로 인한 함수 호출 폭주를 막아줍니다. 한 번 로그인하면 같은 브라우저에서 30일 동안 비번을 다시 묻지 않습니다.
 **KIS 토큰은 발급 시 알림톡/SMS가 올 수 있습니다.** 앱은 토큰을 `data/kis-token.json`에 저장해 만료 전까지 재사용합니다.
-문자 폭주 등 장애 대응이 필요할 때만 `KIS_ENABLED=0`으로 끄면, 외인/기관 수급은 네이버 또는 mock data로 표시됩니다.
+KIS는 한국/미국 현재가에만 사용하고, 지수·일봉·수급·부가데이터는 빠른 기존 경로를 사용합니다.
+문자 폭주 등 장애 대응이 필요할 때만 `KIS_ENABLED=0`으로 끄면 됩니다.
 
 ## 디렉토리 구조
 
