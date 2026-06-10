@@ -540,26 +540,17 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
       />
 
-      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용.
-          모바일(<lg)에서는 "선택 종목" 카드는 숨김 — Hero/Detail에 동일 정보가 모두 있어 중복.
-          데스크탑(>=lg)에서는 가로 비교를 위해 선택 종목도 그대로 노출. */}
+      {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용. 모바일·데스크탑 동일 노출. */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {snap.primaries.map((p) => {
-          const isSelected = p.meta.code === selected;
-          return (
-            <div
-              key={p.meta.code}
-              className={isSelected ? "hidden lg:block" : ""}
-            >
-              <StockCard
-                snap={p}
-                selected={isSelected}
-                onSelect={setSelected}
-                krwRate={krwRate}
-              />
-            </div>
-          );
-        })}
+        {snap.primaries.map((p) => (
+          <StockCard
+            key={p.meta.code}
+            snap={p}
+            selected={p.meta.code === selected}
+            onSelect={setSelected}
+            krwRate={krwRate}
+          />
+        ))}
         {snap.primaries.length === 0 && (
           <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
             종목 데이터를 불러오지 못했습니다.
