@@ -18,7 +18,6 @@ import {
 } from "./StockDetailPanel";
 import { PriceChart } from "./PriceChart";
 import { RecommendationsPanel } from "./RecommendationsPanel";
-import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
@@ -72,6 +71,10 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   const isRegular = snapshot.primaries.some(
     (p) => (p.quote.marketState ?? "").toUpperCase() === "REGULAR"
   );
+  const isQuoteExtended = snapshot.primaries.some((p) => {
+    const state = (p.quote.marketState ?? "").toUpperCase();
+    return state === "PRE" || state === "POST";
+  });
   const isExtended = snapshot.primaries.some(
     (p) => p.quote.extendedHours?.active === true
   );
@@ -82,11 +85,11 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
 
   if (hasRealFlow) {
     if (isRegular) return KIS_REGULAR_REFRESH_MS;
-    if (isExtended) return KIS_EXTENDED_REFRESH_MS;
+    if (isExtended || isQuoteExtended) return KIS_EXTENDED_REFRESH_MS;
     return KIS_OFF_HOURS_REFRESH_MS;
   }
   if (isRegular) return REGULAR_REFRESH_MS;
-  if (isExtended) return EXTENDED_REFRESH_MS;
+  if (isExtended || isQuoteExtended) return EXTENDED_REFRESH_MS;
   if (isOverseasNightOpen) return OVERSEAS_NIGHT_REFRESH_MS;
   return OFF_HOURS_REFRESH_MS;
 }
@@ -535,9 +538,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         maxWatch={MAX_WATCH}
         krwRate={krwRate}
       />
-
-      {/* 시장 순위 — KIS 실패 시에도 현재 관심종목 기준 fallback 표시. 기본 접힘. */}
-      <MarketLeadersPanel snapshots={visiblePrimaries} />
 
       {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
       <ThemeGroupView

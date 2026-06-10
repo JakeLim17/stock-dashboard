@@ -28,7 +28,7 @@ import type { FlowData, Quote } from "../types";
 //       기본 Yahoo. KIS_HISTORY_ENABLED=1 이면 한국/미국 주식 KIS 우선.
 //       기타:  Yahoo
 //   - 수급(fetchFlowOrMock)
-//       한국:   KIS → 네이버 → mock
+//       한국:   기본 네이버 → mock. KIS_FLOW_ENABLED=1 이면 KIS 우선.
 //       해외:  mock (의미 없음)
 
 function isUsTicker(code: string): boolean {
@@ -150,7 +150,7 @@ export async function fetchFlowOrMock(
     return { flow: m, source: "mock" };
   }
 
-  if (kisEnabled()) {
+  if (envEnabled("KIS_FLOW_ENABLED") && kisEnabled()) {
     const kisFlow = await fetchKrFlow(code);
     if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
       return { flow: kisFlow, source: "kis" };

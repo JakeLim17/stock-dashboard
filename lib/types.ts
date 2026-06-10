@@ -704,29 +704,6 @@ export interface IndexQuote {
   fetchedAt: number;
 }
 
-// 시장 순위 종목 한 건
-export interface MarketLeader {
-  rank: number;
-  // 6자리 단축 코드 (예: "005930")
-  code: string;
-  name: string;
-  price: number;
-  changeAbs: number;
-  changeRate: number;
-  volume: number | null;
-}
-
-// 거래량/등락 순위 묶음
-export type MarketLeadersKind = "volume" | "rising" | "falling";
-export type MarketLeadersMarket = "all" | "kospi" | "kosdaq";
-
-export interface MarketLeadersData {
-  kind: MarketLeadersKind;
-  market: MarketLeadersMarket;
-  items: MarketLeader[];
-  fetchedAt: number;
-}
-
 // 공매도 잔고/거래 정보.
 // 종목별 잔고는 KRX 주간 공시 기반이라 API 응답이 일~수일 지연될 수 있다.
 // asOf는 데이터 기준 영업일 epoch ms.

@@ -7,10 +7,6 @@ import type {
   ExecutionTick,
   FlowData,
   IndexQuote,
-  MarketLeader,
-  MarketLeadersData,
-  MarketLeadersKind,
-  MarketLeadersMarket,
   ProgramTradeData,
   Quote,
   ShortBalanceData,
@@ -569,6 +565,29 @@ function applySign(value: number | null, sign: string | undefined): number | nul
   return Math.abs(value);
 }
 
+function marketClockParts(timeZone: string): { weekday: number; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const rawWeekday = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+    rawWeekday
+  );
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return { weekday, minutes: hour * 60 + minute };
+}
+
+function krMarketStateByClock(): string {
+  const { weekday, minutes } = marketClockParts("Asia/Seoul");
+  if (weekday < 1 || weekday > 5) return "CLOSED";
+  return minutes >= 9 * 60 && minutes <= 15 * 60 + 30 ? "REGULAR" : "CLOSED";
+}
+
 // 한국 종목 현재가 — Yahoo 코드(005930.KS) 받음. 실패 시 null.
 export async function fetchKrQuote(code: string, name: string): Promise<Quote | null> {
   const six = toKisCode(code);
@@ -623,10 +642,8 @@ export async function fetchKrQuote(code: string, name: string): Promise<Quote | 
         bps: n(o.bps),
       },
       fetchedAt: Date.now(),
-      // KIS inquire-price는 시장 상태를 직접 안 줘서 비워두고, 호출자(라우팅)에서
-      // 네이버/Yahoo와 머지하거나 별도 판정에 맡긴다.
-      marketState: undefined,
-      priceTime: null,
+      marketState: krMarketStateByClock(),
+      priceTime: Date.now(),
       extendedHours: null,
     };
   } catch (e) {
@@ -882,6 +899,15 @@ function yahooToKisExchange(ticker: string): string | null {
   return "NAS";
 }
 
+function usMarketStateByClock(): string {
+  const { weekday, minutes } = marketClockParts("America/New_York");
+  if (weekday < 1 || weekday > 5) return "CLOSED";
+  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return "REGULAR";
+  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "PRE";
+  if (minutes >= 16 * 60 && minutes < 20 * 60) return "POST";
+  return "CLOSED";
+}
+
 interface KisOverseasPriceResponse {
   rt_cd?: string;
   output?: {
@@ -949,8 +975,8 @@ export async function fetchUsQuote(
       currency: o.curr ?? "USD",
       valuation: null,
       fetchedAt: Date.now(),
-      marketState: undefined,
-      priceTime: null,
+      marketState: usMarketStateByClock(),
+      priceTime: Date.now(),
       extendedHours: null,
     };
   } catch {
@@ -1356,124 +1382,6 @@ export async function fetchKrIndex(
     };
   } catch (e) {
     dbg("[index] throw:", e instanceof Error ? e.message : String(e));
-    return null;
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────
-// 시장 순위 — 등락률 / 거래량
-// 등락률: /uapi/domestic-stock/v1/ranking/fluctuation (FHPST01700000)
-// 거래량: /uapi/domestic-stock/v1/ranking/volume-rank (FHPST01710000)
-// ────────────────────────────────────────────────────────────────────
-
-interface KisRankingItem {
-  data_rank?: string;
-  hts_kor_isnm?: string;
-  mksc_shrn_iscd?: string;
-  stck_prpr?: string;
-  prdy_vrss?: string;
-  prdy_vrss_sign?: string;
-  prdy_ctrt?: string;
-  acml_vol?: string;
-}
-
-interface KisRankingResponse {
-  rt_cd?: string;
-  msg1?: string;
-  output?: KisRankingItem[];
-}
-
-// "all"→"0000", "kospi"→"0001", "kosdaq"→"1001"
-function marketToKisCode(market: MarketLeadersMarket): string {
-  if (market === "kospi") return "0001";
-  if (market === "kosdaq") return "1001";
-  return "0000";
-}
-
-export async function fetchKrMarketLeaders(
-  kind: MarketLeadersKind,
-  market: MarketLeadersMarket = "all",
-  count = 20
-): Promise<MarketLeadersData | null> {
-  if (!kisEnabled()) return null;
-  const isVolume = kind === "volume";
-  const apiPath = isVolume
-    ? "/uapi/domestic-stock/v1/ranking/volume-rank"
-    : "/uapi/domestic-stock/v1/ranking/fluctuation";
-  const trId = isVolume ? "FHPST01710000" : "FHPST01700000";
-  const mktCode = marketToKisCode(market);
-
-  const query: Record<string, string> = isVolume
-    ? {
-        FID_COND_MRKT_DIV_CODE: "J",
-        FID_COND_SCR_DIV_CODE: "20171",
-        FID_INPUT_ISCD: mktCode,
-        FID_DIV_CLS_CODE: "0",
-        FID_BLNG_CLS_CODE: "0",
-        FID_TRGT_CLS_CODE: "111111111",
-        FID_TRGT_EXLS_CLS_CODE: "0000000000",
-        FID_INPUT_PRICE_1: "0",
-        FID_INPUT_PRICE_2: "0",
-        FID_VOL_CNT: "0",
-        FID_INPUT_DATE_1: "0",
-      }
-    : {
-        FID_COND_MRKT_DIV_CODE: "J",
-        FID_COND_SCR_DIV_CODE: "20170",
-        FID_INPUT_ISCD: mktCode,
-        FID_RANK_SORT_CLS_CODE: kind === "rising" ? "0" : "1",
-        FID_INPUT_CNT_1: "0",
-        FID_PRC_CLS_CODE: "0",
-        FID_INPUT_PRICE_1: "",
-        FID_INPUT_PRICE_2: "",
-        FID_VOL_CNT: "",
-        FID_TRGT_CLS_CODE: "0",
-        FID_TRGT_EXLS_CLS_CODE: "0",
-        FID_DIV_CLS_CODE: "0",
-        FID_RSFL_RATE1: "",
-        FID_RSFL_RATE2: "",
-      };
-
-  try {
-    const json = await kisGet<KisRankingResponse>({
-      path: apiPath,
-      trId,
-      query,
-    });
-
-    if (json.rt_cd && json.rt_cd !== "0") return null;
-    const list = json.output ?? [];
-    if (list.length === 0) return null;
-
-    const items: MarketLeader[] = [];
-    for (const it of list.slice(0, count)) {
-      const code = (it.mksc_shrn_iscd ?? "").trim();
-      const name = (it.hts_kor_isnm ?? "").trim();
-      const price = n(it.stck_prpr);
-      if (!code || !name || price == null) continue;
-      const sign = it.prdy_vrss_sign;
-      const changeAbs = applySign(n(it.prdy_vrss), sign) ?? 0;
-      const rateRaw = applySign(n(it.prdy_ctrt), sign);
-      items.push({
-        rank: n(it.data_rank) ?? items.length + 1,
-        code,
-        name,
-        price,
-        changeAbs,
-        changeRate: rateRaw != null ? rateRaw / 100 : 0,
-        volume: n(it.acml_vol),
-      });
-    }
-    if (items.length === 0) return null;
-
-    return {
-      kind,
-      market,
-      items,
-      fetchedAt: Date.now(),
-    };
-  } catch (e) {
-    dbg("[leaders] throw:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }
