@@ -317,7 +317,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     currentSelectedSnap ??
     (lastSelectedSnapRef.current?.meta.code === selected
       ? lastSelectedSnapRef.current
-      : snap.primaries[0]);
+      : watchCodes.includes(selected)
+        ? null
+        : snap.primaries[0]);
+  const visiblePrimaries = snap.primaries.filter((p) =>
+    watchCodes.includes(p.meta.code)
+  );
 
   // USDKRW 환율 — USD 종목 원화 병기에 사용. indicators(KRW=X) 기준.
   // 환율이 없거나 fetch 실패면 null → 자식들이 보조 표시를 자동 생략(graceful).
@@ -531,8 +536,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
       />
 
-      {/* 시장 순위 — KIS 활성 시 거래량/상승/하락 TOP. 기본 접힘. */}
-      <MarketLeadersPanel />
+      {/* 시장 순위 — KIS 실패 시에도 현재 관심종목 기준 fallback 표시. 기본 접힘. */}
+      <MarketLeadersPanel snapshots={visiblePrimaries} />
 
       {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시 */}
       <ThemeGroupView
@@ -559,7 +564,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
 
       {/* 종목 카드 grid — 디테일 패널 아래 보조 비교용. 모바일·데스크탑 동일 노출. */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {snap.primaries.map((p) => (
+        {visiblePrimaries.map((p) => (
           <StockCard
             key={p.meta.code}
             snap={p}
@@ -568,9 +573,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             krwRate={krwRate}
           />
         ))}
-        {snap.primaries.length === 0 && (
+        {visiblePrimaries.length === 0 && (
           <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
-            종목 데이터를 불러오지 못했습니다.
+            선택한 관심종목 데이터를 불러오는 중입니다.
           </div>
         )}
       </div>

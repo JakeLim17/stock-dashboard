@@ -6,9 +6,10 @@ import type {
   MarketLeadersData,
   MarketLeadersKind,
   MarketLeadersMarket,
+  StockSnapshot,
 } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
-import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
+import { changeColor, fmtNumber, fmtPercent, pickPrimaryQuote } from "@/lib/utils";
 
 // 거래량 / 상승 / 하락 TOP — KIS 활성 시만 동작. 30s 캐시.
 // 마운트 시 1회 + 사용자 탭 전환 시 fetch. 자동 폴링은 없음 (사용자 행동 기반).
@@ -30,17 +31,68 @@ interface LeadersResponse {
   error?: string;
 }
 
-export function MarketLeadersPanel() {
+function toShortCode(code: string): string {
+  return code.replace(/\.(KS|KQ)$/i, "");
+}
+
+function matchesMarket(code: string, market: MarketLeadersMarket): boolean {
+  if (market === "all") return true;
+  if (market === "kospi") return /\.KS$/i.test(code);
+  return /\.KQ$/i.test(code);
+}
+
+function buildFallbackLeaders(
+  snapshots: StockSnapshot[],
+  kind: MarketLeadersKind,
+  market: MarketLeadersMarket
+): MarketLeadersData | null {
+  const rows = snapshots
+    .filter((snap) => matchesMarket(snap.meta.code, market))
+    .map((snap) => {
+      const { primary } = pickPrimaryQuote(snap.quote);
+      return {
+        code: toShortCode(snap.meta.code),
+        name: snap.meta.name,
+        price: primary.price,
+        changeAbs: primary.changeAbs,
+        changeRate: primary.changeRate,
+        volume: snap.quote.volume ?? null,
+      };
+    });
+
+  if (kind === "volume") {
+    rows.sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1));
+  } else if (kind === "rising") {
+    rows.sort((a, b) => b.changeRate - a.changeRate);
+  } else {
+    rows.sort((a, b) => a.changeRate - b.changeRate);
+  }
+
+  const items: MarketLeader[] = rows.slice(0, 10).map((row, i) => ({
+    rank: i + 1,
+    ...row,
+  }));
+  if (items.length === 0) return null;
+  return { kind, market, items, fetchedAt: Date.now() };
+}
+
+export function MarketLeadersPanel({
+  snapshots,
+}: {
+  snapshots: StockSnapshot[];
+}) {
   const [kind, setKind] = useState<MarketLeadersKind>("volume");
   const [market, setMarket] = useState<MarketLeadersMarket>("all");
   const [data, setData] = useState<MarketLeadersData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<"kis" | "watchlist" | null>(null);
   const [open, setOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const fallback = buildFallbackLeaders(snapshots, kind, market);
     try {
       const r = await fetch(
         `/api/leaders?kind=${kind}&market=${market}&count=10`,
@@ -48,17 +100,22 @@ export function MarketLeadersPanel() {
       );
       const j = (await r.json()) as LeadersResponse;
       if (j.error) {
-        setError(j.error);
-        setData(null);
+        setError(`${j.error} · 관심종목 기준으로 표시`);
+        setData(fallback);
+        setSource(fallback ? "watchlist" : null);
         return;
       }
-      setData(j.data);
+      setData(j.data ?? fallback);
+      setSource(j.data ? "kis" : fallback ? "watchlist" : null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`${msg} · 관심종목 기준으로 표시`);
+      setData(fallback);
+      setSource(fallback ? "watchlist" : null);
     } finally {
       setLoading(false);
     }
-  }, [kind, market]);
+  }, [kind, market, snapshots]);
 
   useEffect(() => {
     if (!open) return;
@@ -132,8 +189,13 @@ export function MarketLeadersPanel() {
             </div>
           )}
           {error && (
-            <div className="rounded-lg border border-down/30 bg-down/10 text-down text-sm px-3 py-2">
+            <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 text-warn text-xs px-3 py-2">
               {error}
+            </div>
+          )}
+          {!loading && !error && !data && (
+            <div className="text-center py-6 text-sm text-muted-foreground">
+              표시할 순위 데이터가 없습니다.
             </div>
           )}
           {data && data.items.length > 0 && <LeadersTable items={data.items} />}
@@ -148,7 +210,9 @@ export function MarketLeadersPanel() {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
-              })} · KIS (30s 캐시)`}
+              })} · ${
+                source === "kis" ? "KIS (30s 캐시)" : "관심종목 기준"
+              }`}
             </div>
           )}
         </CardBody>
