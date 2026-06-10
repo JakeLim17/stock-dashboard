@@ -843,6 +843,103 @@ export async function fetchUsHistorical(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// 분봉 (1분) — /uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice
+// TR_ID: FHKST03010200. 가장 최근 시각 기준 100건 반환 (1m × 100 ≒ 100분).
+// 5m/15m 봉이 필요하면 라우트(/api/intraday-chart) 에서 aggregation.
+// ────────────────────────────────────────────────────────────────────
+
+interface KisIntradayCandle {
+  stck_bsop_date?: string; // YYYYMMDD
+  stck_cntg_hour?: string; // HHMMSS
+  stck_prpr?: string;
+  stck_oprc?: string;
+  stck_hgpr?: string;
+  stck_lwpr?: string;
+  cntg_vol?: string;
+  acml_tr_pbmn?: string;
+}
+
+interface KisIntradayResponse {
+  rt_cd?: string;
+  msg1?: string;
+  output1?: Record<string, string | undefined>;
+  output2?: KisIntradayCandle[];
+}
+
+// "YYYYMMDD" + "HHMMSS" (KST) → epoch ms
+function parseYyyymmddHhmmss(
+  date: string | undefined,
+  time: string | undefined
+): number | null {
+  if (!date || date.length !== 8 || !time) return null;
+  const padded = time.padStart(6, "0");
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(4, 6));
+  const d = Number(date.slice(6, 8));
+  const hh = Number(padded.slice(0, 2));
+  const mm = Number(padded.slice(2, 4));
+  const ss = Number(padded.slice(4, 6));
+  if (
+    !Number.isFinite(y) ||
+    !Number.isFinite(m) ||
+    !Number.isFinite(d) ||
+    !Number.isFinite(hh) ||
+    !Number.isFinite(mm) ||
+    !Number.isFinite(ss)
+  )
+    return null;
+  return Date.UTC(y, m - 1, d, hh - 9, mm, ss);
+}
+
+export async function fetchKrIntradayCandles(
+  code: string,
+  startHHMMSS = "153000"
+): Promise<HistoricalPoint[] | null> {
+  const six = toKisCode(code);
+  if (!six) return null;
+  if (!kisEnabled()) return null;
+
+  try {
+    const json = await kisGet<KisIntradayResponse>({
+      path: "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+      trId: "FHKST03010200",
+      query: {
+        FID_ETC_CLS_CODE: "",
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: six,
+        FID_INPUT_HOUR_1: startHHMMSS,
+        FID_PW_DATA_INCU_YN: "Y",
+      },
+    });
+
+    if (json.rt_cd && json.rt_cd !== "0") return null;
+    const list = json.output2 ?? [];
+    if (list.length === 0) return null;
+
+    const points: HistoricalPoint[] = [];
+    for (const it of list) {
+      const t = parseYyyymmddHhmmss(it.stck_bsop_date, it.stck_cntg_hour);
+      const close = n(it.stck_prpr);
+      if (t == null || close == null) continue;
+      points.push({
+        date: t,
+        open: n(it.stck_oprc) ?? close,
+        high: n(it.stck_hgpr) ?? close,
+        low: n(it.stck_lwpr) ?? close,
+        close,
+        volume: n(it.cntg_vol) ?? 0,
+      });
+    }
+    if (points.length === 0) return null;
+    points.sort((a, b) => a.date - b.date);
+    return points;
+  } catch (e) {
+    dbg("[intraday-chart] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // 프로그램 매매 — /uapi/domestic-stock/v1/quotations/program-trade-by-stock
 // TR_ID: FHPST04540000 (당일 누적, 종목별)
 // 응답 키는 KIS 공식 명세: arbt_smtn_*, nabt_smtn_*, whol_smtn_*.

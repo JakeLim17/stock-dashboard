@@ -574,7 +574,11 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 flex flex-col [&>div]:flex-1 [&>div]:flex [&>div]:flex-col [&>div>div:last-child]:flex-1 [&>div>div:last-child]:!h-auto [&>div>div:last-child]:min-h-[280px]">
           {selectedSnap && (
-            <PriceChart code={selectedSnap.meta.code} name={selectedSnap.meta.name} />
+            <PriceChart
+              code={selectedSnap.meta.code}
+              name={selectedSnap.meta.name}
+              currentPrice={selectedSnap.quote.price}
+            />
           )}
         </div>
         <div className="flex flex-col gap-4">

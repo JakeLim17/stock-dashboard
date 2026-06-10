@@ -7,10 +7,12 @@ import type {
   ShortBalanceData,
 } from "../types";
 import {
+  fetchKrIntradayCandles,
   fetchKrMarketLeaders,
   fetchKrProgramTrade,
   fetchKrShortBalance,
 } from "./kis";
+import type { HistoricalPoint } from "./yahoo";
 
 // KIS 신규 데이터(프로그램 매매·공매도·시장 순위) 메모리 캐시.
 // - 프로그램 매매: 60s TTL — 매 폴링(1~2초)마다 호출하면 토큰/throttle 부담이 큼. 분 단위 변화가 본질적인 데이터.
@@ -22,6 +24,8 @@ import {
 const PROGRAM_TTL_MS = 60_000;
 const SHORT_TTL_MS = 5 * 60_000;
 const LEADERS_TTL_MS = 30_000;
+// 분봉은 새 minute boundary 가 의미 있어 30s 캐시. 클라이언트 폴링은 별도로 1m 단위.
+const INTRADAY_CANDLES_TTL_MS = 30_000;
 
 interface Entry<T> {
   data: T;
@@ -41,6 +45,14 @@ declare global {
   var __kisLeadersCache: Map<string, Entry<MarketLeadersData | null>> | undefined;
   // eslint-disable-next-line no-var
   var __kisLeadersFlight: Map<string, Promise<MarketLeadersData | null>> | undefined;
+  // eslint-disable-next-line no-var
+  var __kisCandleCache:
+    | Map<string, Entry<HistoricalPoint[] | null>>
+    | undefined;
+  // eslint-disable-next-line no-var
+  var __kisCandleFlight:
+    | Map<string, Promise<HistoricalPoint[] | null>>
+    | undefined;
 }
 
 function getProgramCache(): Map<string, Entry<ProgramTradeData | null>> {
@@ -134,6 +146,37 @@ export async function getMarketLeadersCached(
   return p;
 }
 
+function getCandleCache(): Map<string, Entry<HistoricalPoint[] | null>> {
+  if (!global.__kisCandleCache) global.__kisCandleCache = new Map();
+  return global.__kisCandleCache;
+}
+function getCandleFlight(): Map<string, Promise<HistoricalPoint[] | null>> {
+  if (!global.__kisCandleFlight) global.__kisCandleFlight = new Map();
+  return global.__kisCandleFlight;
+}
+
+export async function getIntradayCandlesCached(
+  code: string
+): Promise<HistoricalPoint[] | null> {
+  const key = code;
+  const c = getCandleCache();
+  const f = getCandleFlight();
+  const now = Date.now();
+  const hit = c.get(key);
+  if (hit && hit.expiresAt > now) return hit.data;
+  const inflight = f.get(key);
+  if (inflight) return inflight;
+  const p = (async () => {
+    const data = await fetchKrIntradayCandles(code).catch(() => null);
+    c.set(key, { data, expiresAt: Date.now() + INTRADAY_CANDLES_TTL_MS });
+    return data;
+  })().finally(() => {
+    f.delete(key);
+  });
+  f.set(key, p);
+  return p;
+}
+
 // 강제 갱신 — 사용자 새로고침 버튼 등에서 호출.
 export function invalidateKisExtraCache(code?: string): void {
   if (code) {
@@ -141,6 +184,8 @@ export function invalidateKisExtraCache(code?: string): void {
     getProgramFlight().delete(code);
     getShortCache().delete(code);
     getShortFlight().delete(code);
+    getCandleCache().delete(code);
+    getCandleFlight().delete(code);
   } else {
     getProgramCache().clear();
     getProgramFlight().clear();
@@ -148,5 +193,7 @@ export function invalidateKisExtraCache(code?: string): void {
     getShortFlight().clear();
     getLeadersCache().clear();
     getLeadersFlight().clear();
+    getCandleCache().clear();
+    getCandleFlight().clear();
   }
 }
