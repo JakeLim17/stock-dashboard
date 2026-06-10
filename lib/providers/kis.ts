@@ -1242,74 +1242,10 @@ interface KisAskingResponse {
 export async function fetchKrAskingPrice(
   code: string
 ): Promise<AskingPriceData | null> {
-  const six = toKisCode(code);
-  if (!six) return null;
-  if (!kisEnabled()) return null;
-
-  try {
-    const json = await kisGet<KisAskingResponse>({
-      path: "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
-      trId: "FHKST01010200",
-      query: {
-        FID_COND_MRKT_DIV_CODE: "J",
-        FID_INPUT_ISCD: six,
-      },
-    });
-
-    if (json.rt_cd && json.rt_cd !== "0") return null;
-    const o1 = json.output1;
-    if (!o1) return null;
-
-    const levels: AskingPriceLevel[] = [];
-    for (let i = 1; i <= 10; i++) {
-      const askPrice = n(o1[`askp${i}`]);
-      const askQty = n(o1[`askp_rsqn${i}`]);
-      const bidPrice = n(o1[`bidp${i}`]);
-      const bidQty = n(o1[`bidp_rsqn${i}`]);
-      if (askPrice == null && bidPrice == null) continue;
-      levels.push({
-        askPrice: askPrice ?? 0,
-        askQty: askQty ?? 0,
-        bidPrice: bidPrice ?? 0,
-        bidQty: bidQty ?? 0,
-      });
-    }
-    if (levels.length === 0) return null;
-
-    const totalAskQty =
-      n(o1.total_askp_rsqn) ??
-      levels.reduce((acc, l) => acc + (l.askQty || 0), 0);
-    const totalBidQty =
-      n(o1.total_bidp_rsqn) ??
-      levels.reduce((acc, l) => acc + (l.bidQty || 0), 0);
-
-    // 체결강도 — KIS 일부 응답에 tday_rltv(체결강도)가 있고, 없으면 잔량 비율 폴백.
-    let ccldStrength: number | null = null;
-    const o2 = json.output2;
-    if (o2) {
-      const cttr = n(o2.tday_rltv);
-      if (cttr != null) ccldStrength = cttr;
-    }
-    if (ccldStrength == null) {
-      ccldStrength = totalAskQty > 0 ? (totalBidQty / totalAskQty) * 100 : null;
-    }
-
-    const expectedPrice = o2 ? n(o2.antc_cnpr) : null;
-    const expectedVolume = o2 ? n(o2.antc_vol) : null;
-
-    return {
-      levels,
-      totalAskQty,
-      totalBidQty,
-      ccldStrength,
-      expectedPrice,
-      expectedVolume,
-      fetchedAt: Date.now(),
-    };
-  } catch (e) {
-    dbg("[asking] throw:", e instanceof Error ? e.message : String(e));
-    return null;
-  }
+  // 호가 폴링은 사용자 알림(KIS 토큰 발급 카톡/SMS) 폭주 원인이 되어 비활성화.
+  // 재활성화 시에는 별도 opt-in 환경변수와 긴 캐시를 먼저 설계해야 한다.
+  void code;
+  return null;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1546,54 +1482,10 @@ export async function fetchKrExecutions(
   code: string,
   limit = 30
 ): Promise<ExecutionTick[] | null> {
-  const six = toKisCode(code);
-  if (!six) return null;
-  if (!kisEnabled()) return null;
-
-  try {
-    const json = await kisGet<KisCcnlResponse>({
-      path: "/uapi/domestic-stock/v1/quotations/inquire-ccnl",
-      trId: "FHKST01010300",
-      query: {
-        FID_COND_MRKT_DIV_CODE: "J",
-        FID_INPUT_ISCD: six,
-      },
-    });
-
-    if (json.rt_cd && json.rt_cd !== "0") return null;
-    const list = json.output ?? [];
-    if (list.length === 0) return null;
-
-    const ticks: ExecutionTick[] = [];
-    for (const it of list.slice(0, limit)) {
-      const time = parseKisHHMMSS(it.stck_cntg_hour) ?? Date.now();
-      const price = n(it.stck_prpr);
-      if (price == null) continue;
-      const sign = it.prdy_vrss_sign;
-      const changeAbs = applySign(n(it.prdy_vrss), sign);
-      const rateRaw = applySign(n(it.prdy_ctrt), sign);
-      ticks.push({
-        time,
-        price,
-        volume: n(it.cntg_vol) ?? 0,
-        // KIS inquire-ccnl 은 매수/매도 체결 구분이 명시적이지 않다.
-        // sign 으로만 추정: 상승(1,2)→매수, 하락(4,5)→매도, 보합(3)→neutral.
-        side:
-          sign === "1" || sign === "2"
-            ? "buy"
-            : sign === "4" || sign === "5"
-              ? "sell"
-              : "neutral",
-        changeAbs,
-        changeRate: rateRaw != null ? rateRaw / 100 : null,
-      });
-    }
-    if (ticks.length === 0) return null;
-    return ticks;
-  } catch (e) {
-    dbg("[ccnl] throw:", e instanceof Error ? e.message : String(e));
-    return null;
-  }
+  // 체결 틱 폴링도 /api/intraday 와 함께 비활성화한다.
+  void code;
+  void limit;
+  return null;
 }
 
 // ────────────────────────────────────────────────────────────────────

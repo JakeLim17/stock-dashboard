@@ -2,25 +2,21 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getOverseasNightProxy } from "@/lib/symbols";
-import type { ExecutionTick } from "@/lib/types";
 import {
   createChart,
   ColorType,
   type IChartApi,
   type ISeriesApi,
   type CandlestickData,
-  type LineData,
   type UTCTimestamp,
   AreaSeries,
   CandlestickSeries,
-  LineSeries,
 } from "lightweight-charts";
 
 // 차트 모드:
 //   intraday : 1m/5m/15m 캔들 (KIS 분봉 + 마지막 캔들 실시간 갱신)
 //   daily    : 1D 라인/에어리어 (기존 동작)
-//   tick     : 체결 30건 라인 (KIS inquire-ccnl, 1.5s polling)
-type Timeframe = "1m" | "5m" | "15m" | "1D" | "tick";
+type Timeframe = "1m" | "5m" | "15m" | "1D";
 type ChartMode = "domestic" | "overseas";
 
 interface OhlcPoint {
@@ -43,18 +39,11 @@ interface IntradayApiResp {
   error?: string;
 }
 
-interface TickApiResp {
-  executions: ExecutionTick[] | null;
-  asking?: unknown;
-  error?: string;
-}
-
 const TF_LABEL: Record<Timeframe, string> = {
   "1m": "1분",
   "5m": "5분",
   "15m": "15분",
   "1D": "1일",
-  tick: "틱",
 };
 
 // 부모는 polling 주기로 selectedSnap 을 새로 받아 currentPrice 도 자동 흐른다.
@@ -69,10 +58,10 @@ export function PriceChart({ code, name, currentPrice }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<
-    ISeriesApi<"Area"> | ISeriesApi<"Candlestick"> | ISeriesApi<"Line"> | null
+    ISeriesApi<"Area"> | ISeriesApi<"Candlestick"> | null
   >(null);
   // 현재 시리즈 종류 — re-create 여부 판단용
-  const seriesKindRef = useRef<"area" | "candle" | "line" | null>(null);
+  const seriesKindRef = useRef<"area" | "candle" | null>(null);
   // 분봉 모드에서 마지막 캔들의 timestamp(초) — currentPrice 도착 시 어떤 캔들을 update 할지 결정.
   const lastCandleRef = useRef<{
     time: UTCTimestamp;
@@ -151,7 +140,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     setEmpty(false);
     setError(null);
 
-    const ensureSeries = (kind: "area" | "candle" | "line") => {
+    const ensureSeries = (kind: "area" | "candle") => {
       if (seriesKindRef.current === kind && seriesRef.current) {
         return seriesRef.current;
       }
@@ -164,8 +153,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       }
       let next:
         | ISeriesApi<"Area">
-        | ISeriesApi<"Candlestick">
-        | ISeriesApi<"Line">;
+        | ISeriesApi<"Candlestick">;
       if (kind === "candle") {
         next = chart.addSeries(CandlestickSeries, {
           upColor: "#ef4444",
@@ -174,11 +162,6 @@ export function PriceChart({ code, name, currentPrice }: Props) {
           borderDownColor: "#3b82f6",
           wickUpColor: "#ef4444",
           wickDownColor: "#3b82f6",
-        });
-      } else if (kind === "line") {
-        next = chart.addSeries(LineSeries, {
-          color: "#4d8dff",
-          lineWidth: 2,
         });
       } else {
         next = chart.addSeries(AreaSeries, {
@@ -261,36 +244,10 @@ export function PriceChart({ code, name, currentPrice }: Props) {
       lastCandleRef.current = null;
     };
 
-    const loadTick = async () => {
-      const r = await fetch(
-        `/api/intraday?code=${encodeURIComponent(activeCode)}`,
-        { cache: "no-store" }
-      );
-      const j = (await r.json()) as TickApiResp;
-      if (aborted) return;
-      if (j.error) {
-        setError(j.error);
-        setEmpty(true);
-        return;
-      }
-      const ticks = (j.executions ?? []).slice().sort((a, b) => a.time - b.time);
-      const series = ensureSeries("line") as ISeriesApi<"Line">;
-      const data: LineData[] = ticks.map((t) => ({
-        time: Math.floor(t.time / 1000) as UTCTimestamp,
-        value: t.price,
-      }));
-      series.setData(data);
-      chart.timeScale().fitContent();
-      setEmpty(data.length === 0);
-      lastCandleRef.current = null;
-    };
-
     const runOnce = async () => {
       try {
         if (effectiveTf === "1D") {
           await loadDaily();
-        } else if (effectiveTf === "tick") {
-          await loadTick();
         } else {
           await loadIntraday(effectiveTf);
         }
@@ -307,12 +264,9 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     void runOnce();
 
     // 폴링:
-    //   - 틱: 1.5초 (KIS inquire-ccnl)
     //   - 분봉: 15초 (서버 30s 캐시지만 새 분봉 도착을 빠르게 반영)
     //   - 1D: 폴링 없음 (일봉은 정규장 종료까지 의미 변동 적음)
-    if (effectiveTf === "tick") {
-      pollTimer = setInterval(() => void runOnce(), 1500);
-    } else if (effectiveTf !== "1D") {
+    if (effectiveTf !== "1D") {
       pollTimer = setInterval(() => void runOnce(), 15_000);
     }
 
@@ -361,19 +315,6 @@ export function PriceChart({ code, name, currentPrice }: Props) {
     }
   }, [currentPrice]);
 
-  // 틱 모드에서도 currentPrice 가 있을 때 마지막 점에 update.
-  useEffect(() => {
-    if (currentPrice == null || currentPrice <= 0) return;
-    const series = seriesRef.current;
-    if (!series || seriesKindRef.current !== "line") return;
-    const t = Math.floor(Date.now() / 1000) as UTCTimestamp;
-    try {
-      (series as ISeriesApi<"Line">).update({ time: t, value: currentPrice });
-    } catch {
-      // time이 직전 점과 같은 초에 두 번 들어가면 lib가 throw할 수 있음 — 무시
-    }
-  }, [currentPrice]);
-
   const tfButtons: Timeframe[] = isKr ? ["5m", "15m", "1D"] : ["1D"];
 
   return (
@@ -389,9 +330,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
           )}
           {effectiveTf !== "1D" && isKr && (
             <div className="text-[10px] text-muted-foreground mt-0.5">
-              {effectiveTf === "tick"
-                ? "KIS 체결 · 1.5초 폴링"
-                : `KIS 분봉 · ${TF_LABEL[effectiveTf]} · 실시간 갱신`}
+              KIS 분봉 · {TF_LABEL[effectiveTf]} · 실시간 갱신
             </div>
           )}
         </div>
