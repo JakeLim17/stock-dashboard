@@ -11,11 +11,12 @@ import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 선택 종목 1개의 호가 + 체결 폴링 패널.
 // KIS 미활성 또는 한국 종목 아니면 빈 메시지.
-// 호가는 1.5초 간격, 체결도 함께. 카드 보이는 동안만 폴링.
+// 호가는 기본 3초 간격(REST 한도 보호 — relay 호스팅 전까지 임시),
+// 체결도 함께. 카드 보이는 동안만 폴링.
 //
 // ⚠ 깜빡임 방지 정책 (호가 탭 UX) ───────────────────────────────────
 //   /api/intraday 가 일시적으로 빈 응답(KIS cooldown / cold start / 라우트 비활성)
-//   을 줘도 패널이 1.5초마다 "데이터 받지 못했어요" ↔ 정상 표시로 깜빡이지 않도록
+//   을 줘도 패널이 폴링 주기마다 "데이터 받지 못했어요" ↔ 정상 표시로 깜빡이지 않도록
 //   다음 규칙을 지킨다:
 //
 //   1) 빈 응답이면 직전 성공 데이터를 그대로 유지 (state 를 null 로 덮어쓰지 않음).
@@ -26,7 +27,11 @@ import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 // 🚀 Phase 3 — KIS WebSocket H0STASP0 실시간 호가 ─────────────────
 //   부모(`DashboardClient`) 가 `useRealtime(..., ["asp"])` 로 받은 호가 메시지를
 //   `aspOverride` prop 으로 전달한다. aspOverride 가 있으면 REST 데이터보다 우선 표시.
-//   WebSocket 끊김 시 자동으로 REST polling 으로 fallback (기존 로직 그대로 유지).
+//   WebSocket 끊김 시 자동으로 REST polling 으로 fallback.
+//
+//   ⚙️ WS 우선 — REST 호출 절감:
+//     WS asp 가 신선(WS_FRESH_MS 이내)하게 들어오는 동안은 REST polling 자체를
+//     skip 한다. WS 가 끊기거나 stale 해지면 다음 tick 부터 REST 호출 재개.
 
 interface Props {
   code: string;
@@ -45,8 +50,12 @@ interface IntradayResponse {
 }
 
 // 연속 실패가 이 횟수 이상 + 이전 성공 이력 0 일 때만 empty 메시지 노출.
-// pollMs=1500ms × 3회 = ~4.5초 — 일시적 cooldown 으로 인한 깜빡임 방지.
+// pollMs=3000ms × 3회 = ~9초 — 일시적 cooldown 으로 인한 깜빡임 방지.
 const EMPTY_THRESHOLD = 3;
+
+// WS asp 의 마지막 ts 가 이 시간 이내면 "WS 살아있음" 으로 판단하고 REST polling skip.
+// asp 는 호가 변동마다 들어오므로 짧은 종목도 보통 3~5초 안에 한 번은 옴.
+const WS_FRESH_MS = 6_000;
 
 function hasPayload(d: IntradayResponse | null | undefined): boolean {
   if (!d) return false;
@@ -58,7 +67,7 @@ function hasPayload(d: IntradayResponse | null | undefined): boolean {
 export function AskingPricePanel({
   code,
   active,
-  pollMs = 1500,
+  pollMs = 3000,
   aspOverride,
 }: Props) {
   // data 는 "마지막으로 받은 유효(=hasPayload) 응답" 만 보관. 실패 시 교체 안 함.
@@ -71,6 +80,15 @@ export function AskingPricePanel({
   // 마지막으로 본 code — useEffect 의 첫 cleanup 전에 cancelled 가드를 위해 사용.
   const codeRef = useRef(code);
   codeRef.current = code;
+  // WS asp 신선도 체크용 ref — 폴링 timer 안에서 매번 최신값을 보고 skip 결정.
+  // ref 로 두면 aspOverride 가 바뀔 때마다 useEffect 가 재실행되어 폴링 timer 가
+  // 리셋되는 회귀를 피할 수 있다.
+  const aspRef = useRef(aspOverride);
+  aspRef.current = aspOverride;
+  // data 를 closure 에서 직접 보면 stale — 폴링 안에서 "직전 응답 존재 여부"는
+  // ref 로 확인한다 (useEffect dep 에 data 를 넣으면 timer 가 매번 리셋됨).
+  const dataRef = useRef<IntradayResponse | null>(null);
+  dataRef.current = data;
 
   useEffect(() => {
     if (!active || !code) return;
@@ -84,6 +102,13 @@ export function AskingPricePanel({
     setLastSuccessAt(null);
 
     const fetchOnce = async () => {
+      // WS asp 가 신선하면 REST 호출 skip — 한도 절감.
+      // (단, 첫 호출은 ccldStrength/체결 리스트가 필요하므로 한 번은 시도)
+      const aspNow = aspRef.current;
+      const wsFresh =
+        aspNow != null && Date.now() - aspNow.ts < WS_FRESH_MS;
+      if (wsFresh && dataRef.current?.asking) return;
+
       setLoading(true);
       try {
         const r = await fetch(`/api/intraday?code=${encodeURIComponent(code)}`, {
@@ -147,7 +172,7 @@ export function AskingPricePanel({
   const effectiveSuccessAt = wsAsking
     ? Math.max(wsAsking.fetchedAt, lastSuccessAt ?? 0)
     : lastSuccessAt;
-  const sourceLabel = wsAsking ? "KIS-WS" : "KIS";
+  const sourceLabel = wsAsking ? "KIS WS" : "KIS REST";
 
   // 1) 한 번도 성공 못 했고 + 연속 실패 임계 이상 → 명시적 empty 메시지.
   if (!hasEverSucceeded && failures >= EMPTY_THRESHOLD) {
