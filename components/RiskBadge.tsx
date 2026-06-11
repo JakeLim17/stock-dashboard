@@ -28,8 +28,21 @@ export function RiskBadge({
       .map((d) => `· ${d.label} (${d.category})`)
       .join("\n") || `외부 리스크 점수 ${assessment.score}`;
 
-  // high(빨강 sell 톤)일 때만 진동으로 시선 끌기. medium(노랑 watch)은 가만히.
-  const className = assessment.level === "high" ? "shake-warn" : undefined;
+  // 진동(shake-warn) 적용 기준:
+  //  - high(빨강 sell 톤)는 무조건
+  //  - medium(노랑 watch)은 driver 라벨/헤드라인에 구체 위험 키워드가 포함된 경우만
+  //    (과징금·소송·제재·공시위반·리콜·횡령·배임·조사·감리·파산·회생·상장폐지·회계부정)
+  //  - 일반 medium(루머·실적우려 등 모호한 케이스)은 안 떨리게 절제.
+  const DANGER_KEYWORDS =
+    /(과징금|소송|제재|공시위반|리콜|횡령|배임|조사|감리|파산|회생|상장폐지|회계부정)/;
+  const mediumHasDangerKeyword =
+    assessment.level === "medium" &&
+    assessment.drivers.some(
+      (d) => DANGER_KEYWORDS.test(d.label) || DANGER_KEYWORDS.test(d.headline)
+    );
+  const shouldShake =
+    assessment.level === "high" || mediumHasDangerKeyword;
+  const className = shouldShake ? "shake-warn" : undefined;
 
   return (
     <Badge variant={variant} size={size} title={title} className={className}>

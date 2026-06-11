@@ -44,8 +44,10 @@ export function VolatilityBadge({
     assessment.intradayUsed ? "분봉 가중 적용" : "일봉 기반",
   ].join("\n");
 
-  // 도박장 등급은 살짝 흔들림으로 시각적 경고 강화. (prefers-reduced-motion 시 자동 무효)
-  const className = assessment.level === "gambling" ? "shake-soft" : undefined;
+  // 점수 ≥ 60 이면 진동(shake-warn) — "고변동" 노란 구간(60대)부터 시선 끌기.
+  // 도박장 등급은 보통 점수가 더 높아 자동 포함됨. shake-soft 보다 인지 강도 ↑.
+  // prefers-reduced-motion 시 자동 무효.
+  const className = assessment.score >= 60 ? "shake-warn" : undefined;
 
   return (
     <Badge variant={variant} size={size} title={title} className={className}>

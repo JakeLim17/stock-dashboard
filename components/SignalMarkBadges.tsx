@@ -48,14 +48,11 @@ const SIZE_CLASSES: Record<"xs" | "sm", string> = {
 };
 
 // 가장 강한 위험 마크만 shake로 시선 끌기 — 너무 많은 떨림은 피로 유발.
-// 기준: tone="bad" 인 priority 1 마크(외인 던지기·52주 신저가·개미무덤)와
-// 동급 우선순위의 ant_shake(개미털기, warn). priority 2 이하는 잠잠.
-const SHAKE_MARK_KEYS = new Set([
-  "foreign_dump",
-  "new_52w_low",
-  "ant_grave",
-  "ant_shake",
-]);
+// 기준: 발생 빈도가 낮으면서 명확한 위험 신호인 두 개만.
+//   · foreign_dump (외인 던지기) — 외국인 지속 대규모 매도
+//   · new_52w_low  (52주 신저가) — 추세 붕괴
+// 개미무덤(ant_grave)·개미털기(ant_shake)는 발생 빈도가 잦아 제외.
+const SHAKE_MARK_KEYS = new Set(["foreign_dump", "new_52w_low"]);
 
 function SignalMarkBadge({
   mark,
