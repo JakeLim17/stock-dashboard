@@ -31,8 +31,8 @@ import type { FlowData, Quote } from "../types";
 //       한국:   Yahoo → KIS 폴백
 //       해외:   Yahoo → KIS(us-stock) 폴백
 //       기타:  Yahoo
-//   - 수급(fetchFlowOrMock) — 네이버 dealTrendInfos가 5일 누적까지 안정적
-//       한국:   네이버 → KIS 폴백 → mock
+//   - 수급(fetchFlowOrMock) — KIS inquire-investor 가 KRX 원본에 가장 가깝고 실시간
+//       한국:   KIS → 네이버 폴백 → mock
 //       해외:  mock (의미 없음)
 //
 // KIS 전담(다른 진입점에서 호출):
@@ -153,8 +153,11 @@ export {
   reclassifyWithTitleKo,
 } from "./news";
 
-// 외인/기관 수급: 네이버(dealTrendInfos) → KIS 폴백 → mock 순.
-// 네이버는 SMS·토큰 부담이 없고 5일 누적까지 안정적으로 줌. KIS는 네이버 실패 시 폴백.
+// 외인/기관 수급: KIS(inquire-investor) → 네이버(dealTrendInfos) → mock 순.
+// KIS FHKST01010900 은 KRX 원본을 거의 실시간(=토스 증권 데이터) 그대로 주고
+// 5일 누적도 거래일 단위로 정확히 합산한다. 네이버 dealTrendInfos 는 5~30분 지연·
+// 추정치 섞임이 있어 사용자 보고("토스와 안 맞고 늦음") 의 직접 원인이었음.
+// KIS cooldown/EGW00133 등으로 실패하면 네이버로 자연 폴백되어 빈 화면 위험 0.
 export async function fetchFlowOrMock(
   code: string,
   currentPrice?: number
@@ -167,6 +170,15 @@ export async function fetchFlowOrMock(
     return { flow: m, source: "mock" };
   }
 
+  // 1순위: KIS 실시간 (FHKST01010900)
+  if (kisEnabled()) {
+    const kisFlow = await fetchKrFlow(code);
+    if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
+      return { flow: kisFlow, source: "kis" };
+    }
+  }
+
+  // 2순위: 네이버 dealTrendInfos (KIS 실패/비활성/cooldown 시 폴백)
   if (currentPrice) {
     const naverFlow = await fetchNaverFlow(code, currentPrice);
     if (naverFlow && (naverFlow.foreignNet != null || naverFlow.institutionNet != null)) {
@@ -174,13 +186,6 @@ export async function fetchFlowOrMock(
         flow: { ...naverFlow, source: "naver" as const },
         source: "naver",
       };
-    }
-  }
-
-  if (kisEnabled()) {
-    const kisFlow = await fetchKrFlow(code);
-    if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
-      return { flow: kisFlow, source: "kis" };
     }
   }
 
