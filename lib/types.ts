@@ -387,6 +387,17 @@ export interface PriceTargets {
   resistance: number; // 최근 20일 고점 기준 저항
   // (목표1 - 진입) / (진입 - 손절). entry === stopLoss 면 분모 0이라 null.
   riskReward: number | null;
+  // takeProfit2 산출 출처 — 디버그/UI 안내용.
+  //   "atr"        : ATR 배수 기반 (price + 3.5·ATR < resistance)
+  //   "resistance" : 최근 20일 저항 사용 (price + 3.5·ATR ≥ resistance)
+  //   "floor"      : rawTP2 가 takeProfit1 보다 작아 floor(max(TP1×1.02, entry×1.02))로 보정됨
+  // 옛 스냅샷 호환 위해 optional. 신규 응답엔 항상 채움.
+  takeProfit2Source?: "atr" | "resistance" | "floor";
+  // verdict ↔ target 정합성 플래그.
+  // verdict.action 이 비중 축소·관망 계열인데 takeProfit1/2 가 entry 대비 +3% 이상이면
+  // "팔라는데 목표가가 한참 위" 인 모순이 되므로 UI 에서 회색·숨김 처리하도록 표시.
+  // 옛 스냅샷 호환 위해 optional. 정상 정합 시 채우지 않음.
+  suppressed?: boolean;
 }
 
 export interface ScenarioRow {
@@ -498,8 +509,8 @@ export interface Predictions {
     dxy?: { beta: number; r2: number; residStd: number; samples: number };
   } | null;
 
-  // ─── Round3 B: 베이지안 신뢰도 ───────────────────────────────
-  // 매크로 회귀 R²·VIX·표본수를 종합해 산출한 모델 신뢰도.
+  // ─── Round3 B: 모델 신뢰도 (휴리스틱 가중 평균) ───────────────
+  // R² × VIX × 표본수 패널티의 휴리스틱 가중 평균. (베이지안 갱신 아님.)
   //   score    : 0~1 (0.7 이상 high, 0.4~0.7 medium, 그 이하 low)
   //   label    : "high" | "medium" | "low"
   //   factors  : 사람이 읽는 보정 사유 (예: "VIX 21 — confidence ×0.9")

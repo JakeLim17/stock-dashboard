@@ -30,13 +30,23 @@ const EVENT_INFLATION_DISPLAY_THRESHOLD = 1.05;
 
 // ─── 기본 통계 유틸 ────────────────────────────────────────
 
+// 일별 로그 수익률 r_t = ln(C_t / C_{t-1}).
+//   - 단순 수익률 (C_t-C_{t-1})/C_{t-1} 보다 시간 합산 가법성·정규성 가정에 가까워
+//     EWMA σ + GBM 가격 범위 (price·exp(±zσ√Δt)) 와 정합한다.
+//   - 일중 평균 ~0% 수준에서는 두 정의의 차이가 미미하지만, 대형 단일 이벤트 (±10% 갭)
+//     에서는 단순 수익률 σ 가 과대평가되는 경향이 있어 보수적으로 log returns 채택.
 function dailyReturns(hist: HistoricalPoint[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < hist.length; i++) {
     const prev = hist[i - 1].close;
     const cur = hist[i].close;
-    if (prev > 0 && Number.isFinite(prev) && Number.isFinite(cur)) {
-      out.push((cur - prev) / prev);
+    if (
+      prev > 0 &&
+      cur > 0 &&
+      Number.isFinite(prev) &&
+      Number.isFinite(cur)
+    ) {
+      out.push(Math.log(cur / prev));
     }
   }
   return out;
@@ -339,14 +349,33 @@ export function predict(input: PredictorInput): Predictions {
     dxyHistory
   );
 
+  // ─ US 종목 look-ahead 방어 ────────────────────────────────
+  // 미국 종목은 종목 가격과 매크로(DXY/US10Y/SOX) 가 같은 미국 세션 close 라
+  // 가장 최근 close 의 lastReturn 을 lag-0 drift 로 쓰면 "오늘 종목 데이터에는 없는
+  // 같은 세션 매크로" 가 섞여 look-ahead bias 가 발생할 수 있다.
+  // (한국 종목은 미국 매크로 ΔT-1 이 오늘 한국장의 lag-0 신호라 그대로 사용한다.)
+  // 보수적으로 미국 종목일 때만 매크로 시계열을 한 칸 앞으로 슬라이스해
+  // T-2 → T-1 close-to-close 변동만 lag-0 drift 입력으로 쓴다.
+  const isUsStock = meta?.kind === "us-stock";
+  const dxyHistForLag = isUsStock
+    ? (dxyHistory ?? []).slice(0, -1)
+    : dxyHistory;
+  const us10yHistForLag = isUsStock
+    ? (us10yHistory ?? []).slice(0, -1)
+    : us10yHistory;
+  const soxHistForLag = isUsStock
+    ? (soxHistory ?? []).slice(0, -1)
+    : soxHistory;
+
   // ─ Round3 B: 섹터 리딩 (SOX lag-1 → 한국 반도체주) ───────────
   // 한국 반도체 종목에만 적용. 데이터 부족·비반도체 종목은 null.
-  const sectorLeading = computeSectorLeading(meta, history, soxHistory);
+  // (US 반도체주의 경우 위 슬라이스로 SOX lastReturn 의 look-ahead 를 차단.)
+  const sectorLeading = computeSectorLeading(meta, history, soxHistForLag);
 
   // ─ Round3 B: 매크로 팩터 (DXY/US10Y 휴리스틱) ────────────────
   // 종목 sector 기반 카테고리 분류 → DXY/US10Y 추정 베타 + lag-0 drift.
-  const dxyLast = lastReturn(dxyHistory);
-  const us10yLast = lastReturn(us10yHistory);
+  const dxyLast = lastReturn(dxyHistForLag);
+  const us10yLast = lastReturn(us10yHistForLag);
   const macroFactors = computeMacroFactors(meta, dxyLast, us10yLast);
 
   // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 합산 (한도 ±2%).
@@ -421,9 +450,20 @@ export function predict(input: PredictorInput): Predictions {
       const rawTP1 = price + TP1_ATR_MULT * atr;
       const takeProfit1 = rawTP1 > entry ? rawTP1 : entry * 1.01;
 
-      const rawTP2 = Math.min(resistance, price + TP2_ATR_MULT * atr);
+      const atrTP2 = price + TP2_ATR_MULT * atr;
+      const rawTP2 = Math.min(resistance, atrTP2);
       const tp2Floor = Math.max(takeProfit1 * 1.02, entry * 1.02);
-      const takeProfit2 = rawTP2 > takeProfit1 ? rawTP2 : tp2Floor;
+      // floor 적용 분기 — UI 에서 "저항/ATR 으로는 의미 있는 2차 목표가 안 잡혀
+      // 보수적 floor 사용" 안내가 가능하도록 출처를 명시.
+      let takeProfit2: number;
+      let takeProfit2Source: "atr" | "resistance" | "floor";
+      if (rawTP2 > takeProfit1) {
+        takeProfit2 = rawTP2;
+        takeProfit2Source = atrTP2 <= resistance ? "atr" : "resistance";
+      } else {
+        takeProfit2 = tp2Floor;
+        takeProfit2Source = "floor";
+      }
 
       // Risk-Reward — entry === stopLoss 면 분모 0이라 null로 노출.
       // 산식: (TP1 - entry) / (entry - SL).
@@ -437,6 +477,7 @@ export function predict(input: PredictorInput): Predictions {
         support,
         resistance,
         riskReward,
+        takeProfit2Source,
       };
     }
   }
@@ -445,8 +486,10 @@ export function predict(input: PredictorInput): Predictions {
   //    한·미 휴장일이 다르므로 단순 tail join이 아니라 일자별 inner join으로 정렬한 후
   //    회귀를 계산해야 베타가 정확하다 (alignedDailyReturns).
   //    표본 수가 너무 작으면 베타가 불안정해지므로 30 이상 가드.
+  //    R² < 0.1 이면 회귀선이 사실상 무의미한 잡음이라 시나리오 자체를 노출하지 않는다.
   const scenarios: ScenarioRow[] = [];
   const MIN_SCENARIO_SAMPLES = 30;
+  const MIN_SCENARIO_R2 = 0.1;
 
   if (nasdaqHistory && nasdaqHistory.length >= 30) {
     const aligned = alignedDailyReturns(history, nasdaqHistory);
@@ -457,7 +500,7 @@ export function predict(input: PredictorInput): Predictions {
       nqRet.length === sRet.length
     ) {
       const { beta, r2 } = regressionStats(sRet, nqRet);
-      if (Math.abs(beta) > 0.05) {
+      if (Math.abs(beta) > 0.05 && r2 >= MIN_SCENARIO_R2) {
         const confidence = confidenceFromR2(r2);
         scenarios.push({
           label: "나스닥 +1% 시",
@@ -488,7 +531,7 @@ export function predict(input: PredictorInput): Predictions {
       fxRet.length === sRet.length
     ) {
       const { beta, r2 } = regressionStats(sRet, fxRet);
-      if (Math.abs(beta) > 0.1) {
+      if (Math.abs(beta) > 0.1 && r2 >= MIN_SCENARIO_R2) {
         scenarios.push({
           label: "환율 +1% (원화 약세) 시",
           expected: beta * 0.01,
@@ -504,7 +547,12 @@ export function predict(input: PredictorInput): Predictions {
   // Round3 B: 매크로 베타 회귀(buildMacroBetas) 결과를 시나리오로 변환.
   //   KOSPI / SOX 베타가 의미있게 크면 +1% 시나리오 row 로 노출.
   //   IXIC/DXY 회귀는 nasdaqHistory/fxHistory 시나리오와 중복될 수 있어 추가 안 함.
-  if (macroBetasRaw.kospi && Math.abs(macroBetasRaw.kospi.beta) > 0.1) {
+  //   R² < 0.1 이면 잡음 회귀라 시나리오 자체를 띄우지 않는다 (위 MIN_SCENARIO_R2 동일 정책).
+  if (
+    macroBetasRaw.kospi &&
+    Math.abs(macroBetasRaw.kospi.beta) > 0.1 &&
+    macroBetasRaw.kospi.r2 >= MIN_SCENARIO_R2
+  ) {
     scenarios.push({
       label: "코스피 +1% 시",
       expected: macroBetasRaw.kospi.beta * 0.01,
@@ -514,7 +562,11 @@ export function predict(input: PredictorInput): Predictions {
       confidence: confidenceFromR2(macroBetasRaw.kospi.r2),
     });
   }
-  if (macroBetasRaw.sox && Math.abs(macroBetasRaw.sox.beta) > 0.15) {
+  if (
+    macroBetasRaw.sox &&
+    Math.abs(macroBetasRaw.sox.beta) > 0.15 &&
+    macroBetasRaw.sox.r2 >= MIN_SCENARIO_R2
+  ) {
     scenarios.push({
       label: "필반 +1% 시",
       expected: macroBetasRaw.sox.beta * 0.01,
@@ -632,9 +684,9 @@ export function predict(input: PredictorInput): Predictions {
     // Round3 B: 매크로 베타 회귀 결과 (표본 부족 시 키 누락) ───────────────
     macroBetas: pickMacroBetaSummary(macroBetasRaw),
 
-    // Round3 B: 베이지안 신뢰도 — VIX gate × max(R²) × 표본 수 가중.
-    //   base = max(0.3, R²_max)  // R² 0이어도 최소 0.3 (변동성 모델 자체 신뢰)
-    //   adjusted = base × vixConfidenceMult
+    // Round3 B: 모델 신뢰도 — 휴리스틱 가중 평균 (R² × VIX × samplePenalty).
+    //   ※ "베이지안 갱신" 이 아니라 단순 곱연산 휴리스틱이다 (이름 정정).
+    //   score = clamp01(0.3 + 0.7 · R²_max  ×  vixConfidenceMult  ×  samplePenalty)
     //   label: 0.7+ high / 0.4~0.7 medium / <0.4 low
     modelConfidence: buildModelConfidence(macroBetasRaw, vixGate, returns.length),
   };
@@ -688,10 +740,12 @@ function pickMacroBetaSummary(b: {
   return anyKey ? out : null;
 }
 
-// 헬퍼: 베이지안 신뢰도 산출.
-//   - R² 가 큰 매크로 변수가 있으면 시장 설명력 있다고 보고 base ↑
-//   - VIX gate 곱연산 — risk-off 환경에서 신뢰도 ↓
-//   - 표본 수 부족(<60)이면 gentle penalty
+// 헬퍼: 모델 신뢰도 산출 — 휴리스틱 가중 평균 (베이지안 갱신 아님).
+//   실제 산식: score = clamp01(  (0.3 + 0.7 · R²_max)  ×  vixGate.confidenceMult  ×  samplePenalty  )
+//     · R²_max  : 매크로 회귀 IXIC/KOSPI/SOX/DXY 중 최대 R² (0~1)
+//     · vixGate : VIX 구간별 곱연산 (calm 1.0 / elevated 0.9 / stressed 0.8 / panic 0.6)
+//     · samplePenalty : 일별 수익률 표본 < 60 이면 0.95, 그 외 1.0
+//   label: 0.7+ high / 0.4~0.7 medium / <0.4 low
 function buildModelConfidence(
   b: {
     ixic: MacroBetaResult | null;
