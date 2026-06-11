@@ -106,7 +106,12 @@ export function priceTimeLabel(priceTime?: number | null): string {
 //   stale 기준: 5분 이상 갱신이 없으면 매매 판단에 영향이 큼.
 //   야후 미국 종목은 정규장 마감 + 시간외 데이터 없는 시점부터 stale로 보임.
 //   지수(^IXIC/^SOX/^VIX)는 정규장 마감 후엔 데이터 한계로 stale 불가피 → 라벨로 사용자에게 명시.
-export function priceFreshness(epochMs?: number | null): {
+//   장 마감(PREPRE/POSTPOST/CLOSED) 상태에서는 5분 stale 임계가 의미 없음 (정규장 종가 기준).
+//   marketState 가 전달되고 닫힘 상태면 stale=false 로 분기 — 빨간색 warn 톤 노출 방지.
+export function priceFreshness(
+  epochMs?: number | null,
+  marketState?: string | null
+): {
   label: string;
   stale: boolean;
   ageMinutes: number;
@@ -123,9 +128,14 @@ export function priceFreshness(epochMs?: number | null): {
     const remMin = min % 60;
     label = remMin > 0 ? `${hr}시간 ${remMin}분 전` : `${hr}시간 전`;
   }
+  const stateUpper = (marketState ?? "").toUpperCase();
+  const isClosed =
+    stateUpper === "PREPRE" ||
+    stateUpper === "POSTPOST" ||
+    stateUpper === "CLOSED";
   return {
     label,
-    stale: min >= 5,
+    stale: isClosed ? false : min >= 5,
     ageMinutes: min,
   };
 }

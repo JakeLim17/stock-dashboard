@@ -68,6 +68,16 @@ export async function GET(req: Request) {
         { status: 400 }
       );
     }
+    // 캐시 key — code 만 쓰면 미래에 topics(호가/체결/지수 등) 가 추가될 때 응답 mix 위험.
+    // 현재는 topics 파라미터를 받지 않지만 미래 보험으로 키에 포함.
+    const topicsRaw = url.searchParams.get("topics") ?? "";
+    const topicsKey = topicsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+    const cacheKey = topicsKey ? `${code}|${topicsKey}` : code;
 
     // KIS 미활성 → 빈 응답 (한 번 disabled 응답 후 클라가 reset).
     if (!kisEnabled()) {
@@ -91,7 +101,7 @@ export async function GET(req: Request) {
     }
 
     // 캐시 hit — 짧은 TTL 안에 같은 종목 다시 들어오면 KIS 호출 skip.
-    const cached = getCache(code);
+    const cached = getCache(cacheKey);
     if (cached) {
       return NextResponse.json(cached, {
         headers: { "Cache-Control": "no-store", "X-Intraday-Cache": "hit" },
@@ -111,7 +121,7 @@ export async function GET(req: Request) {
         ? { reason: "kis-restored, asking unavailable" }
         : {}),
     };
-    setCache(code, payload);
+    setCache(cacheKey, payload);
 
     return NextResponse.json(payload, {
       headers: { "Cache-Control": "no-store", "X-Intraday-Cache": "miss" },

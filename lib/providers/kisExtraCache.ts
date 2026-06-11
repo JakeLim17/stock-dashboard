@@ -26,6 +26,15 @@ const SHORT_TTL_MS = 5 * 60_000;
 const LEADERS_TTL_MS = 30_000;
 // 분봉은 새 minute boundary 가 의미 있어 30s 캐시. 클라이언트 폴링은 별도로 1m 단위.
 const INTRADAY_CANDLES_TTL_MS = 30_000;
+// null 결과 캐시 TTL — 첫 실패로 길게 봉인되면 일시적 KIS hiccup 회복이 느려진다.
+// 정상 data 와 분리해 짧게(기본 10s) 유지하면, KIS 가 복구된 직후 다음 폴링부터
+// 사용자 화면에 데이터가 다시 채워진다.
+const NULL_TTL_MS = 10_000;
+
+// data 가 null 이면 짧은 null-TTL, 그 외에는 정상 data-TTL.
+function pickTtl<T>(data: T | null, dataTtl: number): number {
+  return data == null ? NULL_TTL_MS : dataTtl;
+}
 
 interface Entry<T> {
   data: T;
@@ -92,7 +101,10 @@ export async function getProgramTradeCached(
   if (inflight) return inflight;
   const p = (async () => {
     const data = await fetchKrProgramTrade(code).catch(() => null);
-    c.set(code, { data, expiresAt: Date.now() + PROGRAM_TTL_MS });
+    c.set(code, {
+      data,
+      expiresAt: Date.now() + pickTtl(data, PROGRAM_TTL_MS),
+    });
     return data;
   })().finally(() => {
     f.delete(code);
@@ -113,7 +125,10 @@ export async function getShortBalanceCached(
   if (inflight) return inflight;
   const p = (async () => {
     const data = await fetchKrShortBalance(code).catch(() => null);
-    c.set(code, { data, expiresAt: Date.now() + SHORT_TTL_MS });
+    c.set(code, {
+      data,
+      expiresAt: Date.now() + pickTtl(data, SHORT_TTL_MS),
+    });
     return data;
   })().finally(() => {
     f.delete(code);
@@ -137,7 +152,10 @@ export async function getMarketLeadersCached(
   if (inflight) return inflight;
   const p = (async () => {
     const data = await fetchKrMarketLeaders(kind, market, count).catch(() => null);
-    c.set(key, { data, expiresAt: Date.now() + LEADERS_TTL_MS });
+    c.set(key, {
+      data,
+      expiresAt: Date.now() + pickTtl(data, LEADERS_TTL_MS),
+    });
     return data;
   })().finally(() => {
     f.delete(key);
@@ -168,7 +186,10 @@ export async function getIntradayCandlesCached(
   if (inflight) return inflight;
   const p = (async () => {
     const data = await fetchKrIntradayCandles(code).catch(() => null);
-    c.set(key, { data, expiresAt: Date.now() + INTRADAY_CANDLES_TTL_MS });
+    c.set(key, {
+      data,
+      expiresAt: Date.now() + pickTtl(data, INTRADAY_CANDLES_TTL_MS),
+    });
     return data;
   })().finally(() => {
     f.delete(key);

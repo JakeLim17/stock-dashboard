@@ -44,7 +44,9 @@ export function MarketPanel({ indicators }: { indicators: MarketIndicator[] }) {
       <CardBody>
         <ul className="divide-y divide-border">
           {visible.map((i) => {
-            const fresh = priceFreshness(i.priceTime);
+            // 장 마감(PREPRE/POSTPOST/CLOSED) 이면 5분 stale 임계는 의미 없으므로
+            // priceFreshness 에 marketState 도 전달 → 정규장 종가 기준에선 회색 톤 유지.
+            const fresh = priceFreshness(i.priceTime, i.marketState);
             const stateUpper = (i.marketState ?? "").toUpperCase();
             const isClosed =
               stateUpper === "POSTPOST" ||

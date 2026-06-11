@@ -26,8 +26,16 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
 
   // 지수 신선도 — KIS는 priceTime을 즉시(방금) 박아주고 Yahoo는 거래소 시각.
   // 차이가 작으면 "방금", 크면 "N분 전". MarketPanel과 동일 로직을 짧게 노출.
+  // 장 마감(PREPRE/POSTPOST/CLOSED) 상태에서는 시각이 7시간+ 전이라 의미 없음 →
+  // "종가 기준" 카피로 단축. priceFreshness 와 동일한 분기 기준을 사용.
   function freshLabel(ind: typeof kospi): string | null {
     if (!ind?.priceTime) return null;
+    const stateUpper = (ind.marketState ?? "").toUpperCase();
+    const isClosed =
+      stateUpper === "PREPRE" ||
+      stateUpper === "POSTPOST" ||
+      stateUpper === "CLOSED";
+    if (isClosed) return "종가 기준";
     const diff = Date.now() - ind.priceTime;
     if (diff < 30_000) return "방금";
     if (diff < 60_000) return "1분 전";

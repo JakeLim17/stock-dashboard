@@ -19,21 +19,47 @@ const parser = new Parser({
   headers: { "User-Agent": "Mozilla/5.0 stock-dashboard/0.1" },
 });
 
-// Google News RSS 차단(503/timeout) 감지 — 한 번 차단 잡히면 일정 시간 모든 Google
-// fetch 를 즉시 fail 시켜 snapshot 응답이 수십 초 hang 되는 사태를 막는다.
-// 차단 시간(10 분)이 지나면 다음 윈도우에서 자동 회복.
-const GOOGLE_BLOCK_WINDOW_MS = 10 * 60 * 1000;
-let googleBlockedUntil = 0;
+// Google News RSS 차단(503/timeout) 감지 — 한 번 차단 잡히면 해당 언어 윈도우에서만
+// 즉시 fail 시켜 snapshot 응답이 수십 초 hang 되는 사태를 막는다.
+//
+// 이전엔 전역 변수 1개로 한 번 잡히면 한·영 양쪽 모두 10분 봉인됐다.
+// 한국어(hl=ko) 가 503 인 사이에도 영어(hl=en) 는 살아 있을 수 있어 per-language 로 분리.
+// 첫 실패는 2분 backoff 부터 시작해 연속 실패 시 4·8·16·30분(cap) 으로 지수 증가 →
+// 일시적 hiccup 에서는 빨리 회복하고, 지속 차단에는 호출 횟수 자체를 줄인다.
+const GOOGLE_BACKOFF_START_MS = 2 * 60 * 1000;
+const GOOGLE_BACKOFF_MAX_MS = 30 * 60 * 1000;
 
-function shouldSkipGoogle(): boolean {
-  return Date.now() < googleBlockedUntil;
+interface GoogleBlockState {
+  blockedUntil: number;
+  consecutiveFailures: number;
+}
+const googleBlockState = new Map<string, GoogleBlockState>();
+
+type GoogleSourceKey = "ko" | "en";
+
+function shouldSkipGoogle(key: GoogleSourceKey): boolean {
+  const state = googleBlockState.get(key);
+  return !!state && Date.now() < state.blockedUntil;
 }
 
-function markGoogleBlocked(): void {
-  googleBlockedUntil = Date.now() + GOOGLE_BLOCK_WINDOW_MS;
-  console.warn(
-    `[news] Google News RSS blocked → skip for ${GOOGLE_BLOCK_WINDOW_MS / 60_000} min`
+function markGoogleBlocked(key: GoogleSourceKey): void {
+  const prev = googleBlockState.get(key);
+  const failures = (prev?.consecutiveFailures ?? 0) + 1;
+  const backoff = Math.min(
+    GOOGLE_BACKOFF_MAX_MS,
+    GOOGLE_BACKOFF_START_MS * Math.pow(2, failures - 1)
   );
+  googleBlockState.set(key, {
+    blockedUntil: Date.now() + backoff,
+    consecutiveFailures: failures,
+  });
+  console.warn(
+    `[news] Google News RSS blocked (${key}) → skip for ${Math.round(backoff / 60_000)} min (failure ${failures})`
+  );
+}
+
+function clearGoogleBlocked(key: GoogleSourceKey): void {
+  googleBlockState.delete(key);
 }
 
 // Google fetch 한 건당 hard timeout. parser timeout 이 실제 안 끝나는 사례(503 HTML
@@ -53,15 +79,17 @@ async function withHardTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 async function fetchGoogleFeed(cfg: { q: string; lang: "ko" | "en"; symbol?: string }) {
-  if (shouldSkipGoogle()) throw new Error("google-skipped");
+  if (shouldSkipGoogle(cfg.lang)) throw new Error(`google-skipped:${cfg.lang}`);
   try {
     const feed = await withHardTimeout(
       parser.parseURL(feedUrl(cfg.q, cfg.lang)),
       GOOGLE_HARD_TIMEOUT_MS
     );
+    // 성공했으면 연속 실패 카운터 리셋 — 다음 hiccup 은 다시 짧은 backoff(2분) 부터.
+    clearGoogleBlocked(cfg.lang);
     return (feed.items ?? []).slice(0, 8).map((item) => toNewsItem(item, cfg.symbol));
   } catch (e) {
-    markGoogleBlocked();
+    markGoogleBlocked(cfg.lang);
     throw e;
   }
 }
@@ -243,10 +271,18 @@ export async function fetchAllNews(limit = 40): Promise<NewsItem[]> {
   }
   // 1) Google News RSS (한·영 쿼리) — 시장 전반 + 한국 종목 헤드라인의 주력 소스.
   // 2) Yahoo Finance 헤드라인 RSS — 미국 종목별 폴백. Google 차단 시에도 미국 뉴스 확보.
+  // per-language skip 으로 한쪽만 차단된 경우엔 살아있는 쪽 쿼리는 그대로 실행.
+  // fetchGoogleFeed 안에서 다시 한번 shouldSkipGoogle 가드가 있어 race-safe.
+  const koSkip = shouldSkipGoogle("ko");
+  const enSkip = shouldSkipGoogle("en");
+  const googleQueries =
+    koSkip && enSkip
+      ? []
+      : QUERIES.filter((q) => (q.lang === "ko" ? !koSkip : !enSkip));
   const [googleResults, yahooResults] = await Promise.all([
-    shouldSkipGoogle()
-      ? Promise.resolve([] as PromiseSettledResult<NewsItem[]>[])
-      : runWithConcurrency(QUERIES, 3, fetchGoogleFeed),
+    googleQueries.length > 0
+      ? runWithConcurrency(googleQueries, 3, fetchGoogleFeed)
+      : Promise.resolve([] as PromiseSettledResult<NewsItem[]>[]),
     runWithConcurrency(SYMBOLS_FOR_YAHOO_RSS, 3, fetchYahooHeadlines),
   ]);
 
@@ -393,17 +429,18 @@ async function fromGoogleRss(
   symbol: string | undefined,
   maxItems: number
 ): Promise<NewsItem[]> {
-  if (shouldSkipGoogle()) return [];
+  if (shouldSkipGoogle(lang)) return [];
   try {
     const feed = await withHardTimeout(
       parser.parseURL(feedUrl(query, lang)),
       GOOGLE_HARD_TIMEOUT_MS
     );
+    clearGoogleBlocked(lang);
     return (feed.items ?? [])
       .slice(0, maxItems)
       .map((item) => toNewsItem(item, symbol));
   } catch {
-    markGoogleBlocked();
+    markGoogleBlocked(lang);
     return [];
   }
 }
