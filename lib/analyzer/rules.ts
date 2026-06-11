@@ -194,6 +194,40 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
   return hits;
 }
 
+/**
+ * 단기 신호 결정 — heat(과열)·buy(매수우위) 두 점수를 임계값 lattice 로 분류.
+ *
+ * ⚠️ 임계값 사이 "갭 영역" 이 존재해 같은 입력의 미세한 변동(±1점)으로 신호가
+ *    비단조적으로 바뀔 수 있다. 예) buy=58 (장중) 인데 heat=63 이면 buy≥56 / heat≤62
+ *    조건을 모두 못 만족해 ADD 가 아닌 HOLD 로 떨어진다. 알고는 있되 — 의도된 보수성
+ *    (애매한 구간에서 매수 우위를 잘못 선언하지 않으려는 디자인) 이므로 코드는 유지.
+ *
+ * 장중(REGULAR) — 우선순위 위→아래 (먼저 매치되는 branch 채택):
+ *   - heat ≥ 80 & buy ≤ 35              → SELL    (과열 + 매수 약함)
+ *   - buy ≥ 68 & heat ≤ 55              → BUY     (매수 강 + 과열 약)
+ *   - buy ≥ 90 & heat ≤ 80              → ADD     (극강 매수면 과열 일부 무시)
+ *   - buy ≥ 56 & heat ≤ 62              → ADD     (일반 매수 + 과열 보통 이하)
+ *   - heat ≥ 65 & buy < 60              → WATCH   (과열인데 매수 약)
+ *   - buy ≤ 35 & heat ≤ 45              → WATCH   (매수 없음, 과열도 없음 — 무근거)
+ *   - 그 외                              → HOLD
+ *
+ * 비장중(CLOSED 등) — 보수적으로 ±2~4 점 더 빡빡:
+ *   - heat ≥ 82 & buy ≤ 32              → SELL
+ *   - buy ≥ 72 & heat ≤ 52              → BUY
+ *   - buy ≥ 90 & heat ≤ 80              → ADD     (극강은 동일)
+ *   - buy ≥ 58 & heat ≤ 62              → ADD
+ *   - heat ≥ 65 & buy < 62              → WATCH
+ *   - buy ≤ 35 & heat ≤ 45              → WATCH
+ *   - 그 외                              → HOLD
+ *
+ * "갭 영역" 예시 (장중):
+ *   buy=58, heat=63 → ADD 조건(heat≤62) 못 맞춤 → HOLD
+ *   buy=68, heat=56 → BUY 조건(heat≤55) 못 맞춤 → ADD(buy≥56 매치) — OK
+ *   buy=50, heat=70 → WATCH(heat≥65) 매치
+ *
+ * 의도된 동작이지만, 임계값 한두 점 차이로 신호가 도약하므로 UI 에서 점수 자체도
+ * 함께 노출해 사용자가 "왜 ADD 인지/HOLD 인지" 추적 가능하게 한다.
+ */
 function decideShortTermSignal(
   heat: number,
   buy: number,

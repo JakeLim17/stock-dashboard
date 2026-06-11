@@ -24,8 +24,13 @@ export function ewmaVolatility(returns: number[], lambda = 0.94): number {
   const warmupSize = 30;
   const warmup = returns.slice(0, warmupSize);
   const mu0 = warmup.reduce((a, b) => a + b, 0) / warmup.length;
+  // 표본분산(unbiased) — Σ(x-μ)² / (n-1).
+  //   이전엔 모분산(/n)을 써서 ~3% 과소추정되던 편향이 있었음. 표본에서 모집단 σ²를
+  //   추정하는 표준 식과 일관성을 맞춤 (Bessel's correction).
+  //   warmup 30이라 (n-1)=29 → 29/30 ≈ 0.967, 보정폭은 작지만 stddev() 함수와 동일 식으로 통일.
+  const denom = Math.max(1, warmup.length - 1);
   let variance =
-    warmup.reduce((acc, x) => acc + (x - mu0) ** 2, 0) / warmup.length;
+    warmup.reduce((acc, x) => acc + (x - mu0) ** 2, 0) / denom;
 
   for (let i = warmupSize; i < returns.length; i++) {
     const r = returns[i];

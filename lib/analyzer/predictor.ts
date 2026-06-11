@@ -142,9 +142,18 @@ function alignedDailyReturns(
   return { stock: sRet, market: mRet };
 }
 
-// ATR (Average True Range, 14일 기본)
+// ATR (Average True Range, 14일 기본) — Wilder smoothing.
+//   Wilder 원전 (1978):
+//     ATR_period  = mean(TR_1 .. TR_period)                  (warmup: 단순 평균)
+//     ATR_t       = (ATR_{t-1} · (period-1) + TR_t) / period (t > period, 재귀 평활)
+//   = EWMA(α = 1/period) 와 등가. TradingView·StockCharts·대부분 차트 패키지가 이 식.
+//   이전엔 "최근 period개의 단순 평균(SMA-of-TR)" 이라 옛 데이터가 갑자기 떨어져 나가는
+//   step 효과로 ATR 가 갑자기 튀는 경향이 있었음. Wilder 는 모든 과거 TR 가 지수
+//   가중으로 살아 있어 추세 변동에 부드럽게 반응.
+//   호출부(TP1/TP2/SL/intradayRange)는 인터페이스 동일 — 값만 살짝 바뀜(±10~20% 수준,
+//   같은 종목 기준). 새 값이 TradingView ATR(14) 와 호환되는 점이 핵심.
 function averageTrueRange(hist: HistoricalPoint[], period = 14): number {
-  if (hist.length < 2) return 0;
+  if (hist.length < 2 || period < 1) return 0;
   const trs: number[] = [];
   for (let i = 1; i < hist.length; i++) {
     const h = hist[i].high;
@@ -153,7 +162,18 @@ function averageTrueRange(hist: HistoricalPoint[], period = 14): number {
     const tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
     trs.push(tr);
   }
-  return mean(trs.slice(-period));
+  if (trs.length === 0) return 0;
+  // 표본 부족 — period 미달이면 가능한 만큼 단순 평균(폴백). 기존 동작과 동일.
+  if (trs.length < period) return mean(trs);
+
+  // Warmup: 첫 period 개의 단순 평균.
+  let atr = mean(trs.slice(0, period));
+  // 이후 재귀 평활.
+  const invPeriod = 1 / period;
+  for (let i = period; i < trs.length; i++) {
+    atr = atr * (1 - invPeriod) + trs[i] * invPeriod;
+  }
+  return atr;
 }
 
 function clamp(n: number, lo = 0, hi = 100): number {
@@ -189,7 +209,11 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
 
   if (v.forwardPer != null && v.forwardPer > 0) {
     if (v.forwardPer >= 60) {
-      riskScore += 20;
+      // 가중치 약화 (+20 → +10) — 동일 사실(forwardPer 부담)이 장기 rules.ts 의
+      //   score 에서 -15 로 한 번 더 빠지기 때문에 UI 에서 "이중 노출" 이 됨.
+      //   장기 결정에 직접 영향 주는 rules.ts 쪽을 유지하고, valuation riskScore 의
+      //   가중치를 절반으로 낮춰 중복을 완화. (적자 음수 분기 +20 은 별도 사실이라 유지.)
+      riskScore += 10;
       reasons.push(`추정PER ${v.forwardPer.toFixed(0)}배: 다음 실적 기준도 부담`);
     } else if (v.forwardPer <= 15 && (v.per == null || v.per < 40)) {
       riskScore -= 6;

@@ -14,7 +14,17 @@ import type { IntradayBar } from "../providers/naverIntraday";
 
 export interface IntradayMetrics {
   parkinsonVol: number;       // 1분 단위 표준편차 추정치 (소수)
-  // 1일치 환산 — Parkinson을 √(분봉 수)로 곱해 정규장 6.5h ≈ 390분 기준 1일 vol로.
+  // ⚠️ 정확히는 "장 시작부터 현재까지(session-to-date) 누적 Parkinson σ" 다.
+  //   parkinsonVol × √(받은 분봉 수) 라 받은 분봉이 늘어날수록 값이 단조 증가한다.
+  //   - 09:30 (60분 봉)  → σ_1m · √60
+  //   - 14:30 (300분 봉) → σ_1m · √300
+  //   즉, 같은 종목·같은 변동성이라도 10시 vs 15시에 값이 약 2.24배 차이.
+  //   풀세션(정규장 ≈ 390분) 정규화가 아니므로 volatilityScore.ts 의 임계값
+  //   (0.05/0.03/0.02)은 "장 종료에 가까울수록 hit 하기 쉬움" → 장 초반에는
+  //   사팔사팔이 underestimate, 장 후반에는 overestimate 되는 경향이 있다.
+  //   호환성 위해 시멘틱은 유지(snapshot.ts 등 외부 참조 다수). 향후 일관성
+  //   정정 시: ① 이름을 parkinsonSessionToDate 로 rename + ② volatilityScore 임계값
+  //   을 풀세션 정규화 기준으로 재조정 — 한 PR 로 같이 처리해야 회귀 방지.
   parkinsonDaily: number;
   reversalRate: number;       // 0~1
   buyPressureRatio: number;   // 0~1
@@ -51,7 +61,11 @@ export function computeIntradayMetrics(bars: IntradayBar[]): IntradayMetrics {
   }
   const parkinsonVar = pN > 0 ? pSum / pN : 0;
   const parkinsonVol = parkinsonVar > 0 ? Math.sqrt(parkinsonVar) : 0;
-  // 정규장 1일 vol은 분봉 vol × √(분봉 수). 한국 정규장 ≈ 390분이지만 실제 받은 봉 수로 계산.
+  // ⚠️ "1일 환산"이라기보단 "장 시작 → 현재까지 누적 σ" (session-to-date).
+  //   √(받은 분봉 수) 라서 시간이 갈수록 단조 증가한다 (정규화 없음).
+  //   필드명 호환성을 위해 parkinsonDaily 유지 — 상세는 IntradayMetrics 인터페이스 주석 참조.
+  //   풀세션 정규화 (× √(390 / pN)) 로 바꾸면 호출부 임계값(volatilityScore.ts:216~)도
+  //   같이 조정해야 회귀가 안 남는다.
   const parkinsonDaily = parkinsonVol * Math.sqrt(Math.max(pN, 1));
 
   // 1분 close-to-close 단순 수익률
