@@ -1,0 +1,21 @@
+{
+  "name": "stock-dashboard-relay",
+  "version": "1.0.0",
+  "description": "한국 IP relay 서버 — Vercel 함수가 KIS WebSocket(ops.koreainvestment.com:21000)에 1006 으로 막히는 문제를 우회하기 위해 한국 IP 호스트에서 KIS WS 를 연결하고 SSE 로 변환해 클라이언트(또는 Vercel proxy)에 forward.",
+  "private": true,
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

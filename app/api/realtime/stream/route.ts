@@ -1,7 +1,25 @@
 import { getApprovalKey, kisApprovalEnabled } from "@/lib/providers/kisApproval";
 
-// ─── 쿠키 인증 (middleware bypass 대체) ─────────────────────────────
-// middleware 는 /api/realtime/stream 을 PUBLIC_PATHS 로 통과시키므로
+// ─────────────────────────────────────────────────────────────────────
+// /api/realtime/stream — KIS 실시간 SSE 엔드포인트
+//
+// 운영 모드 (KIS_WS_RELAY_URL 설정됨, **권장**):
+//   클라이언트 EventSource
+//     → 이 라우트(쿠키 인증 + Vercel)
+//        → fetch streaming
+//           → 한국 IP relay 서버 (relay/server.js)
+//              → KIS wss://ops.koreainvestment.com:21000
+//   목적: Vercel 함수가 한국 외 리전(sin1/hnd1)일 때 KIS 가 IP 차단해 1006 으로 끊는 문제 우회.
+//   relay 호스팅 가이드는 `relay/README.md` 참고.
+//
+// 로컬/한국 IP 모드 (KIS_WS_RELAY_URL 미설정, fallback):
+//   이 라우트가 직접 KIS WS 에 연결. 호스트 IP 가 한국이 아니면 1006 발생 → relay 필요.
+//
+// 두 모드 모두 클라이언트 SSE 이벤트 스키마는 동일 — `hooks/useRealtime.ts` 변경 불필요.
+// ─────────────────────────────────────────────────────────────────────
+
+// ─── 쿠키 인증 ───────────────────────────────────────────────────────
+// middleware 가 /api/realtime/stream 을 PUBLIC_PATHS 로 통과시키므로
 // (EventSource 가 307 리다이렉트를 못 따름) 라우트 내부에서 동일한 SHA-256 검증.
 // 보호 비활성 환경(DASHBOARD_PASS 미설정)이면 통과.
 const AUTH_COOKIE_VERSION = "v1";
@@ -17,7 +35,7 @@ async function sha256Hex(input: string): Promise<string> {
 
 async function isAuthorized(req: Request): Promise<boolean> {
   const pass = process.env.DASHBOARD_PASS;
-  if (!pass) return true; // 로컬 등 보호 비활성
+  if (!pass) return true;
   const cookieHeader = req.headers.get("cookie") ?? "";
   const m = cookieHeader.match(AUTH_COOKIE_RE);
   if (!m) return false;
@@ -26,29 +44,42 @@ async function isAuthorized(req: Request): Promise<boolean> {
   return token === expected;
 }
 
-// ─── 런타임 선택 — Node.js (Edge 아님!) ────────────────────────────────
-// Vercel Edge Runtime 은 `new WebSocket(...)` 으로 **외부 서버에 연결하는** 클라이언트
-// API 를 지원하지 않는다. (WebSocketPair 같은 인바운드 server-side WebSocket 만 지원.)
-// 그래서 KIS WebSocket(ops.koreainvestment.com) 에 outbound 연결하려면 Node.js runtime
-// 이 필수. Node 22+ 부터 globalThis.WebSocket 이 native 로 들어와 별도 패키지 불필요.
+// ─── 런타임 — Node.js 필수 ───────────────────────────────────────────
+// Vercel Edge 는 outbound WebSocket 클라이언트 미지원. fetch streaming 은 Edge 도 OK 지만
+// fallback direct-WS 경로를 위해 Node 로 통일.
 //
 // maxDuration:
-//   Vercel Hobby Node function 최대 60s, Pro 는 300s 까지 가능.
-//   Hobby 안전선으로 기본 60 으로 설정.
-//   클라이언트(`hooks/useRealtime.ts`)는 stream 종료 시 자동 reconnect 한다.
+//   Vercel Hobby 함수 최대 60s, Pro 는 300s. 300 설정해 두면 Hobby 에선 자동 60 으로 clamp.
+//   클라이언트(`hooks/useRealtime.ts`)는 stream 종료 시 자동 reconnect.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-const SOFT_TIMEOUT_MS = (maxDuration - 10) * 1000;
+// soft timeout — relay/직접 모드 공통. maxDuration 보다 10s 일찍 끊어 클라이언트 reconnect.
+const EFFECTIVE_MAX_DURATION = Math.min(maxDuration, 60); // Hobby 안전선
+const SOFT_TIMEOUT_MS = (EFFECTIVE_MAX_DURATION - 10) * 1000;
 
-// KIS WebSocket 서버 URL 결정 — 견고하게 정규화.
-//   1) KIS_WS_URL env 값이 valid `ws://` / `wss://` 면 그대로
-//   2) 아니면 KIS_BASE_URL 이 모의(`openapivts`) 면 :31000, 실전이면 :21000 자동 분기
-//
-// 직전 사고 방지: Vercel env 에 사용자가 `KIS_WS_URL=KIS_WS_URL=wss://...` 같이 `KEY=value`
-// 통째로 박은 경우, REST URL 풀 경로를 박은 경우 모두 흡수 → 잘못된 값이면 자동 기본값 사용.
+// ─── 공통 유틸 ───────────────────────────────────────────────────────
+
+function normalizeRelayUrl(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  const eq = s.indexOf("=");
+  if (eq > -1 && /^[A-Z0-9_]+$/.test(s.slice(0, eq))) {
+    s = s.slice(eq + 1).trim();
+  }
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    // 끝의 슬래시 제거
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeWsUrl(raw: string | undefined | null): string | null {
   if (!raw) return null;
   let s = raw.trim();
@@ -66,23 +97,20 @@ function normalizeWsUrl(raw: string | undefined | null): string | null {
   }
 }
 
-function getWsUrl(): string {
+function getDirectWsUrl(): string {
   const fromEnv = normalizeWsUrl(process.env.KIS_WS_URL);
   if (fromEnv) return fromEnv;
-  // 자동 분기 — REST URL 이 openapivts 면 모의(VTS), 아니면 실전.
   const isVts = (process.env.KIS_BASE_URL ?? "").includes("openapivts");
   return isVts
     ? "wss://ops.koreainvestment.com:31000"
     : "wss://ops.koreainvestment.com:21000";
 }
 
-// 한국 종목 코드(005930.KS) → 6자리 KIS short code.
 function toKisShortCode(code: string): string | null {
   const m = code.trim().match(/^(\d{6})/);
   return m ? m[1] : null;
 }
 
-// "HHMMSS" → epoch ms (오늘 KST 기준).
 function parseHHMMSS(s: string | undefined): number | null {
   if (!s) return null;
   const padded = s.padStart(6, "0").slice(0, 6);
@@ -98,12 +126,13 @@ function parseHHMMSS(s: string | undefined): number | null {
   return Date.UTC(y, mo, d, hh - 9, mm, ss);
 }
 
-// ─── KIS pipe schema 상수 ────────────────────────────────────────────
-// 두 TR 모두 종목당 1 레코드/메시지가 일반적이지만 KIS 가 count > 1 로 묶어 보낼 수 있어
-// FIELDS_PER_RECORD 로 슬라이스. 명세는 KIS 공식 docs (open-trading-api Python sample) 기준.
+function numOrZero(s: string | undefined): number {
+  if (!s) return 0;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
 
-// H0STCNT0 = 국내주식 실시간 체결가. 46 필드. 핵심 인덱스:
-//   0=종목코드, 1=체결시간(HHMMSS), 2=현재가, 13=누적거래량(주), 14=누적거래대금(원)
+// ─── KIS pipe schema (direct 모드용) ─────────────────────────────────
 const H0STCNT0_FIELDS_PER_RECORD = 46;
 const H0STCNT0_IDX = {
   code: 0,
@@ -113,27 +142,20 @@ const H0STCNT0_IDX = {
   cumTradeValue: 14,
 } as const;
 
-// H0STASP0 = 국내주식 실시간 호가. ~59 필드. 핵심 인덱스:
-//   0=종목코드, 1=영업시간(HHMMSS),
-//   3..12=매도호가1..10, 13..22=매수호가1..10,
-//   23..32=매도잔량1..10, 33..42=매수잔량1..10,
-//   43=총매도잔량, 44=총매수잔량,
-//   47=예상체결가, 48=예상체결량
 const H0STASP0_FIELDS_PER_RECORD = 59;
 const H0STASP0_IDX = {
   code: 0,
   hhmmss: 1,
-  askPriceBase: 3, // ASKP1..ASKP10 = idx 3..12
-  bidPriceBase: 13, // BIDP1..BIDP10 = idx 13..22
-  askQtyBase: 23, // ASKP_RSQN1..10 = idx 23..32
-  bidQtyBase: 33, // BIDP_RSQN1..10 = idx 33..42
+  askPriceBase: 3,
+  bidPriceBase: 13,
+  askQtyBase: 23,
+  bidQtyBase: 33,
   totalAskQty: 43,
   totalBidQty: 44,
   expectedPrice: 47,
   expectedVolume: 48,
 } as const;
 
-// ─── 출력 메시지 타입 ────────────────────────────────────────────────
 interface PriceMsg {
   type: "price";
   code: string;
@@ -154,8 +176,8 @@ interface AspLevel {
 interface AspMsg {
   type: "asp";
   code: string;
-  asks: AspLevel[]; // 1..10
-  bids: AspLevel[]; // 1..10
+  asks: AspLevel[];
+  bids: AspLevel[];
   totalAskQty: number;
   totalBidQty: number;
   expectedPrice: number | null;
@@ -173,15 +195,13 @@ function parseTopics(raw: string | null): Set<Topic> {
       if (VALID_TOPICS.has(t as Topic)) out.add(t as Topic);
     }
   }
-  if (out.size === 0) out.add("price"); // Phase 1 호환 — topics 미지정 = price만
+  if (out.size === 0) out.add("price");
   return out;
 }
 
-function numOrZero(s: string | undefined): number {
-  if (!s) return 0;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
+// ─────────────────────────────────────────────────────────────────────
+// GET 핸들러
+// ─────────────────────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
   if (!(await isAuthorized(req))) {
@@ -193,14 +213,13 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const symbolsParam = url.searchParams.get("symbols") ?? "";
-  const topics = parseTopics(url.searchParams.get("topics"));
+  const topicsRaw = url.searchParams.get("topics");
+  const topics = parseTopics(topicsRaw);
 
-  // 구독할 KIS TR — price/trade 는 H0STCNT0 한 번으로 동시 추출.
+  // 구독 한도 — KIS WS 41건 (tr_id × tr_key)
   const trIds: string[] = [];
   if (topics.has("price") || topics.has("trade")) trIds.push("H0STCNT0");
   if (topics.has("asp")) trIds.push("H0STASP0");
-
-  // KIS WS 동시 구독 41건 한도 (tr_id × tr_key). 종목 수 × trIds 수.
   const MAX_SUBSCRIPTIONS = 41;
   const maxSymbolsByLimit = Math.max(
     1,
@@ -220,6 +239,196 @@ export async function GET(req: Request) {
     );
   }
 
+  // ─── 1순위: relay 모드 ─────────────────────────────────────────────
+  const relayBase = normalizeRelayUrl(process.env.KIS_WS_RELAY_URL);
+  const relaySecret = process.env.KIS_WS_RELAY_SECRET ?? "";
+
+  if (relayBase) {
+    return handleRelayMode(req, relayBase, relaySecret, symbolsParam, topicsRaw);
+  }
+
+  // ─── 2순위: 직접 WS 모드 (로컬·한국 IP 호스트 전용 fallback) ─────
+  return handleDirectMode(req, symbols, topics, trIds);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Relay 모드 — fetch streaming SSE proxy
+// ─────────────────────────────────────────────────────────────────────
+
+async function handleRelayMode(
+  req: Request,
+  relayBase: string,
+  relaySecret: string,
+  symbolsParam: string,
+  topicsRaw: string | null
+): Promise<Response> {
+  const qs = new URLSearchParams();
+  qs.set("symbols", symbolsParam);
+  if (topicsRaw) qs.set("topics", topicsRaw);
+
+  const upstreamUrl = `${relayBase}/sse?${qs.toString()}`;
+
+  // 클라이언트가 abort 하면 upstream 도 abort.
+  const upstreamAbort = new AbortController();
+  const clientAbortHandler = () => {
+    try {
+      upstreamAbort.abort();
+    } catch {
+      // ignore
+    }
+  };
+  req.signal.addEventListener("abort", clientAbortHandler);
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: "GET",
+      headers: relaySecret
+        ? { "x-relay-secret": relaySecret, accept: "text/event-stream" }
+        : { accept: "text/event-stream" },
+      signal: upstreamAbort.signal,
+      // Next.js fetch cache 끄기
+      cache: "no-store",
+      // @ts-expect-error -- Node fetch streaming
+      duplex: "half",
+    });
+  } catch (e) {
+    req.signal.removeEventListener("abort", clientAbortHandler);
+    const message =
+      e instanceof Error ? e.message : typeof e === "string" ? e : "unknown";
+    const body =
+      `event: error\ndata: ${JSON.stringify({
+        reason: "relay-unreachable",
+        message,
+        ts: Date.now(),
+      })}\n\n`;
+    return new Response(body, {
+      status: 503,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    req.signal.removeEventListener("abort", clientAbortHandler);
+    let text = "";
+    try {
+      text = (await upstream.text()).slice(0, 500);
+    } catch {
+      // ignore
+    }
+    const body =
+      `event: error\ndata: ${JSON.stringify({
+        reason: "relay-bad-response",
+        status: upstream.status,
+        body: text,
+        ts: Date.now(),
+      })}\n\n`;
+    return new Response(body, {
+      status: upstream.status >= 400 ? upstream.status : 502,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
+  }
+
+  // soft-timeout: maxDuration 임박 전 reconnect 이벤트 한 번 보내고 종료
+  const upstreamReader = upstream.body.getReader();
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          upstreamAbort.abort();
+        } catch {
+          // ignore
+        }
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+        req.signal.removeEventListener("abort", clientAbortHandler);
+      };
+
+      const softTimer = setTimeout(() => {
+        if (closed) return;
+        try {
+          controller.enqueue(
+            encoder.encode(
+              `event: reconnect\ndata: ${JSON.stringify({
+                reason: "soft-timeout",
+                ts: Date.now(),
+              })}\n\n`
+            )
+          );
+        } catch {
+          // ignore
+        }
+        cleanup();
+      }, SOFT_TIMEOUT_MS);
+
+      try {
+        for (;;) {
+          const { value, done } = await upstreamReader.read();
+          if (done) break;
+          if (value && !closed) {
+            try {
+              controller.enqueue(value);
+            } catch {
+              break;
+            }
+          }
+        }
+      } catch {
+        // upstream abort / network error — fallthrough cleanup
+      } finally {
+        clearTimeout(softTimer);
+        try {
+          upstreamReader.releaseLock();
+        } catch {
+          // ignore
+        }
+        cleanup();
+      }
+    },
+    cancel() {
+      try {
+        upstreamAbort.abort();
+      } catch {
+        // ignore
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Direct 모드 — Vercel 함수가 직접 KIS WS 연결 (로컬·한국 IP 호스트용)
+// ─────────────────────────────────────────────────────────────────────
+
+async function handleDirectMode(
+  req: Request,
+  symbols: string[],
+  topics: Set<Topic>,
+  trIds: string[]
+): Promise<Response> {
   if (!kisApprovalEnabled()) {
     return new Response(
       JSON.stringify({ error: "KIS_APP_KEY/SECRET 미설정 — 실시간 비활성" }),
@@ -289,14 +498,13 @@ export async function GET(req: Request) {
       abortHandler = () => cleanup("client-abort");
       req.signal.addEventListener("abort", abortHandler);
 
-      // maxDuration - 10 시점에 우아하게 reconnect 이벤트 보내고 종료.
       softTimer = setTimeout(() => {
         sse("reconnect", { reason: "soft-timeout", ts: Date.now() });
         cleanup("soft-timeout");
       }, SOFT_TIMEOUT_MS);
 
       try {
-        ws = new WebSocket(getWsUrl());
+        ws = new WebSocket(getDirectWsUrl());
 
         ws.addEventListener("open", () => {
           sse("open", {
@@ -304,25 +512,23 @@ export async function GET(req: Request) {
             symbolCount: krCodes.length,
             trIds,
             topics: Array.from(topics),
+            relay: false,
           });
-          // 각 종목 × 각 TR 조합으로 subscribe 메시지 전송.
           for (const { six } of krCodes) {
             for (const trId of trIds) {
               const msg = {
                 header: {
                   approval_key: approvalKey,
                   custtype: "P",
-                  tr_type: "1", // 1=subscribe
+                  tr_type: "1",
                   "content-type": "utf-8",
                 },
-                body: {
-                  input: { tr_id: trId, tr_key: six },
-                },
+                body: { input: { tr_id: trId, tr_key: six } },
               };
               try {
                 ws!.send(JSON.stringify(msg));
               } catch {
-                // socket 닫힘 — close handler 가 정리
+                // ignore
               }
             }
           }
@@ -332,7 +538,6 @@ export async function GET(req: Request) {
           const raw = typeof ev.data === "string" ? ev.data : "";
           if (raw.length === 0) return;
 
-          // JSON 컨트롤 메시지: subscribe ack / PINGPONG / error
           if (raw.charCodeAt(0) === 0x7b /* '{' */) {
             try {
               const j = JSON.parse(raw) as {
@@ -355,12 +560,11 @@ export async function GET(req: Request) {
                 });
               }
             } catch {
-              // 파싱 실패 — 무시
+              // ignore
             }
             return;
           }
 
-          // PIPE 데이터 프레임: "0|H0STCNT0|count|f0^f1^..." 또는 "0|H0STASP0|count|..."
           const parts = raw.split("|");
           if (parts.length < 4) return;
           const trId = parts[1];
@@ -382,15 +586,11 @@ export async function GET(req: Request) {
                 sse("price", m);
               }
               if (topics.has("trade")) {
-                const cumVolume = numOrZero(fields[o + H0STCNT0_IDX.cumVolume]);
-                const cumTradeValue = numOrZero(
-                  fields[o + H0STCNT0_IDX.cumTradeValue]
-                );
                 const m: TradeMsg = {
                   type: "trade",
                   code,
-                  cumVolume,
-                  cumTradeValue,
+                  cumVolume: numOrZero(fields[o + H0STCNT0_IDX.cumVolume]),
+                  cumTradeValue: numOrZero(fields[o + H0STCNT0_IDX.cumTradeValue]),
                   ts,
                 };
                 sse("trade", m);
@@ -423,7 +623,6 @@ export async function GET(req: Request) {
                   qty: Number.isFinite(bq) ? bq : 0,
                 });
               }
-
               const expectedPriceRaw = Number(
                 fields[o + H0STASP0_IDX.expectedPrice]
               );

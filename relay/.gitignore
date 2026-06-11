@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+*.log
+.cache/
+
+# 루트 .gitignore 의 `.env*` 가 .env.example 까지 막아 README 가 참조하지 못한다.
+# 예시 파일은 추적되도록 negation.
+!.env.example
