@@ -702,7 +702,22 @@ interface KisInvestorItem {
 
 interface KisInvestorResponse {
   rt_cd?: string;
+  msg_cd?: string;
+  msg1?: string;
   output?: KisInvestorItem[];
+}
+
+// `[kis-flow] OK ...` 샘플은 한 번만(=처음 성공한 종목만) 찍어 노이즈 방지.
+// lambda hot reuse 동안 유지, cold start 마다 재설정.
+let kisFlowSampleLogged = false;
+
+// kisGet throw 메시지(`KIS GET <path> <status>: <body>`) 에서 HTTP status 추출 시도.
+// non-2xx 응답일 때만 kisGet 이 throw 하므로 catch 경로에서 사용.
+function extractHttpStatus(message: string): number | null {
+  const m = message.match(/\s(\d{3})(?:\s|:)/);
+  if (!m) return null;
+  const code = Number(m[1]);
+  return Number.isFinite(code) ? code : null;
 }
 
 // 수량×종가 → 원화 환산.
@@ -733,6 +748,7 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
 
   try {
     dbg("[flow] call inquire-investor", six);
+    // kisGet 은 2xx 응답일 때만 json 을 반환. non-2xx 는 throw → catch 경로로.
     const json = await kisGet<KisInvestorResponse>({
       path: "/uapi/domestic-stock/v1/quotations/inquire-investor",
       trId: "FHKST01010900",
@@ -742,17 +758,24 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       },
     });
 
-    if (json.rt_cd && json.rt_cd !== "0") {
-      const msg = (json as { msg1?: string }).msg1;
-      // production Vercel Functions Logs 에서 종목별 KIS 실패 사유 핀포인트.
+    const rtCd = json.rt_cd;
+    const msgCd = json.msg_cd;
+    const msg1 = json.msg1;
+    const list = json.output ?? [];
+    const outputLength = list.length;
+
+    // rt_cd != "0" — KIS 응답 자체가 거부. 권한·구독·tr_id·파라미터 문제 가능성.
+    if (rtCd && rtCd !== "0") {
       console.warn(
-        `[kis] flow fetch failed for ${code}: rt_cd=${json.rt_cd} msg=${msg ?? "?"}`
+        `[kis-flow] ${code} status=200 rt_cd=${rtCd} msg_cd=${msgCd ?? "?"} msg1=${msg1 ?? "?"} output_length=${outputLength}`
       );
       return null;
     }
-    const list = json.output ?? [];
-    if (list.length === 0) {
-      console.warn(`[kis] flow fetch failed for ${code}: empty output`);
+    // 200 OK + rt_cd=0 인데 output 이 비었을 때 — tr_id/query 가 잘못됐을 가능성 시그널.
+    if (outputLength === 0) {
+      console.warn(
+        `[kis-flow] ${code} status=200 rt_cd=${rtCd ?? "0"} msg_cd=${msgCd ?? "?"} msg1=${msg1 ?? "?"} output_length=0`
+      );
       return null;
     }
 
@@ -801,6 +824,14 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       }
     }
 
+    // 성공 sample — lambda 인스턴스당 한 번만. 응답 구조 확인용.
+    if (!kisFlowSampleLogged) {
+      kisFlowSampleLogged = true;
+      console.warn(
+        `[kis-flow] OK ${code} bizdate=${today.stck_bsop_date ?? "?"} 외인순매수=${foreignNet ?? "null"} 기관순매수=${institutionNet ?? "null"} 개인순매수=${individualNet ?? "null"} output_length=${outputLength}`
+      );
+    }
+
     return {
       foreignNet,
       institutionNet,
@@ -812,8 +843,12 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       fetchedAt: Date.now(),
     };
   } catch (e) {
+    // non-2xx 응답·네트워크·파싱 에러 모두 여기로. message 에서 status 추출.
     const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`[kis] flow fetch failed for ${code}: ${msg}`);
+    const httpStatus = extractHttpStatus(msg);
+    console.warn(
+      `[kis-flow] ${code} status=${httpStatus ?? "?"} rt_cd=? msg_cd=? msg1=? output_length=null err=${msg.slice(0, 200)}`
+    );
     return null;
   }
 }
