@@ -9,7 +9,12 @@ import type {
   MarketLeadersMarket,
 } from "@/lib/types";
 import { Card, CardBody } from "./ui/Card";
-import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
+import {
+  changeColor,
+  fmtNumber,
+  fmtPercent,
+  toFriendlyErrorMessage,
+} from "@/lib/utils";
 
 // 거래량 / 상승 / 하락 TOP — KIS 활성 시만 동작. 30s 캐시.
 // 마운트 시 1회 + 사용자 탭 전환 시 fetch. 자동 폴링은 없음 (사용자 행동 기반).
@@ -55,7 +60,7 @@ export function MarketLeadersPanel() {
       }
       setData(j.data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toFriendlyErrorMessage(e));
     } finally {
       setLoading(false);
     }

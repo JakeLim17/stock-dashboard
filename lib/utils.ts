@@ -343,6 +343,49 @@ export function formatKrwAmount(
   return `₩${krw.toLocaleString("ko-KR")}`;
 }
 
+// 사용자에게 노출되는 에러 메시지를 한국어로 통일.
+// Network/Fetch/HTTP 류 영어 메시지는 친절한 한국어로 매핑하고,
+// 이미 한국어로 시작하는 메시지(예: "서버 오류 503")는 그대로 보존한다.
+//
+// 정책:
+//   - "Failed to fetch", TypeError "NetworkError" → 네트워크 카피
+//   - AbortError → 호출 측에서 별도 처리하므로 보통 도달하지 않지만 안전망
+//   - "HTTP 4xx", "HTTP 5xx" 패턴 → 상태 코드만 보존하고 일반 카피
+//   - 그 외 영문 메시지 → "데이터를 불러오지 못했어요…" 표준 카피로 대체
+//   - 한국어 메시지 또는 "서버 오류"로 시작 → 그대로 노출
+export function toFriendlyErrorMessage(e: unknown): string {
+  const fallback =
+    "데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+  const networkCopy =
+    "네트워크 연결을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.";
+
+  if (e instanceof DOMException && e.name === "AbortError") {
+    return "요청이 취소됐어요.";
+  }
+
+  const raw =
+    e instanceof Error
+      ? e.message
+      : typeof e === "string"
+        ? e
+        : "";
+
+  if (!raw) return fallback;
+
+  if (/[가-힣]/.test(raw)) return raw;
+
+  if (/failed to fetch|network ?error|networkerror|load failed/i.test(raw)) {
+    return networkCopy;
+  }
+
+  const httpMatch = raw.match(/^HTTP\s+(\d{3})/i);
+  if (httpMatch) {
+    return `서버 오류 (${httpMatch[1]}) — 잠시 후 다시 시도해 주세요.`;
+  }
+
+  return fallback;
+}
+
 // 안전한 fetch with timeout
 export async function safeFetch(
   url: string,

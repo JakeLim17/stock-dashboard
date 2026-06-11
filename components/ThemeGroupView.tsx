@@ -23,7 +23,7 @@ import type {
 import { Badge } from "./ui/Badge";
 import { Card, CardBody } from "./ui/Card";
 import { SignalMarkBadges } from "./SignalMarkBadges";
-import { changeColor, fmtPercent } from "@/lib/utils";
+import { changeColor, fmtPercent, toFriendlyErrorMessage } from "@/lib/utils";
 
 interface Props {
   // 시장 지표 — NVDA 등 MARKET_INDICATORS 종목의 등락률 데이터 (스냅샷에서 직접 전달)
@@ -81,7 +81,7 @@ export function ThemeGroupView({
       setData(j);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toFriendlyErrorMessage(e));
     } finally {
       if (abortRef.current === ctrl) {
         abortRef.current = null;

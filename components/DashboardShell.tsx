@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/types";
 import { DashboardClient } from "./DashboardClient";
 import { DashboardSkeleton } from "./skeletons/DashboardSkeleton";
+import { toFriendlyErrorMessage } from "@/lib/utils";
 
 // 페이지가 server 측 fetch 를 기다리지 않고 즉시 응답되도록 하는 client wrapper.
 //   1) mount 즉시 DashboardSkeleton 표시 (헤더 + SummaryBar + 카드 그리드 자리)
@@ -74,7 +75,7 @@ export function DashboardShell() {
       } catch (e) {
         if ((e as { name?: string })?.name === "AbortError") return;
         if (mountedRef.current) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(toFriendlyErrorMessage(e));
         }
       }
     })();
@@ -95,7 +96,7 @@ export function DashboardShell() {
           role="alert"
           className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-lg border border-down/40 bg-down/10 px-4 py-2 text-sm text-down shadow-lg"
         >
-          첫 로딩 실패 — {error}. 새로고침 해 주세요.
+          첫 로딩 실패 — {error} 새로고침 해 주세요.
         </div>
       )}
     </>

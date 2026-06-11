@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getOverseasNightProxy } from "@/lib/symbols";
+import { toFriendlyErrorMessage } from "@/lib/utils";
 import {
   createChart,
   ColorType,
@@ -138,7 +139,7 @@ export function PriceChart({ code, name, currentPrice }: Props) {
         await loadDaily();
       } catch (e) {
         if (!aborted) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(toFriendlyErrorMessage(e));
           setEmpty(true);
         }
       } finally {

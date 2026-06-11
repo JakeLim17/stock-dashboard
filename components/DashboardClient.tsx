@@ -23,7 +23,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
 import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { DisclaimerModal } from "./DisclaimerModal";
-import { fmtRelative, getKrwRate } from "@/lib/utils";
+import { fmtRelative, getKrwRate, toFriendlyErrorMessage } from "@/lib/utils";
 import {
   Loader2,
   LogOut,
@@ -176,7 +176,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(toFriendlyErrorMessage(e));
       } finally {
         if (abortRef.current === ctrl) {
           abortRef.current = null;

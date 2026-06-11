@@ -26,6 +26,7 @@ import {
   currencyOf,
   fmtPercent,
   fmtRelative,
+  toFriendlyErrorMessage,
 } from "@/lib/utils";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
@@ -115,7 +116,7 @@ export function RecommendationsPanel({
       setData(j);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toFriendlyErrorMessage(e));
     } finally {
       if (abortRef.current === ctrl) {
         abortRef.current = null;
