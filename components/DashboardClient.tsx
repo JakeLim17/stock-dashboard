@@ -733,6 +733,21 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </p>
         <p>데이터 출처: KIS · 네이버 · Yahoo · Google News</p>
         <p>익명 트래픽 통계(Vercel Analytics) 수집 · IP·쿠키 미저장.</p>
+        <p className="pt-1">
+          <a
+            href="/terms"
+            className="text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
+          >
+            이용약관
+          </a>
+          <span className="mx-1.5 opacity-50">·</span>
+          <a
+            href="/privacy"
+            className="text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
+          >
+            개인정보 처리방침
+          </a>
+        </p>
       </footer>
     </div>
   );

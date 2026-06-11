@@ -85,6 +85,13 @@ export default async function LoginPage({ searchParams }: PageProps) {
             <span className="opacity-50">·</span>
             <span>30일 자동 로그인</span>
           </div>
+
+          {/* SameSite=Strict 쿠키 정책 안내 — 외부 링크에서 첫 진입한 사용자가
+              로그인으로 리다이렉트된 이유를 짧게 설명. 보안 정책 안내라 강조 아님. */}
+          <p className="text-[11px] leading-relaxed text-center text-muted-foreground/70 pt-1">
+            외부 링크(검색결과·메신저)에서 처음 접속하셨다면 보안 정책상 한 번
+            로그인 후 정상 진입됩니다.
+          </p>
         </form>
       </div>
     </Suspense>
