@@ -106,9 +106,20 @@ export const RISK_KEYWORDS: RiskKeyword[] = [
   { pattern: /\bpanic\b/i, weight: 4, category: "경기", label: "panic" },
 ];
 
+// 헤드라인이 "악재 반전(해소/회복)" 표현을 담고 있는지 — 외부 노출도 함께 사용.
+// 매칭되면 risk 키워드 가산점을 모두 무효(빈 배열 반환)로 처리한다.
+// 예) "관세 우려 해소", "전쟁 위기 진정", "지정학 긴장 완화·회복", "약세 종료" 등.
+// 한국어/영어를 가볍게 함께 다루며, 단어 substring 매칭이 합리적인 한국어는 그대로,
+// 영어는 word boundary 로 false-positive 를 줄인다.
+export const RISK_NEGATION_PATTERN: RegExp =
+  /(해소|벗어나|벗어났|탈출|종료|진정|완화|개선|회복|회복세|반등|진화|\beased?\b|\beasing\b|\bresolved?\b|\brecover(s|ed|ing|y)?\b|\brebound(s|ed|ing)?\b)/i;
+
 // 헤드라인 1개를 받아 매칭된 키워드를 전부 반환한다.
 // 동일 라벨이 여러 번 잡히지 않도록 라벨 기준으로 dedupe.
+// negation 검출 시 모든 risk 가산점을 무효로 — 같은 헤드라인이 "위기 회복" / "긴장 해소"
+// 같은 반전 표현을 담으면 부정적 점수로 잘못 카운트되는 것을 방지.
 export function matchRiskKeywords(headline: string): RiskKeyword[] {
+  if (RISK_NEGATION_PATTERN.test(headline)) return [];
   const hits: RiskKeyword[] = [];
   const seen = new Set<string>();
   for (const kw of RISK_KEYWORDS) {

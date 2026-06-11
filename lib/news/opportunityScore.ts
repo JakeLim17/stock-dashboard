@@ -16,6 +16,7 @@
 //   - verdict shift는 절대 하지 않음 (안전장치 부족). reasons + UI 노출만.
 
 import { matchOpportunityKeywords } from "./positiveKeywords";
+import { dominantHeadlineSide } from "./headlineSide";
 import { timeDecay } from "./riskScore";
 import type {
   OpportunityAssessment,
@@ -73,6 +74,9 @@ export function assessOpportunity(
     const age = now - item.publishedAt;
     const decay = timeDecay(age);
     if (decay === 0) continue;
+    // 같은 헤드라인이 risk 키워드에 더 강하게 매칭되면 opportunity 카운트 skip.
+    // ("실적 사상 최대에도 트럼프 관세 위협" 같은 양방향 부풀림 방지.) 동률·근접도 skip.
+    if (dominantHeadlineSide(item.title) !== "opportunity") continue;
     const hits = matchOpportunityKeywords(item.title);
     const headlineKey = normalize(item.title);
     for (const h of hits) {

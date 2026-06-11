@@ -588,6 +588,26 @@ export async function fetchWatchlistSnapshots(
         intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
         events: eventsForVolatility,
       });
+      // H2: verdict ↔ target 정합성 — 비중 축소·관망 verdict 인데 1·2차 목표가가
+      //     entry 대비 +3% 이상이면 "팔라는데 목표가 한참 위" 모순. UI 노출 회색·숨김
+      //     처리할 수 있도록 데이터 측에 suppressed 플래그를 박는다 (UI 노출은 후속).
+      if (predictions.targets) {
+        const REDUCE_ACTIONS = new Set([
+          "REDUCE",
+          "TRIM",
+          "AVOID",
+        ]);
+        if (REDUCE_ACTIONS.has(analysis.verdict.action)) {
+          const t = predictions.targets;
+          if (
+            t.entry > 0 &&
+            (t.takeProfit1 >= t.entry * 1.03 ||
+              t.takeProfit2 >= t.entry * 1.03)
+          ) {
+            predictions.targets = { ...t, suppressed: true };
+          }
+        }
+      }
 
       saveQuote(quote);
       saveFlow(meta.code, quote.fetchedAt, flow);

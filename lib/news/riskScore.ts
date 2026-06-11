@@ -16,6 +16,7 @@
 // drivers: 점수 기여도(weight × decay) 큰 순으로 최대 5개. UI 배지/툴팁용.
 
 import { matchRiskKeywords } from "./keywords";
+import { dominantHeadlineSide } from "./headlineSide";
 import type {
   NewsRiskAssessment,
   NewsRiskDriver,
@@ -67,6 +68,9 @@ export function assessNewsRisk(
     const age = now - item.publishedAt;
     const decay = timeDecay(age);
     if (decay === 0) continue;
+    // 같은 헤드라인이 호재 키워드에 더 강하게 매칭되면 risk 카운트는 skip
+    // ("관세 우려에도 실적 사상 최대" 같은 양방향 가산 부풀림 방지). null(동률·근접)도 skip.
+    if (dominantHeadlineSide(item.title) !== "risk") continue;
     const hits = matchRiskKeywords(item.title);
     const headlineKey = normalize(item.title);
     for (const h of hits) {
