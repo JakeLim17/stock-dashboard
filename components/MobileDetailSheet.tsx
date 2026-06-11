@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { NewsItem, StockSnapshot } from "@/lib/types";
+import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { StockDetailPanel } from "./StockDetailPanel";
 import { X } from "lucide-react";
 
@@ -46,6 +47,7 @@ export function MobileDetailSheet({
   allNews,
   krwRate,
   kisActive,
+  aspOverride,
 }: {
   open: boolean;
   onClose: () => void;
@@ -53,6 +55,8 @@ export function MobileDetailSheet({
   allNews: NewsItem[];
   krwRate?: number | null;
   kisActive?: boolean;
+  // Phase 3 — KIS WS 호가 실시간. StockDetailPanel 의 AskingPricePanel 에 forwarding.
+  aspOverride?: RealtimeAspEntry | null;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -138,6 +142,7 @@ export function MobileDetailSheet({
             krwRate={krwRate}
             kisActive={kisActive}
             mobileSheet
+            aspOverride={aspOverride}
           />
         </div>
       </div>

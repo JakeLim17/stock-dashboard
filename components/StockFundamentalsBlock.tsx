@@ -37,6 +37,8 @@ interface Props {
   // KIS Open API 가 서버 설정에 활성화돼 있는지 — DashboardSnapshot.kisActive 미러.
   // true 면 "분 단위 실시간은 KIS API 필요" 안내 문구를 숨긴다.
   kisActive?: boolean;
+  // Phase 3 — KIS WS H0STCNT0 누적거래량·거래대금 실시간 override. 있으면 quote.volume 위에 덮어쓰기.
+  tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
 }
 
 export function StockFundamentalsBlock({
@@ -44,11 +46,22 @@ export function StockFundamentalsBlock({
   krwRate,
   variant = "card",
   kisActive = false,
+  tradeOverride,
 }: Props) {
   const { meta, quote, tech, flow } = snap;
   const { secondary } = pickPrimaryQuote(quote);
   const currency = currencyOf(meta.code, meta.currency);
   const isDetail = variant === "detail";
+
+  // 실시간 누적거래량/거래대금 — KIS WS tick 이 있으면 사용, 없으면 snapshot.
+  const liveVolume =
+    tradeOverride?.cumVolume != null && tradeOverride.cumVolume > 0
+      ? tradeOverride.cumVolume
+      : quote.volume;
+  const liveTradeValue =
+    tradeOverride?.cumTradeValue != null && tradeOverride.cumTradeValue > 0
+      ? tradeOverride.cumTradeValue
+      : null;
 
   return (
     <div className={isDetail ? "space-y-4" : "space-y-4"}>
@@ -111,17 +124,24 @@ export function StockFundamentalsBlock({
         </div>
       )}
 
-      {/* 거래량 / RSI(14) */}
+      {/* 거래량 / RSI(14) / (KRW 종목) 거래대금 — Phase 3 KIS WS tick 시 즉시 갱신 */}
       <div
         className={`grid grid-cols-2 gap-x-4 gap-y-2 text-sm ${
           isDetail ? "" : "border-t border-border pt-3"
         }`}
       >
-        <Row label="거래량" value={fmtNumber(quote.volume)} />
+        <Row label="거래량" value={fmtNumber(liveVolume)} />
         <Row
           label="RSI(14)"
           value={tech.rsi14 != null ? tech.rsi14.toFixed(0) : "—"}
         />
+        {/* 거래대금 — KIS WS 가 줄 때만 노출 (한국 종목 + Phase 3 active). 단위 자동 (억/조). */}
+        {liveTradeValue != null && (
+          <Row
+            label="거래대금"
+            value={fmtTradeValueKR(liveTradeValue)}
+          />
+        )}
       </div>
 
       {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 */}
@@ -161,6 +181,17 @@ function flowLabel(v: number | null | undefined): string {
   const eok = v / 1e8;
   const sign = eok > 0 ? "+" : "";
   return `${sign}${eok.toFixed(0)}억`;
+}
+
+// 거래대금(원) → 토스 스타일 단위 자동 환산 (KRW 가정).
+// 1조 이상 = "N.NN조", 1000억 이상 = "N,NNN억", 그 미만 = "N억" 또는 "—"
+function fmtTradeValueKR(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v) || v <= 0) return "—";
+  const jo = v / 1e12;
+  if (jo >= 1) return `${jo.toFixed(2)}조`;
+  const eok = v / 1e8;
+  if (eok >= 1) return `${Math.round(eok).toLocaleString("ko-KR")}억`;
+  return Math.round(v).toLocaleString("ko-KR");
 }
 
 function flowLabel5d(v: number | null | undefined): string {

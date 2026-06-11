@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   AskingPriceData,
+  AskingPriceLevel,
   ExecutionTick,
 } from "@/lib/types";
+import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 선택 종목 1개의 호가 + 체결 폴링 패널.
@@ -20,11 +22,19 @@ import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 //   2) "데이터 받지 못했어요" 메시지는 **연속 실패가 EMPTY_THRESHOLD 회 이상이고
 //      이전에 한 번도 성공한 적이 없을 때만** 노출.
 //   3) 마지막 성공 시각을 작게 노출 ("방금 / N초 전 갱신") — stale 여부 판단 가능.
+//
+// 🚀 Phase 3 — KIS WebSocket H0STASP0 실시간 호가 ─────────────────
+//   부모(`DashboardClient`) 가 `useRealtime(..., ["asp"])` 로 받은 호가 메시지를
+//   `aspOverride` prop 으로 전달한다. aspOverride 가 있으면 REST 데이터보다 우선 표시.
+//   WebSocket 끊김 시 자동으로 REST polling 으로 fallback (기존 로직 그대로 유지).
 
 interface Props {
   code: string;
   active: boolean;
   pollMs?: number;
+  // Phase 3 — KIS WS H0STASP0 호가 메시지. 있으면 REST polling 보다 우선.
+  // null/undefined 면 기존 REST polling 그대로 (회귀 0).
+  aspOverride?: RealtimeAspEntry | null;
 }
 
 interface IntradayResponse {
@@ -45,7 +55,12 @@ function hasPayload(d: IntradayResponse | null | undefined): boolean {
   return false;
 }
 
-export function AskingPricePanel({ code, active, pollMs = 1500 }: Props) {
+export function AskingPricePanel({
+  code,
+  active,
+  pollMs = 1500,
+  aspOverride,
+}: Props) {
   // data 는 "마지막으로 받은 유효(=hasPayload) 응답" 만 보관. 실패 시 교체 안 함.
   const [data, setData] = useState<IntradayResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -105,10 +120,34 @@ export function AskingPricePanel({ code, active, pollMs = 1500 }: Props) {
 
   if (!active) return null;
 
-  const hasEverSucceeded = lastSuccessAt != null;
-  const asking = data?.asking;
+  // WS asp → AskingPriceData 합성. ccldStrength 는 H0STASP0 에 없어 REST 값을 그대로 stitch.
+  const wsAsking: AskingPriceData | null = aspOverride
+    ? {
+        levels: Array.from({ length: 10 }, (_, i): AskingPriceLevel => ({
+          askPrice: aspOverride.asks[i]?.price ?? 0,
+          askQty: aspOverride.asks[i]?.qty ?? 0,
+          bidPrice: aspOverride.bids[i]?.price ?? 0,
+          bidQty: aspOverride.bids[i]?.qty ?? 0,
+        })),
+        totalAskQty: aspOverride.totalAskQty,
+        totalBidQty: aspOverride.totalBidQty,
+        ccldStrength: data?.asking?.ccldStrength ?? null,
+        expectedPrice: aspOverride.expectedPrice,
+        expectedVolume: aspOverride.expectedVolume,
+        fetchedAt: aspOverride.ts,
+      }
+    : null;
+
+  // WS 호가가 있으면 hasEverSucceeded 도 자동 true. REST 가 한 번도 응답 못 했어도 호가 표시 OK.
+  const hasEverSucceeded = lastSuccessAt != null || wsAsking != null;
+  const asking = wsAsking ?? data?.asking;
   const executions = data?.executions;
   const hasAny = !!asking || !!(executions && executions.length > 0);
+  // 마지막 갱신 시각 — WS 우선, REST 차순.
+  const effectiveSuccessAt = wsAsking
+    ? Math.max(wsAsking.fetchedAt, lastSuccessAt ?? 0)
+    : lastSuccessAt;
+  const sourceLabel = wsAsking ? "KIS-WS" : "KIS";
 
   // 1) 한 번도 성공 못 했고 + 연속 실패 임계 이상 → 명시적 empty 메시지.
   if (!hasEverSucceeded && failures >= EMPTY_THRESHOLD) {
@@ -155,23 +194,27 @@ export function AskingPricePanel({ code, active, pollMs = 1500 }: Props) {
         hasAny={hasAny}
         loading={loading}
         failures={failures}
-        lastSuccessAt={lastSuccessAt}
+        lastSuccessAt={effectiveSuccessAt}
+        sourceLabel={sourceLabel}
       />
     </div>
   );
 }
 
 // 마지막 갱신 라벨. "방금 / N초 전 갱신" + 연속 실패 중이면 작은 표시.
+// sourceLabel: "KIS" (REST polling) 또는 "KIS-WS" (Phase 3 WebSocket 호가).
 function UpdatedLabel({
   hasAny,
   loading,
   failures,
   lastSuccessAt,
+  sourceLabel,
 }: {
   hasAny: boolean;
   loading: boolean;
   failures: number;
   lastSuccessAt: number | null;
+  sourceLabel: string;
 }) {
   if (!lastSuccessAt || !hasAny) return null;
   const age = Date.now() - lastSuccessAt;
@@ -187,7 +230,7 @@ function UpdatedLabel({
             : "오래된 데이터";
   return (
     <div className="text-[10px] text-muted-foreground tabular text-right flex items-center justify-end gap-1.5">
-      <span>KIS · {ageLabel}</span>
+      <span>{sourceLabel} · {ageLabel}</span>
       {failures > 0 && (
         <span
           className="text-muted-foreground/60"

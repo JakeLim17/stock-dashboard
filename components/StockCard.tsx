@@ -58,7 +58,15 @@ const SIGNAL_VARIANT = {
 
 type SignalKey = keyof typeof SIGNAL_VARIANT;
 
-export function StockCard({ snap, onSelect, selected, krwRate, kisActive, priceOverride }: {
+export function StockCard({
+  snap,
+  onSelect,
+  selected,
+  krwRate,
+  kisActive,
+  priceOverride,
+  tradeOverride,
+}: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
   selected?: boolean;
@@ -67,12 +75,15 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive, priceO
   /** KIS Open API 활성 여부. DashboardSnapshot.kisActive 미러 — 펀더멘털 안내 분기. */
   kisActive?: boolean;
   /**
-   * KIS WebSocket H0STCNT0(체결가) 실시간 override. `useRealtime` 훅이 흘려보낸 최신 체결가.
-   * 정규장 진행 중일 때만 적용되며, 시간외/장마감 상태이면 무시한다.
-   * 등락 절대값/등락률은 `quote.prevClose` 로 즉석 재계산.
-   * undefined/null/비정상 값이면 기존 snapshot 그대로 사용 (회귀 0).
+   * Phase 1 — KIS WebSocket H0STCNT0(체결가) 실시간 override.
+   * 정규장 진행 중일 때만 적용. 등락은 `quote.prevClose` 로 즉석 재계산.
    */
   priceOverride?: number | null;
+  /**
+   * Phase 3 — KIS WebSocket H0STCNT0 의 누적거래량(주)·거래대금(원) 실시간 override.
+   * 있으면 StockFundamentalsBlock 의 거래량/거래대금 Row 가 tick 단위 갱신.
+   */
+  tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
 }) {
   const { meta, quote, tech, analysis, consensus } = snap;
 
@@ -244,6 +255,7 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive, priceO
           krwRate={krwRate}
           variant="card"
           kisActive={kisActive}
+          tradeOverride={tradeOverride}
         />
         
 

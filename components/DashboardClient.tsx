@@ -334,24 +334,70 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     watchCodes.includes(p.meta.code)
   );
 
-  // KIS WebSocket H0STCNT0(체결가) 실시간 가격 구독 — 카드 표시 가격만 즉시 갱신.
+  // KIS WebSocket 실시간 구독 — 카드 가격/거래량 + 선택 종목 호가 즉시 갱신.
   // - feature flag NEXT_PUBLIC_REALTIME_ENABLED=true 일 때만 SSE 연결, 그 외엔 noop.
   // - 한국 6자리 종목만 구독 (훅 내부에서도 필터). 미국 종목은 기존 polling 유지.
-  // - 60초 신선도 가드: stale tick(예: 장 마감 후 잔존) 으로 가격이 굳지 않게.
+  // - 60초 신선도 가드: stale tick(예: 장 마감 후 잔존) 으로 데이터가 굳지 않게.
+  //
+  // 구독 구조:
+  //   1) 가시 카드 (visibleCodes) × [price, trade]   → H0STCNT0 한 번에 가격 + 누적거래량 추출
+  //   2) 선택 종목 1개 (selectedSnap.meta.code) × [asp] → H0STASP0 호가 10단계
+  //   동시 구독 ≈ 6×1 + 1 = 7건 (KIS 한도 41 안전).
   const visibleCodes = useMemo(
     () => visiblePrimaries.map((p) => p.meta.code),
     [visiblePrimaries]
   );
-  const { prices: realtimePrices } = useRealtime(visibleCodes);
+  const cardTopics = useMemo<("price" | "trade")[]>(
+    () => ["price", "trade"],
+    []
+  );
+  const { prices: realtimePrices, trades: realtimeTrades } = useRealtime(
+    visibleCodes,
+    cardTopics
+  );
+
+  // 선택 종목 호가 — 한국 종목일 때만 (H0STASP0 는 국내주식 한정).
+  const aspCodes = useMemo(() => {
+    const c = selectedSnap?.meta.code;
+    if (!c) return [];
+    return /^\d{6}\.K[SQ]$/.test(c) ? [c] : [];
+  }, [selectedSnap?.meta.code]);
+  const aspTopics = useMemo<("asp")[]>(() => ["asp"], []);
+  const { asps: realtimeAsps } = useRealtime(aspCodes, aspTopics);
+
   const realtimeNow = Date.now();
+  const FRESH_MS = 60_000;
   const realtimeFresh = (code: string): number | null => {
     const six = code.match(/^(\d{6})/)?.[1];
     if (!six) return null;
     const entry = realtimePrices[six];
     if (!entry) return null;
-    if (realtimeNow - entry.ts > 60_000) return null;
+    if (realtimeNow - entry.ts > FRESH_MS) return null;
     return entry.price;
   };
+  const realtimeTradeFresh = (
+    code: string
+  ): { cumVolume?: number; cumTradeValue?: number } | null => {
+    const six = code.match(/^(\d{6})/)?.[1];
+    if (!six) return null;
+    const entry = realtimeTrades[six];
+    if (!entry) return null;
+    if (realtimeNow - entry.ts > FRESH_MS) return null;
+    return {
+      cumVolume: entry.cumVolume > 0 ? entry.cumVolume : undefined,
+      cumTradeValue: entry.cumTradeValue > 0 ? entry.cumTradeValue : undefined,
+    };
+  };
+  const selectedAspOverride = (() => {
+    const c = selectedSnap?.meta.code;
+    if (!c) return null;
+    const six = c.match(/^(\d{6})/)?.[1];
+    if (!six) return null;
+    const entry = realtimeAsps[six];
+    if (!entry) return null;
+    if (realtimeNow - entry.ts > FRESH_MS) return null;
+    return entry;
+  })();
 
   // USDKRW 환율 — USD 종목 원화 병기에 사용. indicators(KRW=X) 기준.
   // 환율이 없거나 fetch 실패면 null → 자식들이 보조 표시를 자동 생략(graceful).
@@ -589,6 +635,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           allNews={snap.news}
           krwRate={krwRate}
           kisActive={snap.kisActive}
+          aspOverride={selectedAspOverride}
         />
       </div>
 
@@ -614,6 +661,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               krwRate={krwRate}
               kisActive={snap.kisActive}
               priceOverride={realtimeFresh(p.meta.code)}
+              tradeOverride={realtimeTradeFresh(p.meta.code)}
             />
           </div>
         ))}
@@ -632,6 +680,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         allNews={snap.news}
         krwRate={krwRate}
         kisActive={snap.kisActive}
+        aspOverride={selectedAspOverride}
       />
 
       {error && (

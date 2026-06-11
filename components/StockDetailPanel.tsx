@@ -13,6 +13,7 @@ import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { AskingPricePanel } from "./AskingPricePanel";
+import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { fmtRelative } from "@/lib/utils";
 import { isNewsRelated } from "@/lib/news/symbolKeywords";
 
@@ -62,6 +63,8 @@ interface Props {
   // 모바일 모달(MobileDetailSheet) 안에서 렌더되는지 여부.
   // true 면 PredictionPanel 의 "상세 예측 보기" details 를 기본 펼침 등 모바일 친화 동작.
   mobileSheet?: boolean;
+  // Phase 3 — KIS WS H0STASP0 호가 실시간. 있으면 AskingPricePanel 에 우선 표시.
+  aspOverride?: RealtimeAspEntry | null;
 }
 
 const TAB_META: Record<
@@ -77,7 +80,7 @@ const TAB_META: Record<
 
 export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
   function StockDetailPanel(
-    { snap, allNews, krwRate, kisActive, mobileSheet = false },
+    { snap, allNews, krwRate, kisActive, mobileSheet = false, aspOverride },
     ref
   ) {
     const [tab, setTab] = useState<DetailTabKey>("prediction");
@@ -182,7 +185,11 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
             <FlowTab snap={snap} krwRate={krwRate} kisActive={kisActive} />
           )}
           {tab === "asking" && (
-            <AskingPricePanel code={snap.meta.code} active={tab === "asking"} />
+            <AskingPricePanel
+              code={snap.meta.code}
+              active={tab === "asking"}
+              aspOverride={aspOverride}
+            />
           )}
           {tab === "news" && <NewsTab snap={snap} allNews={allNews} />}
         </CardBody>
