@@ -13,7 +13,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 const COOKIE_NAME = "dashboard_token";
 const COOKIE_VERSION = "v1";
-const PUBLIC_PATHS = ["/login", "/api/login"];
+// /api/realtime/stream 은 SSE (text/event-stream) 라 브라우저 EventSource 가 307 리다이렉트를
+// 따라가지 못한다. middleware 는 통과시키고, 라우트 핸들러 내부에서 동일한 쿠키 검증 수행.
+const PUBLIC_PATHS = ["/login", "/api/login", "/api/realtime/stream"];
 
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);

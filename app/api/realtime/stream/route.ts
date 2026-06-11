@@ -1,5 +1,31 @@
 import { getApprovalKey, kisApprovalEnabled } from "@/lib/providers/kisApproval";
 
+// ─── 쿠키 인증 (middleware bypass 대체) ─────────────────────────────
+// middleware 는 /api/realtime/stream 을 PUBLIC_PATHS 로 통과시키므로
+// (EventSource 가 307 리다이렉트를 못 따름) 라우트 내부에서 동일한 SHA-256 검증.
+// 보호 비활성 환경(DASHBOARD_PASS 미설정)이면 통과.
+const AUTH_COOKIE_VERSION = "v1";
+const AUTH_COOKIE_RE = /(?:^|;\s*)dashboard_token=([^;]+)/;
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function isAuthorized(req: Request): Promise<boolean> {
+  const pass = process.env.DASHBOARD_PASS;
+  if (!pass) return true; // 로컬 등 보호 비활성
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const m = cookieHeader.match(AUTH_COOKIE_RE);
+  if (!m) return false;
+  const token = decodeURIComponent(m[1]);
+  const expected = await sha256Hex(pass + AUTH_COOKIE_VERSION);
+  return token === expected;
+}
+
 // ─── 런타임 선택 — Node.js (Edge 아님!) ────────────────────────────────
 // Vercel Edge Runtime 은 `new WebSocket(...)` 으로 **외부 서버에 연결하는** 클라이언트
 // API 를 지원하지 않는다. (WebSocketPair 같은 인바운드 server-side WebSocket 만 지원.)
@@ -62,6 +88,14 @@ interface PriceMsg {
 }
 
 export async function GET(req: Request) {
+  // 인증 — middleware 가 통과시켰으므로 라우트가 직접 확인.
+  if (!(await isAuthorized(req))) {
+    return new Response(
+      JSON.stringify({ error: "unauthorized" }),
+      { status: 401, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const url = new URL(req.url);
   const symbolsParam = url.searchParams.get("symbols") ?? "";
   const symbols = symbolsParam

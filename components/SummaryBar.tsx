@@ -93,12 +93,21 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
       <Stat
         label="반도체 과열도"
         value={
-          // SOX·NVDA 데이터가 모두 들어와야만 계산됨. 결손 시 mood.semiHeat=null →
-          // 과거엔 "0/100" 으로 굳어 보였으나 지금은 "—" 로 명확히 표시.
+          // SOX·NVDA 데이터가 모두 들어와야만 계산됨. 결손 시 mood.semiHeat=null → "—" 표시.
+          // 값이 있을 때는 0(급랭)·50(중립)·100(과열) 의미를 한눈에 알 수 있도록 톤 라벨 동반.
+          // (사용자가 "0/100" 을 "데이터 없음" 으로 오해하는 사례 방지.)
           mood.semiHeat != null ? (
-            <span className="tabular text-base font-semibold">
-              {mood.semiHeat}
-              <span className="text-xs text-muted-foreground ml-1">/100</span>
+            <span
+              className="tabular text-base font-semibold inline-flex items-baseline gap-1"
+              title="SOX·NVDA 평균 등락률을 0~100으로 환산. 50=중립, 0=급랭, 100=과열."
+            >
+              <span className={semiHeatTone(mood.semiHeat).color}>
+                {mood.semiHeat}
+              </span>
+              <span className="text-xs text-muted-foreground">/100</span>
+              <span className={`text-[10px] ml-1 ${semiHeatTone(mood.semiHeat).color}`}>
+                {semiHeatTone(mood.semiHeat).label}
+              </span>
             </span>
           ) : (
             <span
@@ -167,6 +176,16 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
       <span>{value}</span>
     </div>
   );
+}
+
+// 반도체 과열도 점수를 짧은 톤 라벨 + 색으로 환산.
+// 0/100 같은 극단값이 "데이터 없음" 이 아니라 실제 시장 상태임을 시각적으로 보강.
+function semiHeatTone(v: number): { label: string; color: string } {
+  if (v <= 20) return { label: "급랭", color: "text-down" };
+  if (v <= 40) return { label: "약세", color: "text-muted-foreground" };
+  if (v <= 60) return { label: "중립", color: "text-foreground" };
+  if (v <= 80) return { label: "강세", color: "text-up" };
+  return { label: "과열", color: "text-warn" };
 }
 
 function MoodBadge({ mood }: { mood: "강세" | "중립" | "약세" }) {
