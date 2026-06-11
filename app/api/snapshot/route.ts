@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { buildSnapshot } from "@/lib/snapshot";
+import {
+  buildSnapshot,
+  buildSnapshotShared,
+  invalidateSnapshotCache,
+} from "@/lib/snapshot";
 import { invalidateConsensusCache } from "@/lib/providers/consensusCache";
 import { invalidateMarketAlertCache } from "@/lib/providers/marketAlertCache";
 import { invalidateEventCalendarCache } from "@/lib/providers/eventCalendar";
@@ -36,9 +40,15 @@ export async function GET(req: Request) {
         // 매크로 이벤트 캐시(global)도 비워 새 발표 일정이 즉시 반영되게 함.
         invalidateEventCalendarCache();
       }
+      // 스냅샷 + 시장지표 soft TTL 캐시도 함께 비움 — refresh 의도와 일치.
+      invalidateSnapshotCache();
     }
 
-    const snap = await buildSnapshot(symbols, { includeOverseasNight });
+    // 평상시는 in-flight dedup + 2s soft TTL 로 동시 호출 압축.
+    // refresh=1 은 분석/컨센서스 캐시도 비웠으니 신선한 호출이 가도록 직접 buildSnapshot.
+    const snap = forceRefresh
+      ? await buildSnapshot(symbols, { includeOverseasNight })
+      : await buildSnapshotShared(symbols, { includeOverseasNight });
     return NextResponse.json(snap, {
       headers: { "Cache-Control": "no-store" },
     });

@@ -89,10 +89,28 @@ export interface WatchlistDeps {
 }
 
 // ──────────────────────────────────────────────────────────────
+// 스탬피드 가드 — 동일 결과를 짧은 시간 안에 여러 클라이언트가 동시에 요청하면
+// Yahoo 28개 + 종목별 fanout 이 곱빼기로 발생해 24초 latency 가 생기는 원인.
+// snapshot/indicator 둘 다 같은 패턴(`consensusCache.ts`)의 in-flight + soft TTL.
+// ──────────────────────────────────────────────────────────────
+
+// 시장 지표 — 5s TTL. Vercel 인스턴스 안에서 같은 polling 사이클 안의 중복 호출 방지.
+const MARKET_INDICATOR_TTL_MS = 5_000;
+type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
+let marketIndicatorCache: MarketIndicatorCache | null = null;
+let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
+
+// 풀 스냅샷 — 2s TTL. 동일 symbols+옵션이면 직전 응답 재사용 → 사용자 폴링 사이클을 곱빼기로 두드리지 않음.
+const SNAPSHOT_TTL_MS = 2_000;
+type SnapshotCache = { data: DashboardSnapshot; at: number };
+const snapshotCache = new Map<string, SnapshotCache>();
+const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
+
+// ──────────────────────────────────────────────────────────────
 // 1) 시장 지표 — 빠른 영역 (1-2초). SummaryBar / MarketPanel 1차 채움용.
 //    Suspense streaming 단계 중 가장 먼저 도착한다.
 // ──────────────────────────────────────────────────────────────
-export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
+async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   const errors: Record<string, string> = {};
   // 시세 batch + 모든 인디케이터 일별 close history(최근 35영업일)를 병렬로.
   // history는 (1) KRW=X 변동성 σ 계산, (2) 모든 카드의 Sparkline 렌더에 사용.
@@ -207,6 +225,27 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
     },
     usdKrw: fx?.value ?? null,
   };
+}
+
+// fetchMarketIndicators 의 외부 노출 진입점 — 5s soft TTL + in-flight dedup 적용.
+// Suspense streaming 진입과 client polling /api/snapshot 의 indicator 부분이
+// 같은 인스턴스에서 동시 fanout 되는 사고를 막는다.
+export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
+  const now = Date.now();
+  if (marketIndicatorCache && now - marketIndicatorCache.at < MARKET_INDICATOR_TTL_MS) {
+    return marketIndicatorCache.data;
+  }
+  if (marketIndicatorInFlight) return marketIndicatorInFlight;
+  const p = fetchMarketIndicatorsCore()
+    .then((data) => {
+      marketIndicatorCache = { data, at: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      marketIndicatorInFlight = null;
+    });
+  marketIndicatorInFlight = p;
+  return p;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -720,6 +759,50 @@ export async function buildSnapshot(
     macroEvents: fetchMacroEvents(),
     kisActive: kisEnabled(),
   };
+}
+
+// ──────────────────────────────────────────────────────────────
+// buildSnapshotShared — `/api/snapshot` 전용 in-flight dedup + 2s TTL.
+//   동일 symbols + 옵션을 짧은 시간 안에 여러 클라이언트가 호출하면
+//   직전 응답을 그대로 반환해 fanout 비용을 한 번으로 압축한다.
+//   refresh=1 처럼 캐시 우회가 필요하면 buildSnapshot 을 직접 호출.
+// ──────────────────────────────────────────────────────────────
+function snapshotKey(symbols: string[], options: BuildSnapshotOptions): string {
+  const normalized = Array.from(new Set(symbols)).sort().join(",");
+  return `${normalized}|night=${options.includeOverseasNight ? "1" : "0"}`;
+}
+
+export async function buildSnapshotShared(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  const key = snapshotKey(requestedSymbols, options);
+  const now = Date.now();
+  const hit = snapshotCache.get(key);
+  if (hit && now - hit.at < SNAPSHOT_TTL_MS) return hit.data;
+  const inflight = snapshotInFlight.get(key);
+  if (inflight) return inflight;
+  const p = buildSnapshot(requestedSymbols, options)
+    .then((data) => {
+      snapshotCache.set(key, { data, at: Date.now() });
+      // 메모리 가드 — symbol 조합이 폭증해도 64 entry 까지만 유지.
+      if (snapshotCache.size > 64) {
+        const firstKey = snapshotCache.keys().next().value;
+        if (firstKey !== undefined) snapshotCache.delete(firstKey);
+      }
+      return data;
+    })
+    .finally(() => {
+      snapshotInFlight.delete(key);
+    });
+  snapshotInFlight.set(key, p);
+  return p;
+}
+
+// 강제 갱신용 — `/api/snapshot?refresh=1` 진입 시 호출.
+export function invalidateSnapshotCache(): void {
+  snapshotCache.clear();
+  marketIndicatorCache = null;
 }
 
 async function fetchOverseasNightIndicator(

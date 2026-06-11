@@ -77,6 +77,17 @@ function dbg(...args: unknown[]): void {
   }
 }
 
+// per-call 단위 provider 진단 로그 — production 에서 폴링 사이클마다 warn 이 폭주해
+// Vercel logs 가 빠르게 채워지는 문제 회피. DEBUG_PROVIDERS=1 일 때만 warn 으로,
+// 그 외엔 console.debug (Vercel/Node 기본 출력 OFF 에 가까움) 로 격하한다.
+function providerDbg(...args: unknown[]): void {
+  if (process.env.DEBUG_PROVIDERS === "1" || process.env.DEBUG_PROVIDERS === "true") {
+    console.warn(...args);
+  } else {
+    console.debug(...args);
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // OAuth 토큰
 // ────────────────────────────────────────────────────────────────────
@@ -366,7 +377,9 @@ interface KisGetParams {
 // 모의투자(openapivts)는 초당 ~1건, 실전은 키별 한도가 달라 보수적으로 직렬화.
 // 실전 환경에서도 EGW00201이 자주 발생해서 (단일 키 동시 호출 제한) — 안전 마진 크게.
 function isVtsMode(): boolean {
-  return (process.env.KIS_BASE_URL ?? "").includes("openapivts");
+  // raw env 가 아닌 `normalizeHttpsBase` 통과 후 origin 기준으로 판정.
+  // (env 에 `KIS_BASE_URL=...` 처럼 prefix 가 박혀 있어도 origin 만 추출돼 정확히 비교.)
+  return getBaseUrl().includes("openapivts");
 }
 function kisMinIntervalMs(): number {
   // 환경 변수로 override 가능 — 실전 키 한도 여유 있으면 낮춰 사용.
@@ -442,7 +455,15 @@ async function kisGet<T>(params: KisGetParams): Promise<T> {
     let token = await getToken();
     let res = await call(token);
     if (res.status === 401 || res.status === 403) {
-      token = await getToken(true);
+      // 토큰 재발급은 1~2s 소요. 슬롯을 잡은 채로 기다리면 동시 호출자가 전원 직렬화돼
+      // 응답 latency 가 곱빼기로 늘어남. 재발급 동안 슬롯을 임시 반환했다가
+      // 새 토큰 받은 뒤 재획득. 발급 자체는 getToken 내부 inflight Promise 가 직렬화 보장.
+      releaseKisSlot();
+      try {
+        token = await getToken(true);
+      } finally {
+        await acquireKisSlot();
+      }
       res = await call(token);
     }
     // EGW00201 (초당 거래건수 초과) — 1초 대기 후 1회 재시도. 보통 회복됨.
@@ -603,7 +624,10 @@ export async function fetchKrQuote(code: string, name: string): Promise<Quote | 
       // KIS inquire-price는 시장 상태를 직접 안 줘서 비워두고, 호출자(라우팅)에서
       // 네이버/Yahoo와 머지하거나 별도 판정에 맡긴다.
       marketState: undefined,
-      priceTime: null,
+      // KIS inquire-price 는 ~100ms 안에 실시간 last 를 주므로 priceTime = fetch 시각.
+      // (fetchUsQuote 와 동일 패턴. priceTime 이 null 이면 UI 신선도 라벨이 안 떠서
+      //  사용자가 "지금 가격인지 종가인지" 판단 못 함.)
+      priceTime: Date.now(),
       extendedHours: null,
     };
   } catch (e) {
@@ -766,14 +790,14 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
 
     // rt_cd != "0" — KIS 응답 자체가 거부. 권한·구독·tr_id·파라미터 문제 가능성.
     if (rtCd && rtCd !== "0") {
-      console.warn(
+      providerDbg(
         `[kis-flow] ${code} status=200 rt_cd=${rtCd} msg_cd=${msgCd ?? "?"} msg1=${msg1 ?? "?"} output_length=${outputLength}`
       );
       return null;
     }
     // 200 OK + rt_cd=0 인데 output 이 비었을 때 — tr_id/query 가 잘못됐을 가능성 시그널.
     if (outputLength === 0) {
-      console.warn(
+      providerDbg(
         `[kis-flow] ${code} status=200 rt_cd=${rtCd ?? "0"} msg_cd=${msgCd ?? "?"} msg1=${msg1 ?? "?"} output_length=0`
       );
       return null;
@@ -846,7 +870,7 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
     // non-2xx 응답·네트워크·파싱 에러 모두 여기로. message 에서 status 추출.
     const msg = e instanceof Error ? e.message : String(e);
     const httpStatus = extractHttpStatus(msg);
-    console.warn(
+    providerDbg(
       `[kis-flow] ${code} status=${httpStatus ?? "?"} rt_cd=? msg_cd=? msg1=? output_length=null err=${msg.slice(0, 200)}`
     );
     return null;
@@ -888,6 +912,11 @@ const NYSE_TICKERS = new Set([
   "CRM",
   "NOW",
   "ADBE",
+  // 2026-06: AI 데이터센터 인프라(VRT)·서버(DELL) 추가. 둘 다 NYSE 상장 종목.
+  // 기존 기본값(NAS) 으로 보내면 EXCD 불일치로 KIS 가 빈 응답을 줘서 Yahoo 폴백으로
+  // 떨어지고, Yahoo free API 의 stale 응답 이슈가 동시에 노출되는 사고가 있었음.
+  "DELL",
+  "VRT",
 ]);
 
 const AMEX_TICKERS = new Set<string>([]);

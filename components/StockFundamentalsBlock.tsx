@@ -474,10 +474,12 @@ function FlowSection({
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
-      {/* KIS·네이버 둘 다 실패한 진짜 빈 상태 — 옵션 F 부활 이후엔 거의 발생하지 않음. */}
+      {/* KIS·네이버 둘 다 실패한 진짜 빈 상태 — 옵션 F 부활 이후엔 거의 발생하지 않음.
+          KIS 토큰 EGW00133 cooldown 이 기본 5분 (lib/providers/kis.ts tokenCooldownMs)
+          이라 사용자에게도 실제 재시도 주기를 정직하게 안내. */}
       {flow.source === "kis-unavailable" && (
         <div className="text-[11px] text-warn leading-snug">
-          ⚠ KIS·네이버 둘 다 일시 실패 — 잠시 후 자동 재시도.
+          ⚠ KIS·네이버 모두 일시 실패 — 최대 5분 후 자동 재시도.
         </div>
       )}
       {/* "분 단위 실시간은 KIS API 필요" 안내 — KIS 가 active 하면 의미 없는 안내라 항상 미노출.
