@@ -193,8 +193,12 @@ export interface FlowData {
   foreignNet5d?: number | null;
   institutionNet5d?: number | null;
   individualNet5d?: number | null;
-  // 데이터 출처 — UI에 mock 표시용
-  source?: "naver" | "kis" | "mock";
+  // 데이터 출처 — UI 표시용.
+  //   "kis"             : KIS inquire-investor (KRX 원본, 토스와 정합)
+  //   "naver"           : 네이버 dealTrendInfos (단위·부호 mismatch 로 현재 비활성)
+  //   "kis-unavailable" : KIS 일시 실패 — 숫자 비표시 + 안내
+  //   "mock"            : 더미 (개발 환경)
+  source?: "naver" | "kis" | "kis-unavailable" | "mock";
   // 수급 데이터를 받아온 시각 (epoch ms). UI 신선도 라벨용. 최초엔 quote.fetchedAt에 동기화.
   fetchedAt?: number;
 }

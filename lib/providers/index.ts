@@ -153,24 +153,34 @@ export {
   reclassifyWithTitleKo,
 } from "./news";
 
-// 외인/기관 수급: KIS(inquire-investor) → 네이버(dealTrendInfos) → mock 순.
-// KIS FHKST01010900 은 KRX 원본을 거의 실시간(=토스 증권 데이터) 그대로 주고
-// 5일 누적도 거래일 단위로 정확히 합산한다. 네이버 dealTrendInfos 는 5~30분 지연·
-// 추정치 섞임이 있어 사용자 보고("토스와 안 맞고 늦음") 의 직접 원인이었음.
-// KIS cooldown/EGW00133 등으로 실패하면 네이버로 자연 폴백되어 빈 화면 위험 0.
+// 외인/기관 수급: KIS(inquire-investor) 만 신뢰. 네이버 dealTrendInfos 는 비활성.
+//
+// 배경 (사용자 보고 비교):
+//   토스 삼성전기 오늘 외인 +3,082(백만원=30.82억) / 기관 +7,000 / 개인 0
+//   우리 화면(네이버 fallback) 외인 -2,409억 / 기관 -885억 / 개인 +3,426억
+//   → 정확히 ~1000배 + 부호 반전.
+//
+// 네이버 dealTrendInfos 의 응답 단위·부호·시점이 KIS/KRX 와 다르게 해석되는 것으로 보이는데
+// production 직접 호출 없이 raw 값을 확정할 수 없어, "잘못된 숫자로 사용자 혼란" 보다
+// "비표시 + KIS 복귀 안내" 가 안전하다고 판단 (사용자 결정·옵션 E).
+//
+// 네이버 호출은 **로그 목적으로 유지** — `naver.ts` 에서 raw bizdate/quant 를 한 줄씩 찍어
+// Vercel Functions Logs 로 추적 가능. 추후 단위 확정 시 다시 사용 가능.
+//
+// KIS 실패 시: source="kis-unavailable" 로 빈 flow 반환 → UI 가 "KIS 일시 실패" 안내.
 export async function fetchFlowOrMock(
   code: string,
   currentPrice?: number
 ): Promise<{
   flow: FlowData;
-  source: "naver" | "kis" | "mock";
+  source: FlowData["source"];
 }> {
   if (!isKrStock(code)) {
     const m = mockFlow(code);
     return { flow: m, source: "mock" };
   }
 
-  // 1순위: KIS 실시간 (FHKST01010900)
+  // 1순위: KIS 실시간 (FHKST01010900) — 토스/KRX 와 정합.
   if (kisEnabled()) {
     const kisFlow = await fetchKrFlow(code);
     if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
@@ -178,19 +188,26 @@ export async function fetchFlowOrMock(
     }
   }
 
-  // 2순위: 네이버 dealTrendInfos (KIS 실패/비활성/cooldown 시 폴백)
+  // 네이버 호출은 raw 값 로깅 목적으로만 실행 — 결과 숫자는 사용 안 함.
+  // (단위/부호 확정 후 다시 활성화 시 위 if 블록 바깥에 옮기면 됨.)
   if (currentPrice) {
-    const naverFlow = await fetchNaverFlow(code, currentPrice);
-    if (naverFlow && (naverFlow.foreignNet != null || naverFlow.institutionNet != null)) {
-      return {
-        flow: { ...naverFlow, source: "naver" as const },
-        source: "naver",
-      };
-    }
+    await fetchNaverFlow(code, currentPrice).catch(() => null);
   }
 
-  const m = mockFlow(code);
-  return { flow: m, source: "mock" };
+  // KIS 실패 + 네이버 비신뢰 → 빈 표시.
+  return {
+    flow: {
+      foreignNet: null,
+      institutionNet: null,
+      individualNet: null,
+      foreignNet5d: null,
+      institutionNet5d: null,
+      individualNet5d: null,
+      source: "kis-unavailable",
+      fetchedAt: Date.now(),
+    },
+    source: "kis-unavailable",
+  };
 }
 
 export { kisEnabled };

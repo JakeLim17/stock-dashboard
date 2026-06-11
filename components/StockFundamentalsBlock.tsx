@@ -286,11 +286,13 @@ function ShortBalanceSection({
 
 function flowSubtitle(source: import("@/lib/types").FlowData["source"]): string {
   if (source === "kis") return "수급 (당일 누적 · 거의 실시간, 억)";
+  if (source === "kis-unavailable") return "수급 (KIS 일시 실패)";
   return "수급 (당일 누적 · 종일치, 억)";
 }
 
 function flowSourceLabel(source: import("@/lib/types").FlowData["source"]): string {
   if (source === "kis") return "KIS 실시간";
+  if (source === "kis-unavailable") return "—";
   if (source === "naver") return "네이버";
   return "mock";
 }
@@ -357,7 +359,7 @@ function FlowSection({
           </div>
         ))}
       </div>
-      {has5d && (
+      {has5d && flow.source !== "kis-unavailable" && (
         <div className="text-[11px] text-muted-foreground tabular leading-snug">
           <span className="mr-1">5일:</span>
           외인 {flowLabel5d(flow.foreignNet5d)} / 기관{" "}
@@ -365,13 +367,22 @@ function FlowSection({
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
-      {/* "분 단위 실시간은 KIS API 필요" 안내 — KIS 가 active 하면 사용자에게 의미 없는 안내라
-          항상 미노출. KIS 비활성 + naver/mock 출처일 때만 표시된다. */}
-      {!kisActive && flow.source !== "kis" && (
-        <div className="text-[10px] text-muted-foreground/80 leading-snug">
-          ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
+      {/* KIS 일시 실패 안내 — 네이버 응답은 토스/KRX 와 단위·부호 mismatch (사용자 보고)
+          가 확인돼 일시 비표시. 잘못된 숫자보다 빈 표시가 안전. */}
+      {flow.source === "kis-unavailable" && (
+        <div className="text-[11px] text-warn leading-snug">
+          ⚠ KIS 데이터 일시 실패 — 잠시 후 자동 재시도. (토스/KRX 와 정합 보장 위해 비표시)
         </div>
       )}
+      {/* "분 단위 실시간은 KIS API 필요" 안내 — KIS 가 active 하면 의미 없는 안내라 항상 미노출.
+          mock/naver 출처일 때만 (현재는 거의 발생 안 함). */}
+      {!kisActive &&
+        flow.source !== "kis" &&
+        flow.source !== "kis-unavailable" && (
+          <div className="text-[10px] text-muted-foreground/80 leading-snug">
+            ※ 일별 누적값. 분 단위 실시간은 KIS API 필요.
+          </div>
+        )}
     </div>
   );
 }

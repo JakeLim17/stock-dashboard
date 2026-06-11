@@ -39,14 +39,13 @@ const SIGNAL_LABEL: Record<string, string> = {
   SELL: "비중 축소",
 };
 
-// 카드 가로 폭 제약 안에서 H/L 라벨을 한 줄로 유지하기 위한 컴팩트 가격 포맷.
-// KRW: 6자리 가격 → "319.5K" / "1.81M". USD: 2자리 그대로(짧음).
-function fmtCompactPrice(v: number | null | undefined, currency: string): string {
+// 카드 우측 고저가 라벨용 정확 금액 포맷.
+// 사용자 요청 — 축약 단위("1.84M")가 아닌 천단위 콤마("1,840,000") 로 정확 표기.
+// KRW 는 정수(원), USD 는 소수 2자리. 줄바꿈은 부모의 flex-wrap 가 처리.
+function fmtFullPrice(v: number | null | undefined, currency: string): string {
   if (v == null || !Number.isFinite(v)) return "—";
   if (currency === "USD") return v.toFixed(2);
-  if (v >= 1_000_000) return (v / 1_000_000).toFixed(2) + "M";
-  if (v >= 1_000) return (v / 1_000).toFixed(1) + "K";
-  return v.toLocaleString("ko-KR");
+  return Math.round(v).toLocaleString("ko-KR");
 }
 
 const SIGNAL_VARIANT = {
@@ -178,15 +177,18 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive, priceO
                 />
               </div>
             )}
-            <div className="flex items-center justify-between gap-2 mt-1">
+            <div className="flex items-start justify-between gap-2 mt-1 flex-wrap">
               <div className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(liveChangeRate)}`}>
                 {trendIcon}
                 {fmtSigned(liveChangeAbs)} ({fmtPercent(liveChangeRate)})
               </div>
-              <div className="text-[10px] text-muted-foreground tabular shrink-0 whitespace-nowrap">
-                H <span className="text-foreground">{fmtCompactPrice(quote.high, currency)}</span>
-                <span className="mx-1 opacity-50">·</span>
-                L <span className="text-foreground">{fmtCompactPrice(quote.low, currency)}</span>
+              <div className="text-[11px] text-muted-foreground tabular inline-flex flex-wrap gap-x-2 gap-y-0.5 justify-end">
+                <span>
+                  고가 <span className="text-foreground">{fmtFullPrice(quote.high, currency)}</span>
+                </span>
+                <span>
+                  저가 <span className="text-foreground">{fmtFullPrice(quote.low, currency)}</span>
+                </span>
               </div>
             </div>
             {primary.isExtended && primary.isLive ? (

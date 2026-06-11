@@ -616,6 +616,14 @@ export async function fetchNaverFlow(
     const organShares = parseSignedNumber(today.organPureBuyQuant);
     const individualShares = parseSignedNumber(today.individualPureBuyQuant);
 
+    // 디버그 로그 — production Vercel Functions Logs 에서 네이버 raw 응답 확인용.
+    // 사용자 보고: 토스 +3,082(백만원 추정=30.82억) vs 우리 -2,409억 → 1000배+부호반전.
+    // 이 로그로 dealTrendInfos[0] 의 bizdate/raw quant 단위·부호를 직접 검증할 수 있다.
+    // 추후 단위 확정되면 fetchNaverFlow 정상화 가능. (지금은 fetchFlowOrMock 에서 결과 무시.)
+    console.warn(
+      `[naver-flow] ${code} bizdate=${today.bizdate ?? "?"} foreignerPureBuyQuant=${today.foreignerPureBuyQuant ?? "?"} organPureBuyQuant=${today.organPureBuyQuant ?? "?"} individualPureBuyQuant=${today.individualPureBuyQuant ?? "?"} closePrice=${today.closePrice ?? "?"} currentPrice=${currentPrice}`
+    );
+
     // 5일 누적: 각 거래일 종가 × 해당일 수량으로 합산해야 정확.
     //   기존 구현은 모든 일자에 currentPrice를 곱해 단기 급등 종목에서 ~5-6% 오차가 발생.
     //   각 일자 closePrice가 없으면 currentPrice로 폴백.
