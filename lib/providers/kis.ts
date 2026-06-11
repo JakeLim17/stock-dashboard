@@ -27,9 +27,33 @@ import type { HistoricalPoint } from "./yahoo";
 // 기본 설정
 // ────────────────────────────────────────────────────────────────────
 
+// `kisApproval.ts` 와 동일한 정규화 — Vercel env 에 사용자가 `KIS_BASE_URL=https://...`
+// 통째로 또는 path 가 붙은 URL 을 박은 사고를 흡수한다. (REST 경로는 path 결합 시
+// 잘못된 URL 이 만들어져 모든 호출이 throw 로 떨어진다.)
+//   - 정상 origin (https://host:port) 이면 그대로
+//   - "KEY=value" 같은 prefix 가 있으면 잘라냄
+//   - path 가 붙어 있어도 protocol+host(+port) 만 남김
+// 위 어느 것도 통과 못 하면 모의(VTS) 기본값.
+function normalizeHttpsBase(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  const eq = s.indexOf("=");
+  if (eq > -1 && /^[A-Z0-9_]+$/.test(s.slice(0, eq))) {
+    s = s.slice(eq + 1).trim();
+  }
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
 function getBaseUrl(): string {
   return (
-    process.env.KIS_BASE_URL ??
+    normalizeHttpsBase(process.env.KIS_BASE_URL) ??
     "https://openapivts.koreainvestment.com:29443"
   );
 }
