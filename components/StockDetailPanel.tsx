@@ -13,6 +13,7 @@ import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { AskingPricePanel } from "./AskingPricePanel";
+import { VerdictHint } from "./VerdictHint";
 import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { fmtRelative } from "@/lib/utils";
 import { isNewsRelated } from "@/lib/news/symbolKeywords";
@@ -131,6 +132,7 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
               >
                 {verdict.label}
               </Badge>
+              <VerdictHint />
               <SignalDetailBadges
                 short={a.shortTerm.signal}
                 long={a.longTerm.signal}

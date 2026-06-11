@@ -15,6 +15,7 @@ import { PriceWithKrw } from "./PriceWithKrw";
 import { CardSparkline } from "./CardSparkline";
 import { PredictionBlock } from "./PredictionBlock";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
+import { VerdictHint } from "./VerdictHint";
 import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
@@ -153,13 +154,16 @@ export function StockCard({
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용.
             tone === "sell" 이면 위험 결론 — shake-warn 으로 시선 끌기. */}
-        <Badge
-          variant={analysis.verdict.tone}
-          size="md"
-          className={analysis.verdict.tone === "sell" ? "shake-warn" : undefined}
-        >
-          {analysis.verdict.label}
-        </Badge>
+        <div className="inline-flex items-center gap-1.5 shrink-0">
+          <Badge
+            variant={analysis.verdict.tone}
+            size="md"
+            className={analysis.verdict.tone === "sell" ? "shake-warn" : undefined}
+          >
+            {analysis.verdict.label}
+          </Badge>
+          <VerdictHint />
+        </div>
       </CardHeader>
       <CardBody className="space-y-4">
         {/* 가격 + 인라인 sparkline.

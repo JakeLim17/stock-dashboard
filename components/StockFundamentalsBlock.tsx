@@ -15,6 +15,12 @@ import {
   priceTimeLabel,
 } from "@/lib/utils";
 
+// 클라이언트용 한국 종목 판정 — `lib/providers/naver.ts` 는 server-only 라 import 불가.
+// regex 만 1:1 동일 (`6자리.K[SQ]`).
+function isKrStockCode(code: string): boolean {
+  return /^\d{6}\.K[SQ]$/.test(code);
+}
+
 // 카드/디테일 패널 양쪽에서 재사용하는 "종목 펀더멘털 블록".
 // 직접 들어있는 것:
 //   - secondary 박스 (시간외 ↔ 정규장 종가 자동 스왑)
@@ -144,8 +150,13 @@ export function StockFundamentalsBlock({
         )}
       </div>
 
-      {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 */}
-      <FlowSection flow={flow} variant={variant} kisActive={kisActive} />
+      {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 (한국 종목만 실데이터, 그 외는 placeholder) */}
+      <FlowSection
+        flow={flow}
+        code={meta.code}
+        variant={variant}
+        kisActive={kisActive}
+      />
 
       {/* 프로그램 매매 — KIS 활성 시 종목별 차익/비차익. 데이터 없으면 미노출. */}
       {snap.programTrade && (
@@ -369,13 +380,38 @@ function flowSourceLabel(
 
 function FlowSection({
   flow,
+  code,
   variant,
   kisActive,
 }: {
   flow: import("@/lib/types").FlowData;
+  code: string;
   variant: Variant;
   kisActive?: boolean;
 }) {
+  const isDetail = variant === "detail";
+
+  // 비-한국 종목(US/지수/환율 등) 또는 mock 출처 — 외인/기관 수급은 KIS·네이버가 한국 시장만
+  // 신뢰 가능. 그 외엔 의미 없는 가짜 숫자(±500억 등)가 노출되지 않도록 placeholder 만.
+  const isKR = isKrStockCode(code);
+  if (!isKR || flow.source === "mock") {
+    return (
+      <div
+        className={
+          isDetail
+            ? "rounded-lg border border-dashed border-border bg-muted/10 p-3"
+            : "border-t border-border pt-3"
+        }
+      >
+        <div className="text-[11px] text-muted-foreground leading-snug">
+          {isKR
+            ? "수급 데이터 일시 미수신"
+            : "해외 시장은 외인/기관 수급을 제공하지 않습니다"}
+        </div>
+      </div>
+    );
+  }
+
   const cells: Array<{
     label: string;
     value: number | null | undefined;
@@ -389,7 +425,6 @@ function FlowSection({
     flow.institutionNet5d != null ||
     flow.individualNet5d != null;
   const fresh = flow.fetchedAt ? freshnessLabel(flow.fetchedAt) : null;
-  const isDetail = variant === "detail";
 
   return (
     <div

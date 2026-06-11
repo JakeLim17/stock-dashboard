@@ -4,6 +4,7 @@ import type { StockSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { VerdictHint } from "./VerdictHint";
 import {
   changeColor,
   currencyOf,
@@ -137,7 +138,7 @@ export function PredictionHero({
             >
               {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
             </div>
-            <div className="pt-1">
+            <div className="pt-1 inline-flex items-center gap-1.5">
               <Badge
                 variant={verdict.tone}
                 size="lg"
@@ -145,6 +146,7 @@ export function PredictionHero({
               >
                 {verdict.label}
               </Badge>
+              <VerdictHint />
             </div>
           </div>
 
@@ -280,6 +282,11 @@ export function PredictionHero({
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+            {p?.targets && (
+              <div className="text-[10px] text-muted-foreground/80 leading-snug">
+                ※ 통계적 참고선 — 투자권유 아님
               </div>
             )}
           </div>

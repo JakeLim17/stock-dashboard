@@ -22,6 +22,7 @@ import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
 import { MarketLeadersPanel } from "./MarketLeadersPanel";
+import { DisclaimerModal } from "./DisclaimerModal";
 import { fmtRelative, getKrwRate } from "@/lib/utils";
 import {
   Loader2,
@@ -722,11 +723,15 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         </details>
       )}
 
-      <footer className="text-center text-xs text-muted-foreground py-4 space-y-1">
-        <p>
-          데이터: Naver Finance · Yahoo Finance · Google News — 투자 판단 보조용.
-          본인 책임.
+      <DisclaimerModal />
+
+      <footer className="text-center text-xs text-muted-foreground py-4 space-y-1.5">
+        <p className="leading-relaxed max-w-2xl mx-auto px-4">
+          ⚠️ 본 화면의 모든 신호·예측·점수는 룰 기반 알고리즘 출력입니다.
+          투자권유 또는 매매 추천이 아니며, 투자 결정과 그 결과 책임은
+          전적으로 사용자에게 있습니다.
         </p>
+        <p>데이터 출처: KIS · 네이버 · Yahoo · Google News</p>
         <p>익명 트래픽 통계(Vercel Analytics) 수집 · IP·쿠키 미저장.</p>
       </footer>
     </div>

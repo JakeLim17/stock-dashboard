@@ -250,6 +250,14 @@ export function PredictionBlock({
           )}
         </div>
       )}
+
+      {/* 단정 표현(목표가/손절) 보강 — 자본시장법 §49 / SEC IA Act §202 단정성 리스크.
+          숫자는 그대로 두되 "통계적 참고선" 임을 footer 보다 더 가까이 알린다. */}
+      {p?.targets && (
+        <div className="text-[10px] text-muted-foreground/80 leading-snug">
+          ※ 통계적 참고선 — 투자권유 아님
+        </div>
+      )}
     </div>
   );
 }

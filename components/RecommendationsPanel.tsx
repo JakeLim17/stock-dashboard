@@ -30,6 +30,7 @@ import {
 import { PriceWithKrw } from "./PriceWithKrw";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
+import { VerdictHint } from "./VerdictHint";
 import { WATCHLIST_CANDIDATES, MARKET_INDICATORS } from "@/lib/symbols";
 
 // 분야 대장주 메타 조회용 맵 — code → leader meta. RecommendationsPanel 카드에서 배지 렌더링에 사용.
@@ -489,6 +490,7 @@ function RecommendationCard({
             >
               {rec.verdict.label}
             </Badge>
+            <VerdictHint />
           </div>
           <div className="text-[10px] text-muted-foreground tabular mt-0.5">
             {rec.code} · {rec.sector}
