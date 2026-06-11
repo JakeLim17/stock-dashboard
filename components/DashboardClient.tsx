@@ -9,6 +9,7 @@ import {
 } from "@/lib/symbols";
 import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
+import { useRealtime } from "@/hooks/useRealtime";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
 import {
@@ -333,6 +334,25 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     watchCodes.includes(p.meta.code)
   );
 
+  // KIS WebSocket H0STCNT0(체결가) 실시간 가격 구독 — 카드 표시 가격만 즉시 갱신.
+  // - feature flag NEXT_PUBLIC_REALTIME_ENABLED=true 일 때만 SSE 연결, 그 외엔 noop.
+  // - 한국 6자리 종목만 구독 (훅 내부에서도 필터). 미국 종목은 기존 polling 유지.
+  // - 60초 신선도 가드: stale tick(예: 장 마감 후 잔존) 으로 가격이 굳지 않게.
+  const visibleCodes = useMemo(
+    () => visiblePrimaries.map((p) => p.meta.code),
+    [visiblePrimaries]
+  );
+  const { prices: realtimePrices } = useRealtime(visibleCodes);
+  const realtimeNow = Date.now();
+  const realtimeFresh = (code: string): number | null => {
+    const six = code.match(/^(\d{6})/)?.[1];
+    if (!six) return null;
+    const entry = realtimePrices[six];
+    if (!entry) return null;
+    if (realtimeNow - entry.ts > 60_000) return null;
+    return entry.price;
+  };
+
   // USDKRW 환율 — USD 종목 원화 병기에 사용. indicators(KRW=X) 기준.
   // 환율이 없거나 fetch 실패면 null → 자식들이 보조 표시를 자동 생략(graceful).
   const krwRate = getKrwRate(snap.indicators);
@@ -593,6 +613,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               }}
               krwRate={krwRate}
               kisActive={snap.kisActive}
+              priceOverride={realtimeFresh(p.meta.code)}
             />
           </div>
         ))}

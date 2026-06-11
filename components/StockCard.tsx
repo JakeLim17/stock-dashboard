@@ -59,7 +59,7 @@ const SIGNAL_VARIANT = {
 
 type SignalKey = keyof typeof SIGNAL_VARIANT;
 
-export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
+export function StockCard({ snap, onSelect, selected, krwRate, kisActive, priceOverride }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
   selected?: boolean;
@@ -67,6 +67,13 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
   krwRate?: number | null;
   /** KIS Open API 활성 여부. DashboardSnapshot.kisActive 미러 — 펀더멘털 안내 분기. */
   kisActive?: boolean;
+  /**
+   * KIS WebSocket H0STCNT0(체결가) 실시간 override. `useRealtime` 훅이 흘려보낸 최신 체결가.
+   * 정규장 진행 중일 때만 적용되며, 시간외/장마감 상태이면 무시한다.
+   * 등락 절대값/등락률은 `quote.prevClose` 로 즉석 재계산.
+   * undefined/null/비정상 값이면 기존 snapshot 그대로 사용 (회귀 0).
+   */
+  priceOverride?: number | null;
 }) {
   const { meta, quote, tech, analysis, consensus } = snap;
 
@@ -76,9 +83,34 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
   // 통화 — 한국 종목은 KRW(보조 표시 생략), 미국 종목은 USD(원화 병기).
   const currency = currencyOf(meta.code, meta.currency);
 
+  // 실시간 override 적용 조건:
+  //  - priceOverride 가 양수 finite
+  //  - 메인이 정규장 라이브 (시간외/마감 상태에서는 무시 → 시간외 가격이 덮이지 않게)
+  //  - quote.prevClose 가 있어야 등락 재계산 가능
+  const liveOverride =
+    typeof priceOverride === "number" &&
+    Number.isFinite(priceOverride) &&
+    priceOverride > 0 &&
+    primary.isLive &&
+    !primary.isExtended &&
+    typeof quote.prevClose === "number" &&
+    quote.prevClose > 0
+      ? priceOverride
+      : null;
+
+  const livePrice = liveOverride ?? primary.price;
+  const liveChangeAbs =
+    liveOverride != null && typeof quote.prevClose === "number"
+      ? liveOverride - quote.prevClose
+      : primary.changeAbs;
+  const liveChangeRate =
+    liveOverride != null && typeof quote.prevClose === "number" && quote.prevClose > 0
+      ? (liveOverride - quote.prevClose) / quote.prevClose
+      : primary.changeRate;
+
   const trendIcon =
-    primary.changeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
-    primary.changeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
+    liveChangeRate > 0 ? <TrendingUp className="h-4 w-4" /> :
+    liveChangeRate < 0 ? <TrendingDown className="h-4 w-4" /> :
     <Minus className="h-4 w-4" />;
 
   const market = marketDisplayLabel(quote);
@@ -121,10 +153,10 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
         <div className="min-w-0 flex-1">
           <div className="flex items-end gap-3">
             <div
-              className={`text-xl font-bold tabular leading-none shrink-0 ${changeColor(primary.changeRate)}`}
+              className={`text-xl font-bold tabular leading-none shrink-0 ${changeColor(liveChangeRate)}`}
             >
               <PriceTicker
-                value={primary.price}
+                value={livePrice}
                 decimals={currency === "USD" ? 2 : 0}
               />
             </div>
@@ -139,7 +171,7 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
             {currency === "USD" && (
               <div className="mt-1">
                 <PriceWithKrw
-                  price={primary.price}
+                  price={livePrice}
                   currency={currency}
                   krwRate={krwRate ?? null}
                   size="md"
@@ -147,9 +179,9 @@ export function StockCard({ snap, onSelect, selected, krwRate, kisActive }: {
               </div>
             )}
             <div className="flex items-center justify-between gap-2 mt-1">
-              <div className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(primary.changeRate)}`}>
+              <div className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(liveChangeRate)}`}>
                 {trendIcon}
-                {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
+                {fmtSigned(liveChangeAbs)} ({fmtPercent(liveChangeRate)})
               </div>
               <div className="text-[10px] text-muted-foreground tabular shrink-0 whitespace-nowrap">
                 H <span className="text-foreground">{fmtCompactPrice(quote.high, currency)}</span>
