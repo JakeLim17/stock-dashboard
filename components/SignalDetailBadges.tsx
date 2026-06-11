@@ -31,10 +31,18 @@ export function SignalDetailBadges({
       className={`inline-flex items-center gap-1.5 ${className ?? ""}`}
       title={title}
     >
-      <Badge variant={SIGNAL_VARIANT[short]} size="sm">
+      <Badge
+        variant={SIGNAL_VARIANT[short]}
+        size="sm"
+        className={short === "SELL" ? "shake-warn" : undefined}
+      >
         단기 {short}
       </Badge>
-      <Badge variant={SIGNAL_VARIANT[long]} size="sm">
+      <Badge
+        variant={SIGNAL_VARIANT[long]}
+        size="sm"
+        className={long === "SELL" ? "shake-warn" : undefined}
+      >
         장기 {long}
       </Badge>
     </span>

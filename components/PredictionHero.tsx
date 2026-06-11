@@ -138,7 +138,11 @@ export function PredictionHero({
               {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
             </div>
             <div className="pt-1">
-              <Badge variant={verdict.tone} size="lg">
+              <Badge
+                variant={verdict.tone}
+                size="lg"
+                className={verdict.tone === "sell" ? "shake-warn" : undefined}
+              >
                 {verdict.label}
               </Badge>
             </div>

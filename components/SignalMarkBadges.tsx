@@ -47,6 +47,16 @@ const SIZE_CLASSES: Record<"xs" | "sm", string> = {
   sm: "px-2 py-0.5 text-[11px] gap-1 leading-snug",
 };
 
+// 가장 강한 위험 마크만 shake로 시선 끌기 — 너무 많은 떨림은 피로 유발.
+// 기준: tone="bad" 인 priority 1 마크(외인 던지기·52주 신저가·개미무덤)와
+// 동급 우선순위의 ant_shake(개미털기, warn). priority 2 이하는 잠잠.
+const SHAKE_MARK_KEYS = new Set([
+  "foreign_dump",
+  "new_52w_low",
+  "ant_grave",
+  "ant_shake",
+]);
+
 function SignalMarkBadge({
   mark,
   size,
@@ -55,10 +65,11 @@ function SignalMarkBadge({
   size: "xs" | "sm";
 }) {
   const title = mark.detail ? `${mark.label} — ${mark.detail}` : mark.label;
+  const shake = SHAKE_MARK_KEYS.has(mark.key) ? " shake-warn" : "";
   return (
     <span
       title={title}
-      className={`inline-flex items-center rounded-full border font-medium tabular ${SIZE_CLASSES[size]} ${TONE_CLASSES[mark.tone]}`}
+      className={`inline-flex items-center rounded-full border font-medium tabular ${SIZE_CLASSES[size]} ${TONE_CLASSES[mark.tone]}${shake}`}
     >
       <span aria-hidden>{mark.emoji}</span>
       <span>{mark.label}</span>

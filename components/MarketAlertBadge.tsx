@@ -66,11 +66,13 @@ export function MarketAlertBadge({
   className?: string;
 }) {
   if (!alert) return null;
+  // 시장경보는 등급 무관하게 시선을 끄는 게 핵심(주의/경고/위험/거래정지/관리 모두 위험성 표지).
+  // shake-warn 으로 살짝 떨리게 — reduced-motion 사용자엔 자동 무효.
   return (
     <span
       title={LEVEL_TOOLTIP[alert.level]}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border font-medium",
+        "inline-flex items-center gap-1 rounded-full border font-medium shake-warn",
         SIZE_CLASSES[size],
         LEVEL_CLASSES[alert.level],
         className

@@ -124,7 +124,11 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
           <div className="min-w-0">
             <CardTitle>{snap.meta.name} 상세 분석</CardTitle>
             <div className="mt-2 flex items-center gap-2 flex-wrap">
-              <Badge variant={verdict.tone} size="md">
+              <Badge
+                variant={verdict.tone}
+                size="md"
+                className={verdict.tone === "sell" ? "shake-warn" : undefined}
+              >
                 {verdict.label}
               </Badge>
               <SignalDetailBadges

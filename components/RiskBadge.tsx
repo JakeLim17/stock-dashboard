@@ -28,8 +28,11 @@ export function RiskBadge({
       .map((d) => `· ${d.label} (${d.category})`)
       .join("\n") || `외부 리스크 점수 ${assessment.score}`;
 
+  // high(빨강 sell 톤)일 때만 진동으로 시선 끌기. medium(노랑 watch)은 가만히.
+  const className = assessment.level === "high" ? "shake-warn" : undefined;
+
   return (
-    <Badge variant={variant} size={size} title={title}>
+    <Badge variant={variant} size={size} title={title} className={className}>
       <AlertTriangle className="h-3 w-3" />
       {assessment.level === "high" ? "외부 리스크 ↑" : "외부 리스크"}
       {top && <span className="opacity-80">· {top}</span>}

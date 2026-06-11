@@ -104,13 +104,29 @@ html, body {
   animation: shake-soft 2s ease-in-out infinite;
 }
 
+/* 위험 신호 배지 진동 — 5초 주기 중 0~0.6초 burst, 나머지 멈춤.
+   너무 격렬하지 않게 좌우 2px 이내, 도박장 shake-soft 보다는 인지되는 강도.
+   verdict SELL / 외부 리스크 ↑ / 시장경보 / 위험 signalMark 등에 사용. */
+@keyframes shake-warn {
+  0%, 14%, 100% { transform: translateX(0); }
+  2%, 6%, 10% { transform: translateX(-1.5px); }
+  4%, 8%, 12% { transform: translateX(1.5px); }
+}
+.shake-warn {
+  animation: shake-warn 5s ease-in-out infinite;
+  /* 자체 transform 으로 transform-origin 기본값(50% 50%) 유지 — 부모 hover 등과 합성될 때
+     레이아웃 흔들림 최소화. */
+  will-change: transform;
+}
+
 /* 모션 줄이기 사용자 환경에선 모든 가격 애니메이션을 끔 */
 @media (prefers-reduced-motion: reduce) {
   .flash-up,
   .flash-down,
   .pulse-up,
   .pulse-down,
-  .shake-soft {
+  .shake-soft,
+  .shake-warn {
     animation: none !important;
   }
 }

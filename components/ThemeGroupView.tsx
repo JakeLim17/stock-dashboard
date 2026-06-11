@@ -420,7 +420,11 @@ function ThemeMemberCard({
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-sm font-semibold truncate">{meta.name}</span>
             {rec?.verdict && (
-              <Badge variant={rec.verdict.tone} size="sm">
+              <Badge
+                variant={rec.verdict.tone}
+                size="sm"
+                className={rec.verdict.tone === "sell" ? "shake-warn" : undefined}
+              >
                 {rec.verdict.label}
               </Badge>
             )}

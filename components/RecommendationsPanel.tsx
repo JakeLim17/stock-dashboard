@@ -482,7 +482,11 @@ function RecommendationCard({
               meta={LEADER_META_BY_CODE.get(rec.code)}
               size="xs"
             />
-            <Badge variant={rec.verdict.tone} size="sm">
+            <Badge
+              variant={rec.verdict.tone}
+              size="sm"
+              className={rec.verdict.tone === "sell" ? "shake-warn" : undefined}
+            >
               {rec.verdict.label}
             </Badge>
           </div>

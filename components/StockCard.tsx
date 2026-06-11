@@ -151,8 +151,13 @@ export function StockCard({
             <ShortBalanceBadge short={snap.shortBalance} />
           </div>
         </div>
-        {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용. */}
-        <Badge variant={analysis.verdict.tone} size="md">
+        {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용.
+            tone === "sell" 이면 위험 결론 — shake-warn 으로 시선 끌기. */}
+        <Badge
+          variant={analysis.verdict.tone}
+          size="md"
+          className={analysis.verdict.tone === "sell" ? "shake-warn" : undefined}
+        >
           {analysis.verdict.label}
         </Badge>
       </CardHeader>
