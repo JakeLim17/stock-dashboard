@@ -64,17 +64,101 @@ interface TokenCache {
   keyFingerprint: string;
 }
 
+// 메모리 캐시 — 같은 lambda 인스턴스 내 hot reuse. cold start 마다 사라짐.
 let cachedToken: TokenCache | null = null;
 let inflightTokenPromise: Promise<string> | null = null;
 // 토큰 발급 1분당 1회(EGW00133) lockout 회피용 cooldown.
-// 발급 실패 시 60초간 추가 요청을 즉시 throw → 같은 시간 내 호출자는 빠르게 fallback 가도록.
+// 발급 실패 시 일정 시간 추가 요청을 즉시 throw → 같은 시간 내 호출자는 빠르게 fallback 가도록.
+// KIS는 토큰 신규 발급 시 카톡 알림(1일 1회 정책)을 보내므로 cooldown 을 보수적으로 길게.
 let tokenCooldownUntil = 0;
-let diskCacheLoaded = false;
+// 영속 저장소(KV/디스크) 조회 최근 시각 — 너무 자주 KV 호출 안 하도록 throttle.
+// 메모리 캐시가 유효한 동안은 영속 저장소 안 봄. 만료/미스 시에만 throttle 안에서 재조회.
+let lastStoreCheckAt = 0;
+const STORE_RECHECK_INTERVAL_MS = 30_000;
 
-// node_modules/.cache 하위에 토큰 1개만 저장 — git ignore 자동 + dev 재시작/Turbopack
-// 모듈 reload 후에도 동일 키면 그대로 재사용 (KIS 토큰은 24h 유효).
-function tokenCachePath(): string {
-  return path.join(process.cwd(), "node_modules", ".cache", "kis-token.json");
+function tokenCooldownMs(): number {
+  const fromEnv = Number(process.env.KIS_TOKEN_COOLDOWN_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return 300_000; // 기본 5분 — 카톡 폭주 방지. 정상이면 토큰 1일 1회만 발급.
+}
+
+// ─── 토큰 영속 저장소 ──────────────────────────────────────────────────
+// 우선순위: 1) Vercel KV (cross-instance) → 2) /tmp 파일 (instance hot reuse)
+// → 3) 메모리 캐시 (cachedToken).
+//
+// Vercel serverless 환경은 `node_modules/.cache` 가 read-only 라 기존 디스크
+// 캐시가 무용지물이었음. 결과적으로 lambda cold start 마다 토큰 신규 발급 →
+// KIS 카톡 알림 폭주. KV (Upstash) 가 설정되면 모든 인스턴스가 같은 토큰을
+// 공유해 발급은 24h 에 1회만 발생한다.
+//
+// KV REST API 직접 호출 — `@vercel/kv`/`@upstash/redis` 패키지 추가 없이도 동작.
+
+const KV_TOKEN_KEY = "kis:token:v1";
+
+function getKvUrl(): string | null {
+  return (
+    process.env.KV_REST_API_URL ??
+    process.env.UPSTASH_REDIS_REST_URL ??
+    null
+  );
+}
+
+function getKvToken(): string | null {
+  return (
+    process.env.KV_REST_API_TOKEN ??
+    process.env.UPSTASH_REDIS_REST_TOKEN ??
+    null
+  );
+}
+
+function isKvConfigured(): boolean {
+  return !!(getKvUrl() && getKvToken());
+}
+
+async function kvGet(key: string): Promise<string | null> {
+  const url = getKvUrl();
+  const token = getKvToken();
+  if (!url || !token) return null;
+  try {
+    const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { result?: string | null };
+    return json.result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function kvSet(key: string, value: string, ttlSec: number): Promise<boolean> {
+  const url = getKvUrl();
+  const token = getKvToken();
+  if (!url || !token) return false;
+  try {
+    // Upstash REST: POST /set/{key}/{value}?EX={ttl}
+    const res = await fetch(
+      `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?EX=${ttlSec}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// /tmp 는 Vercel serverless 인스턴스 내 쓰기 가능 (인스턴스 격리되긴 함).
+// 로컬/일반 Node 환경에서는 .cache/ 폴더로 폴백 (node_modules 가 아니라 프로젝트 루트).
+function tokenDiskPath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return "/tmp/kis-token.json";
+  }
+  return path.join(process.cwd(), ".cache", "kis-token.json");
 }
 
 function keyFingerprint(): string {
@@ -83,36 +167,76 @@ function keyFingerprint(): string {
   return `${k.slice(0, 8)}:${k.length}`;
 }
 
-async function loadTokenFromDisk(): Promise<void> {
-  if (diskCacheLoaded) return;
-  diskCacheLoaded = true;
+function isValidStoredToken(parsed: Partial<TokenCache> | null | undefined): parsed is TokenCache {
+  return !!(
+    parsed?.token &&
+    typeof parsed.expiresAt === "number" &&
+    parsed.expiresAt > Date.now() &&
+    parsed.keyFingerprint === keyFingerprint()
+  );
+}
+
+async function loadTokenFromStore(): Promise<void> {
+  // 메모리 캐시가 유효하면 영속 저장소 안 봄.
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return;
+  // 너무 자주 KV/디스크 조회 안 하도록 30초 throttle.
+  // (단, 처음 한 번은 무조건 조회되도록 lastStoreCheckAt = 0 으로 시작.)
+  if (lastStoreCheckAt > 0 && Date.now() - lastStoreCheckAt < STORE_RECHECK_INTERVAL_MS) return;
+  lastStoreCheckAt = Date.now();
+
+  // 1) Vercel KV / Upstash 우선 (cross-instance 공유) — 다른 인스턴스가 갱신한 토큰을 본다.
+  if (isKvConfigured()) {
+    try {
+      const raw = await kvGet(KV_TOKEN_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<TokenCache>;
+        if (isValidStoredToken(parsed)) {
+          cachedToken = parsed;
+          dbg("[token] loaded from KV (cross-instance), expires in",
+            Math.round((parsed.expiresAt - Date.now()) / 1000), "s");
+          return;
+        }
+      }
+    } catch {
+      // KV 실패 — 파일 폴백
+    }
+  }
+
+  // 2) /tmp (또는 .cache/) 파일 폴백 — 같은 인스턴스 hot reuse.
   try {
-    const raw = await fs.readFile(tokenCachePath(), "utf8");
+    const raw = await fs.readFile(tokenDiskPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<TokenCache>;
-    if (
-      parsed?.token &&
-      typeof parsed.expiresAt === "number" &&
-      parsed.expiresAt > Date.now() &&
-      parsed.keyFingerprint === keyFingerprint()
-    ) {
-      cachedToken = {
-        token: parsed.token,
-        expiresAt: parsed.expiresAt,
-        keyFingerprint: parsed.keyFingerprint,
-      };
+    if (isValidStoredToken(parsed)) {
+      cachedToken = parsed;
+      dbg("[token] loaded from disk", tokenDiskPath());
     }
   } catch {
-    // 파일 없음/파싱 실패 — 무시
+    // 파일 없음/파싱 실패 — 무시 (메모리 캐시만으로 동작)
   }
 }
 
-async function saveTokenToDisk(tc: TokenCache): Promise<void> {
+async function saveTokenToStore(tc: TokenCache): Promise<void> {
+  const json = JSON.stringify(tc);
+  // KV TTL — 만료까지 남은 시간(최소 60초, 최대 24시간).
+  const ttlSec = Math.max(
+    60,
+    Math.min(86_400, Math.floor((tc.expiresAt - Date.now()) / 1000))
+  );
+
+  // 1) Vercel KV 저장 (cross-instance 공유). 실패해도 디스크/메모리로 동작 가능.
+  if (isKvConfigured()) {
+    const ok = await kvSet(KV_TOKEN_KEY, json, ttlSec);
+    if (ok) dbg("[token] saved to KV, ttl=", ttlSec, "s");
+  }
+
+  // 2) /tmp 파일 저장 (KV 없을 때 같은 인스턴스 hot reuse).
   try {
-    const dir = path.dirname(tokenCachePath());
+    const filePath = tokenDiskPath();
+    const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
-    const tmp = `${tokenCachePath()}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(tc), "utf8");
-    await fs.rename(tmp, tokenCachePath());
+    const tmp = `${filePath}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, json, "utf8");
+    await fs.rename(tmp, filePath);
   } catch {
     // 쓰기 실패는 치명적이지 않음 — 메모리 캐시로 동작 가능
   }
@@ -125,12 +249,18 @@ interface KisTokenResponse {
   access_token_token_expired?: string; // "YYYY-MM-DD HH:mm:ss"
 }
 
-async function requestNewToken(): Promise<string> {
+async function requestNewToken(reason: string): Promise<string> {
   const appkey = getAppKey();
   const appsecret = getAppSecret();
   if (!appkey || !appsecret) {
     throw new Error("KIS_APP_KEY / KIS_APP_SECRET 가 설정되지 않음");
   }
+
+  // KIS 신규 토큰 발급은 카톡 알림(1일 1회 정책) 트리거. Vercel 로그에서 빈도 추적 가능하도록
+  // 디버그 플래그 무관하게 항상 한 줄 남긴다 (시크릿은 노출 안 함 — fingerprint만).
+  console.warn(
+    `[kis] requesting new token (reason=${reason}, fingerprint=${keyFingerprint()}, kvConfigured=${isKvConfigured()})`
+  );
 
   const res = await fetch(`${getBaseUrl()}/oauth2/tokenP`, {
     method: "POST",
@@ -145,9 +275,10 @@ async function requestNewToken(): Promise<string> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    // EGW00133 = 1분당 1회 제한. 60초 cooldown 걸어서 추가 호출 차단.
+    // EGW00133 = 1분당 1회 제한. cooldown (기본 5분) 걸어 추가 호출 차단.
+    // 60초가 너무 짧아 폴링 사이클 안에서 다시 요청 → 카톡 폭주 사고가 있었음.
     if (res.status === 403 && /EGW00133|1분당 1회/.test(text)) {
-      tokenCooldownUntil = Date.now() + 60_000;
+      tokenCooldownUntil = Date.now() + tokenCooldownMs();
     }
     throw new Error(`KIS 토큰 발급 실패 (${res.status}): ${text.slice(0, 200)}`);
   }
@@ -167,24 +298,30 @@ async function requestNewToken(): Promise<string> {
     keyFingerprint: keyFingerprint(),
   };
   cachedToken = tc;
-  // 비동기 디스크 저장 — 실패해도 무시
-  void saveTokenToDisk(tc);
+  // 비동기 영속 저장 — 실패해도 무시 (메모리 캐시로 계속 동작)
+  void saveTokenToStore(tc);
   return json.access_token;
 }
 
 async function getToken(forceRefresh = false): Promise<string> {
-  await loadTokenFromDisk();
+  await loadTokenFromStore();
   if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.token;
   }
-  // 1분당 1회 lockout — 토큰 새로 못 받으므로 즉시 throw
+  // 발급 cooldown — 토큰 새로 못 받으므로 즉시 throw (호출자는 naver/yahoo로 fallback).
   if (tokenCooldownUntil > Date.now()) {
     const sec = Math.ceil((tokenCooldownUntil - Date.now()) / 1000);
     throw new Error(`KIS 토큰 cooldown 중 (${sec}초 남음) — naver/yahoo로 fallback`);
   }
   if (inflightTokenPromise) return inflightTokenPromise;
 
-  inflightTokenPromise = requestNewToken().finally(() => {
+  const reason = forceRefresh
+    ? "force-refresh (401/403 응답)"
+    : cachedToken
+      ? "cache-expired"
+      : "no-cache (cold start)";
+
+  inflightTokenPromise = requestNewToken(reason).finally(() => {
     inflightTokenPromise = null;
   });
   return inflightTokenPromise;

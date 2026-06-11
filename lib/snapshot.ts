@@ -60,7 +60,8 @@ export interface BuildSnapshotOptions {
 // fetchMarketIndicators() 결과로 자동 도출되며, 이후 fetchWatchlistSnapshots()의
 // 종목 분석/예측에 그대로 전달돼 일관된 시장 컨텍스트를 유지한다.
 export interface MarketContextSnapshot {
-  semiHeat: number; // 0~100
+  // 0~100 — SOX·NVDA 기반. 두 데이터 중 하나라도 빠지면 null (UI "—" 표시).
+  semiHeat: number | null;
   nasdaqRate: number;
   fxRate: number;
   vix: number;
@@ -182,16 +183,24 @@ export async function fetchMarketIndicators(): Promise<MarketIndicatorsResult> {
   const fx = indicators.find((i) => i.code === "KRW=X");
   const vix = indicators.find((i) => i.code === "^VIX");
 
-  // 반도체 과열도 = SOX + NVDA 평균을 0~100으로 환산 (1% 변동 → ±15점)
-  const semiSignal = ((sox?.changeRate ?? 0) + (nvda?.changeRate ?? 0)) / 2;
-  const semiHeat = Math.round(50 + semiSignal * 1500);
-  const semiHeatClamped = Math.max(0, Math.min(100, semiHeat));
+  // 반도체 과열도 = SOX + NVDA 평균을 0~100으로 환산 (1% 변동 → ±15점).
+  // ⚠ 데이터 결손 시 0 으로 떨어뜨리지 않고 null 반환 — Vercel 에서 Yahoo SOX/NVDA 가
+  //    빈 응답이면 과거엔 "과열도 0/100" 으로 굳어 보였음. SummaryBar 는 null 시 "—" 표시.
+  const soxRate = sox?.changeRate;
+  const nvdaRate = nvda?.changeRate;
+  const semiHeat: number | null =
+    typeof soxRate === "number" && typeof nvdaRate === "number"
+      ? Math.max(
+          0,
+          Math.min(100, Math.round(50 + ((soxRate + nvdaRate) / 2) * 1500))
+        )
+      : null;
 
   return {
     indicators,
     errors,
     context: {
-      semiHeat: semiHeatClamped,
+      semiHeat,
       nasdaqRate: nq?.changeRate ?? 0,
       fxRate: fx?.changeRate ?? 0,
       vix: vix?.value ?? 15,
@@ -348,7 +357,7 @@ export function fetchMacroEvents(): EventItem[] {
 export function buildMarketMood(
   indicators: MarketIndicator[],
   news: NewsItem[],
-  semiHeat: number
+  semiHeat: number | null
 ): DashboardSnapshot["marketMood"] {
   return {
     label: marketMoodLabel(indicators),

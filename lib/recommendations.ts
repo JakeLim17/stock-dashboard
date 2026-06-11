@@ -294,8 +294,16 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
   const fx = indicatorMap.get("KRW=X");
   const vix = indicatorMap.get("^VIX");
 
-  const semiSignal = ((sox?.changeRate ?? 0) + (nvda?.changeRate ?? 0)) / 2;
-  const semiHeat = Math.max(0, Math.min(100, Math.round(50 + semiSignal * 1500)));
+  // 반도체 과열도 — SOX/NVDA 둘 다 있을 때만 계산. 결손이면 null (룰 미적용).
+  const soxRate = sox?.changeRate;
+  const nvdaRate = nvda?.changeRate;
+  const semiHeat: number | null =
+    typeof soxRate === "number" && typeof nvdaRate === "number"
+      ? Math.max(
+          0,
+          Math.min(100, Math.round(50 + ((soxRate + nvdaRate) / 2) * 1500))
+        )
+      : null;
 
   const ctxNumbers = {
     soxRate: sox?.changeRate ?? 0,

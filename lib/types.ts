@@ -852,7 +852,9 @@ export interface DashboardSnapshot {
   indicators: MarketIndicator[]; // 시장 신호 패널
   marketMood: {
     label: "강세" | "중립" | "약세";
-    semiHeat: number; // 반도체 과열도 0~100
+    // 반도체 과열도 0~100. SOX 또는 NVDA 데이터가 없으면 null (UI 는 "—" 로 표시).
+    // 과거엔 데이터 결손 시 0 으로 떨어져 "과열도 0/100" 으로 잘못 보였음.
+    semiHeat: number | null;
     riskKeywords: string[];
   };
   news: NewsItem[];

@@ -93,10 +93,21 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
       <Stat
         label="반도체 과열도"
         value={
-          <span className="tabular text-base font-semibold">
-            {mood.semiHeat}
-            <span className="text-xs text-muted-foreground ml-1">/100</span>
-          </span>
+          // SOX·NVDA 데이터가 모두 들어와야만 계산됨. 결손 시 mood.semiHeat=null →
+          // 과거엔 "0/100" 으로 굳어 보였으나 지금은 "—" 로 명확히 표시.
+          mood.semiHeat != null ? (
+            <span className="tabular text-base font-semibold">
+              {mood.semiHeat}
+              <span className="text-xs text-muted-foreground ml-1">/100</span>
+            </span>
+          ) : (
+            <span
+              className="tabular text-base font-semibold text-muted-foreground"
+              title="SOX 또는 NVDA 데이터 대기 중 — 다음 갱신에서 채워집니다"
+            >
+              —
+            </span>
+          )
         }
       />
       {fx && (

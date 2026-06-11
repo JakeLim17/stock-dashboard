@@ -32,7 +32,8 @@ export interface AnalyzeInput {
   externalOpportunity?: OpportunityAssessment | null;
   // 시장 컨텍스트 (반도체 강세 여부 등 평가용)
   context: {
-    semiHeat: number; // 0~100, 반도체 섹터 과열도
+    // 0~100, 반도체 섹터 과열도. SOX/NVDA 데이터가 결손이면 null → 관련 룰 미적용.
+    semiHeat: number | null;
     nasdaqRate: number; // 나스닥 선물 등락률
     fxRate: number; // 환율 등락률 (원화 약세면 양수)
     vix: number; // VIX 수치
@@ -112,10 +113,13 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
     else if (flow.institutionNet < -3e10) hits.push({ label: `기관 순매도${flowSuffix}`, heat: 0, buy: Math.round(-10 * flowWeight), good: false });
   }
 
-  // 6) 시장 컨텍스트 — 반도체 종목은 SOX/NVDA에 민감
-  if (context.semiHeat >= 70) hits.push({ label: "미국 반도체 과열", heat: 10, buy: -10, good: false });
-  if (context.semiHeat <= 35) hits.push({ label: "미국 반도체 약세", heat: 5, buy: -15, good: false });
-  if (context.semiHeat > 40 && context.semiHeat < 65) hits.push({ label: "미국 반도체 안정", heat: 0, buy: 5, good: true });
+  // 6) 시장 컨텍스트 — 반도체 종목은 SOX/NVDA에 민감.
+  //    semiHeat 가 null (= SOX/NVDA 결손) 이면 해당 룰은 적용하지 않는다.
+  if (context.semiHeat != null) {
+    if (context.semiHeat >= 70) hits.push({ label: "미국 반도체 과열", heat: 10, buy: -10, good: false });
+    if (context.semiHeat <= 35) hits.push({ label: "미국 반도체 약세", heat: 5, buy: -15, good: false });
+    if (context.semiHeat > 40 && context.semiHeat < 65) hits.push({ label: "미국 반도체 안정", heat: 0, buy: 5, good: true });
+  }
 
   // 7) 환율 — 원화 급격한 약세는 외인 이탈 신호
   if (context.fxRate >= 0.005) hits.push({ label: "환율 급등 (원화 약세)", heat: 10, buy: -10, good: false });
