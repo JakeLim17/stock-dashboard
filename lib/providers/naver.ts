@@ -315,6 +315,8 @@ export interface NaverFlowResult {
   foreignNet5d: number | null;
   institutionNet5d: number | null;
   individualNet5d: number | null;
+  // dealTrendInfos[0].bizdate 그대로 (KST YYYYMMDD). 응답에 없으면 undefined.
+  bizdate?: string;
 }
 
 interface DealTrendInfo {
@@ -652,6 +654,7 @@ export async function fetchNaverFlow(
       foreignNet5d: foreign5dKrw,
       institutionNet5d: organ5dKrw,
       individualNet5d: individual5dKrw,
+      bizdate: today.bizdate,
     };
   } catch {
     return null;

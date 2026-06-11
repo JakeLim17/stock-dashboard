@@ -43,12 +43,37 @@ export const maxDuration = 60;
 
 const SOFT_TIMEOUT_MS = (maxDuration - 10) * 1000;
 
-// KIS WebSocket 서버 — 실전 21000, 모의 31000.
+// KIS WebSocket 서버 URL 결정 — 견고하게 정규화.
+//   1) KIS_WS_URL env 값이 valid `ws://` / `wss://` 면 그대로
+//   2) 아니면 KIS_BASE_URL 이 모의(`openapivts`) 면 :31000, 실전이면 :21000 자동 분기
+//
+// 직전 사고 방지: Vercel env 에 사용자가 `KIS_WS_URL=KIS_WS_URL=wss://...` 같이 `KEY=value`
+// 통째로 박은 경우, REST URL 풀 경로를 박은 경우 모두 흡수 → 잘못된 값이면 자동 기본값 사용.
+function normalizeWsUrl(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  const eq = s.indexOf("=");
+  if (eq > -1 && /^[A-Z0-9_]+$/.test(s.slice(0, eq))) {
+    s = s.slice(eq + 1).trim();
+  }
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "ws:" && u.protocol !== "wss:") return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
 function getWsUrl(): string {
-  return (
-    process.env.KIS_WS_URL ??
-    "wss://ops.koreainvestment.com:21000/tryitout"
-  );
+  const fromEnv = normalizeWsUrl(process.env.KIS_WS_URL);
+  if (fromEnv) return fromEnv;
+  // 자동 분기 — REST URL 이 openapivts 면 모의(VTS), 아니면 실전.
+  const isVts = (process.env.KIS_BASE_URL ?? "").includes("openapivts");
+  return isVts
+    ? "wss://ops.koreainvestment.com:31000"
+    : "wss://ops.koreainvestment.com:21000";
 }
 
 // 한국 종목 코드(005930.KS) → 6자리 KIS short code.

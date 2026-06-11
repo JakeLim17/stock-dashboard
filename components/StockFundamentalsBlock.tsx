@@ -315,16 +315,55 @@ function ShortBalanceSection({
   );
 }
 
-function flowSubtitle(source: import("@/lib/types").FlowData["source"]): string {
+// KST(UTC+9) 기준 오늘 YYYYMMDD. 네이버 bizdate 와 직접 비교 가능.
+function kstTodayYmd(): string {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(kst.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+// "20260610" → "6/10" 같이 짧은 라벨로.
+function shortDateLabel(ymd: string | undefined): string | null {
+  if (!ymd || !/^\d{8}$/.test(ymd)) return null;
+  const m = Number(ymd.slice(4, 6));
+  const d = Number(ymd.slice(6, 8));
+  if (!Number.isFinite(m) || !Number.isFinite(d)) return null;
+  return `${m}/${d}`;
+}
+
+function isNaverStale(bizdate: string | undefined): boolean {
+  const md = shortDateLabel(bizdate);
+  if (!md) return false; // bizdate 모르면 라벨에서 stale 표시 안 함
+  return bizdate !== kstTodayYmd();
+}
+
+function flowSubtitle(
+  source: import("@/lib/types").FlowData["source"],
+  bizdate: string | undefined
+): string {
   if (source === "kis") return "수급 (당일 누적 · 거의 실시간, 억)";
   if (source === "kis-unavailable") return "수급 (KIS 일시 실패)";
+  if (source === "naver" && isNaverStale(bizdate)) {
+    const md = shortDateLabel(bizdate);
+    return `수급 (네이버 · ${md} 마감 기준, 억)`;
+  }
   return "수급 (당일 누적 · 종일치, 억)";
 }
 
-function flowSourceLabel(source: import("@/lib/types").FlowData["source"]): string {
+function flowSourceLabel(
+  source: import("@/lib/types").FlowData["source"],
+  bizdate: string | undefined
+): string {
   if (source === "kis") return "KIS 실시간";
   if (source === "kis-unavailable") return "—";
-  if (source === "naver") return "네이버";
+  if (source === "naver") {
+    const md = shortDateLabel(bizdate);
+    if (md && isNaverStale(bizdate)) return `네이버 · ${md} 마감 기준`;
+    return "네이버 · 실시간";
+  }
   return "mock";
 }
 
@@ -362,11 +401,13 @@ function FlowSection({
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[11px] text-muted-foreground uppercase tracking-wider">
-          {flowSubtitle(flow.source)}
+          {flowSubtitle(flow.source, flow.bizdate)}
         </span>
         <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1.5">
           {fresh && <span>{fresh}</span>}
-          {flow.source && <span>{flowSourceLabel(flow.source)}</span>}
+          {flow.source && (
+            <span>{flowSourceLabel(flow.source, flow.bizdate)}</span>
+          )}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-sm">
@@ -398,11 +439,10 @@ function FlowSection({
           {flowLabel5d(flow.individualNet5d)} 억
         </div>
       )}
-      {/* KIS 일시 실패 안내 — 네이버 응답은 토스/KRX 와 단위·부호 mismatch (사용자 보고)
-          가 확인돼 일시 비표시. 잘못된 숫자보다 빈 표시가 안전. */}
+      {/* KIS·네이버 둘 다 실패한 진짜 빈 상태 — 옵션 F 부활 이후엔 거의 발생하지 않음. */}
       {flow.source === "kis-unavailable" && (
         <div className="text-[11px] text-warn leading-snug">
-          ⚠ KIS 데이터 일시 실패 — 잠시 후 자동 재시도. (토스/KRX 와 정합 보장 위해 비표시)
+          ⚠ KIS·네이버 둘 다 일시 실패 — 잠시 후 자동 재시도.
         </div>
       )}
       {/* "분 단위 실시간은 KIS API 필요" 안내 — KIS 가 active 하면 의미 없는 안내라 항상 미노출.

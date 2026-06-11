@@ -25,9 +25,36 @@ import path from "node:path";
 // 기본 설정
 // ────────────────────────────────────────────────────────────────────
 
+// 사용자가 Vercel env 에 잘못된 값을 박는 사고 (예: `KIS_BASE_URL=https://...` 통째로 또는
+// `/oauth2/Approval` path 가 포함된 풀 URL) 를 흡수한다.
+//   - 정상 origin (https://host:port) 이면 그대로
+//   - "KEY=value" 같은 prefix 가 있으면 잘라냄
+//   - path 가 붙어 있어도 protocol+host(+port) 만 남김
+// 위 어느 것도 통과 못 하면 모의(VTS) 기본값.
+//
+// 직전 사고: Vercel Functions Logs `[kis-ws] approval_key WS throw: Failed to parse URL from
+// KIS_BASE_URL=...` 은 env 값이 `KIS_BASE_URL=https://...` 처럼 통째로 들어가 fetch URL 이
+// invalid 가 된 케이스.
+function normalizeHttpsBase(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  const eq = s.indexOf("=");
+  if (eq > -1 && /^[A-Z0-9_]+$/.test(s.slice(0, eq))) {
+    s = s.slice(eq + 1).trim();
+  }
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
 function getBaseUrl(): string {
   return (
-    process.env.KIS_BASE_URL ??
+    normalizeHttpsBase(process.env.KIS_BASE_URL) ??
     "https://openapivts.koreainvestment.com:29443"
   );
 }

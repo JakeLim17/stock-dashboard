@@ -719,12 +719,16 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
     });
 
     if (json.rt_cd && json.rt_cd !== "0") {
-      dbg("[flow] rt_cd !=0", json.rt_cd, "msg=", (json as { msg1?: string }).msg1);
+      const msg = (json as { msg1?: string }).msg1;
+      // production Vercel Functions Logs 에서 종목별 KIS 실패 사유 핀포인트.
+      console.warn(
+        `[kis] flow fetch failed for ${code}: rt_cd=${json.rt_cd} msg=${msg ?? "?"}`
+      );
       return null;
     }
     const list = json.output ?? [];
     if (list.length === 0) {
-      dbg("[flow] empty output");
+      console.warn(`[kis] flow fetch failed for ${code}: empty output`);
       return null;
     }
 
@@ -784,7 +788,8 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       fetchedAt: Date.now(),
     };
   } catch (e) {
-    dbg("[flow] throw:", e instanceof Error ? e.message : String(e));
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[kis] flow fetch failed for ${code}: ${msg}`);
     return null;
   }
 }

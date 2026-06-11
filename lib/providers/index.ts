@@ -164,10 +164,18 @@ export {
 // production 직접 호출 없이 raw 값을 확정할 수 없어, "잘못된 숫자로 사용자 혼란" 보다
 // "비표시 + KIS 복귀 안내" 가 안전하다고 판단 (사용자 결정·옵션 E).
 //
-// 네이버 호출은 **로그 목적으로 유지** — `naver.ts` 에서 raw bizdate/quant 를 한 줄씩 찍어
-// Vercel Functions Logs 로 추적 가능. 추후 단위 확정 시 다시 사용 가능.
+// 라우팅 (옵션 F): KIS → 네이버 폴백 → kis-unavailable.
 //
-// KIS 실패 시: source="kis-unavailable" 로 빈 flow 반환 → UI 가 "KIS 일시 실패" 안내.
+// 정책:
+//   1순위 KIS inquire-investor — KRX 원본·실시간, 토스와 정합.
+//   2순위 네이버 dealTrendInfos — 일별 누적. 토요/장후엔 어제 영업일자(`bizdate`) 반환.
+//          → bizdate 를 결과에 포함해서 UI 가 "M/D 마감 기준" 라벨로 정직하게 표시.
+//          단위/부호: `quant × close = 원`, 매수+/매도-. (직전 검증으로 단위 확정.)
+//   3순위 빈 표시 (`kis-unavailable`).
+//
+// 직전 옵션 E 의 "네이버 응답 무시 + 빈 표시" 정책은 사용자가 production 에서 KIS 가
+// 안정화되기 전까지 카드들이 모두 비어 보이는 문제로 이어져 옵션 F 로 부활.
+// 잘못된 시점 오해 방지를 위해 bizdate 를 UI 까지 그대로 전달한다.
 export async function fetchFlowOrMock(
   code: string,
   currentPrice?: number
@@ -188,13 +196,31 @@ export async function fetchFlowOrMock(
     }
   }
 
-  // 네이버 호출은 raw 값 로깅 목적으로만 실행 — 결과 숫자는 사용 안 함.
-  // (단위/부호 확정 후 다시 활성화 시 위 if 블록 바깥에 옮기면 됨.)
+  // 2순위: 네이버 dealTrendInfos. bizdate 가 어제이면 UI 가 "M/D 마감 기준" 라벨로 안내.
   if (currentPrice) {
-    await fetchNaverFlow(code, currentPrice).catch(() => null);
+    const naverFlow = await fetchNaverFlow(code, currentPrice).catch(() => null);
+    if (
+      naverFlow &&
+      (naverFlow.foreignNet != null || naverFlow.institutionNet != null)
+    ) {
+      return {
+        flow: {
+          foreignNet: naverFlow.foreignNet,
+          institutionNet: naverFlow.institutionNet,
+          individualNet: naverFlow.individualNet,
+          foreignNet5d: naverFlow.foreignNet5d,
+          institutionNet5d: naverFlow.institutionNet5d,
+          individualNet5d: naverFlow.individualNet5d,
+          source: "naver",
+          bizdate: naverFlow.bizdate,
+          fetchedAt: Date.now(),
+        },
+        source: "naver",
+      };
+    }
   }
 
-  // KIS 실패 + 네이버 비신뢰 → 빈 표시.
+  // KIS·네이버 모두 실패 → 빈 표시.
   return {
     flow: {
       foreignNet: null,

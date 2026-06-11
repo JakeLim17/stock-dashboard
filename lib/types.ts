@@ -194,13 +194,18 @@ export interface FlowData {
   institutionNet5d?: number | null;
   individualNet5d?: number | null;
   // 데이터 출처 — UI 표시용.
-  //   "kis"             : KIS inquire-investor (KRX 원본, 토스와 정합)
-  //   "naver"           : 네이버 dealTrendInfos (단위·부호 mismatch 로 현재 비활성)
-  //   "kis-unavailable" : KIS 일시 실패 — 숫자 비표시 + 안내
+  //   "kis"             : KIS inquire-investor (KRX 원본, 토스와 정합 · 실시간)
+  //   "naver"           : 네이버 dealTrendInfos (일별 누적; bizdate 가 오늘이 아니면 마감 기준)
+  //   "kis-unavailable" : KIS 실패 + 네이버도 실패 — 숫자 비표시 + 안내
   //   "mock"            : 더미 (개발 환경)
   source?: "naver" | "kis" | "kis-unavailable" | "mock";
   // 수급 데이터를 받아온 시각 (epoch ms). UI 신선도 라벨용. 최초엔 quote.fetchedAt에 동기화.
   fetchedAt?: number;
+  // 데이터 기준 영업일 (KST YYYYMMDD). 네이버 dealTrendInfos[0].bizdate 그대로.
+  // UI 는 이 값을 KST 오늘과 비교해 "실시간" 또는 "M/D 마감 기준" 라벨을 분기 표시한다.
+  // KIS 소스에는 응답에 일자가 항상 채워지지 않아 보통 undefined; UI 는 source==="kis" 면
+  // bizdate 무시하고 "KIS 실시간" 으로 표시한다.
+  bizdate?: string;
 }
 
 export interface TechIndicators {
