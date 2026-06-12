@@ -186,6 +186,11 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "DELL", name: "델", kind: "us-stock", sector: "글로벌AI인프라", currency: "USD" },
   { code: "MSTR", name: "마이크로스트래티지(BTC)", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "BTC 노출 대장", currency: "USD" },
   { code: "COIN", name: "코인베이스", kind: "us-stock", sector: "글로벌암호화폐", isSectorLeader: true, sectorLeaderLabel: "美 코인거래소 대장", currency: "USD" },
+
+  // ─── 2026-06-12 IPO ─ SpaceX (NASDAQ: SPCX) ─────────────────────────────
+  // 재사용 발사체·스타링크·스타십. 머스크 자회사. 史상 최대 IPO ($75B+).
+  // 거래소: Nasdaq Global Select Market + Nasdaq Texas. 공모가 $135, 첫날 $150 시초가.
+  { code: "SPCX", name: "스페이스X", kind: "us-stock", sector: "글로벌우주", isSectorLeader: true, sectorLeaderLabel: "우주·발사체 대장", currency: "USD" },
 ];
 
 // 시장 지표 패널
@@ -260,7 +265,9 @@ export type ThemeTag =
   | "ai_cloud_app"
   | "euv_equipment"
   | "hbm_memory"
-  | "ai_power_dc";
+  | "ai_power_dc"
+  // ── 2026-06 SpaceX IPO 신규 테마 ───────────────────────
+  | "us_space";
 
 export interface ThemeDefinition {
   id: ThemeTag;
@@ -575,6 +582,16 @@ export const THEMES: ThemeDefinition[] = [
     emoji: "⚡",
     description: "AI 데이터센터 전력기기·원전·냉각",
     codes: ["VRT", "267260.KS", "034020.KS"],
+  },
+  // ─── 2026-06-12 SpaceX IPO 신규 테마 ─────────────────────────────────────
+  // 한국 방산·항공우주(한화에어로/한국항공우주)는 기존 "defense" 테마에 그대로 두고,
+  // 美 우주 노출은 별도 narrative 테마로 분리. SpaceX 단독 시작, 추후 RKLB 등 합류 여지.
+  {
+    id: "us_space",
+    label: "美 우주·항공",
+    emoji: "🚀",
+    description: "재사용 발사체·스타링크·스타십 — 머스크 자회사",
+    codes: ["SPCX"],
   },
 ];
 

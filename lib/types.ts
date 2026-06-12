@@ -54,7 +54,8 @@ export type SectorTag =
   | "중국ADR"            // BABA/PDD
   | "글로벌에너지"       // XOM/CVX
   | "글로벌암호화폐"     // MSTR/COIN (BTC 노출)
-  | "글로벌AI인프라";    // VRT/DELL (AI 데이터센터 전력·냉각·서버)
+  | "글로벌AI인프라"     // VRT/DELL (AI 데이터센터 전력·냉각·서버)
+  | "글로벌우주";        // SPCX (SpaceX) — 2026-06-12 IPO
 
 export interface SymbolMeta {
   // 내부 표준 코드 (예: 005930.KS)
