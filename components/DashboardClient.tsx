@@ -43,13 +43,40 @@ async function logout() {
   window.location.replace("/login");
 }
 
-const REGULAR_REFRESH_MS = 5_000; // 정규장 OPEN: 5초 (네이버 시세 권장 폴링 내 안전 범위)
-const EXTENDED_REFRESH_MS = 15_000; // 시간외/프리/애프터 OPEN: 15초 (네이버 polling 권장 7초의 여유분)
-const OVERSEAS_NIGHT_REFRESH_MS = 30_000; // 해외 GDR 장중: 소스 지연을 고려해 30초 조회
-const OFF_HOURS_REFRESH_MS = 120_000; // 모두 마감: 120초
-const KIS_REGULAR_REFRESH_MS = 5_000; // KIS 실데이터 정규장: 전체 스냅샷 재계산 부담을 고려해 5초
-const KIS_EXTENDED_REFRESH_MS = 15_000; // 시간외/야간은 15초
-const KIS_OFF_HOURS_REFRESH_MS = 60_000; // 모두 마감: 60초
+// ─── 폴링 주기 (2026-06 응급 절감) ──────────────────────────────────
+// 기존 5s → 15s default. Vercel Hobby CPU 한도 보호.
+// 사용자가 더 빠르게 보고 싶으면 Vercel env 에서 NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS 등으로 override.
+// 수동 새로고침 버튼은 그대로라 즉시 갱신 가능.
+function envInt(key: string, fallback: number): number {
+  if (typeof process === "undefined") return fallback;
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
+const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 30_000);
+const OVERSEAS_NIGHT_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
+  60_000
+);
+const OFF_HOURS_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_OFF_HOURS_MS",
+  180_000
+);
+const KIS_REGULAR_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_KIS_REGULAR_MS",
+  15_000
+);
+const KIS_EXTENDED_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_KIS_EXTENDED_MS",
+  30_000
+);
+const KIS_OFF_HOURS_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_KIS_OFF_HOURS_MS",
+  120_000
+);
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
 const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";

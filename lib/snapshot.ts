@@ -94,14 +94,17 @@ export interface WatchlistDeps {
 // snapshot/indicator 둘 다 같은 패턴(`consensusCache.ts`)의 in-flight + soft TTL.
 // ──────────────────────────────────────────────────────────────
 
-// 시장 지표 — 5s TTL. Vercel 인스턴스 안에서 같은 polling 사이클 안의 중복 호출 방지.
-const MARKET_INDICATOR_TTL_MS = 5_000;
+// 시장 지표 — 15s TTL (2026-06 응급 절감, 기존 5s).
+// Vercel Hobby CPU 한도 보호 — 카드 단위로 부담이 큰 history fetch 가 동반된다.
+// 체감 영향 거의 없음 (지수는 분 단위로 움직임).
+const MARKET_INDICATOR_TTL_MS = 15_000;
 type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
 let marketIndicatorCache: MarketIndicatorCache | null = null;
 let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
 
-// 풀 스냅샷 — 2s TTL. 동일 symbols+옵션이면 직전 응답 재사용 → 사용자 폴링 사이클을 곱빼기로 두드리지 않음.
-const SNAPSHOT_TTL_MS = 2_000;
+// 풀 스냅샷 — 5s TTL (2026-06 응급 절감, 기존 2s).
+// 동일 symbols+옵션이면 직전 응답 재사용. 사용자 폴링 주기(기본 5~15s)와 정렬.
+const SNAPSHOT_TTL_MS = 5_000;
 type SnapshotCache = { data: DashboardSnapshot; at: number };
 const snapshotCache = new Map<string, SnapshotCache>();
 const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();

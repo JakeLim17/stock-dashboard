@@ -11,8 +11,10 @@ import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 선택 종목 1개의 호가 + 체결 폴링 패널.
 // KIS 미활성 또는 한국 종목 아니면 빈 메시지.
-// 호가는 기본 3초 간격(REST 한도 보호 — relay 호스팅 전까지 임시),
-// 체결도 함께. 카드 보이는 동안만 폴링.
+// 호가는 기본 8초 간격 (2026-06 응급 절감, 기존 3s).
+//   Vercel Hobby CPU 한도 보호 — 호가 탭 보는 동안만 폴링이지만 평일 장중 누적이 커서 완화.
+//   env NEXT_PUBLIC_POLL_INTERVAL_ASP_MS 로 override 가능.
+// 카드 보이는 동안만 폴링.
 //
 // ⚠ 깜빡임 방지 정책 (호가 탭 UX) ───────────────────────────────────
 //   /api/intraday 가 일시적으로 빈 응답(KIS cooldown / cold start / 라우트 비활성)
@@ -50,8 +52,18 @@ interface IntradayResponse {
 }
 
 // 연속 실패가 이 횟수 이상 + 이전 성공 이력 0 일 때만 empty 메시지 노출.
-// pollMs=3000ms × 3회 = ~9초 — 일시적 cooldown 으로 인한 깜빡임 방지.
+// pollMs=8000ms × 3회 = ~24초 — 일시적 cooldown 으로 인한 깜빡임 방지.
 const EMPTY_THRESHOLD = 3;
+
+// env override (NEXT_PUBLIC_* 는 빌드 시 inline). Vercel env 로 운영 중에도 변경 가능.
+function envPollMs(): number {
+  if (typeof process === "undefined") return 8_000;
+  const raw = process.env.NEXT_PUBLIC_POLL_INTERVAL_ASP_MS;
+  if (!raw) return 8_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 8_000;
+}
+const DEFAULT_ASP_POLL_MS = envPollMs();
 
 // WS asp 의 마지막 ts 가 이 시간 이내면 "WS 살아있음" 으로 판단하고 REST polling skip.
 // asp 는 호가 변동마다 들어오므로 짧은 종목도 보통 3~5초 안에 한 번은 옴.
@@ -67,7 +79,7 @@ function hasPayload(d: IntradayResponse | null | undefined): boolean {
 export function AskingPricePanel({
   code,
   active,
-  pollMs = 3000,
+  pollMs = DEFAULT_ASP_POLL_MS,
   aspOverride,
 }: Props) {
   // data 는 "마지막으로 받은 유효(=hasPayload) 응답" 만 보관. 실패 시 교체 안 함.

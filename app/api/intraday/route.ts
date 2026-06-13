@@ -24,7 +24,8 @@ export const revalidate = 0;
 //   }
 // ────────────────────────────────────────────────────────────────────
 
-const CACHE_TTL_MS = 2_500;
+// 2026-06 응급 절감: 2.5s → 6s. 클라이언트 polling 기본도 8s 로 늘려 같은 종목 burst 호출 거의 0.
+const CACHE_TTL_MS = 6_000;
 const CACHE_MAX_SIZE = 256;
 
 type IntradayPayload = {

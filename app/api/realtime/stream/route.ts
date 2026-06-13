@@ -48,13 +48,15 @@ async function isAuthorized(req: Request): Promise<boolean> {
 // Vercel Edge 는 outbound WebSocket 클라이언트 미지원. fetch streaming 은 Edge 도 OK 지만
 // fallback direct-WS 경로를 위해 Node 로 통일.
 //
-// maxDuration:
-//   Vercel Hobby 함수 최대 60s, Pro 는 300s. 300 설정해 두면 Hobby 에선 자동 60 으로 clamp.
-//   클라이언트(`hooks/useRealtime.ts`)는 stream 종료 시 자동 reconnect.
+// maxDuration (2026-06 응급 절감):
+//   Vercel Hobby 함수 최대 60s. 기존 300s → 30s 로 축소.
+//   이유: relay 미설정 + direct 모드 시 KIS WS 가 한국 외 IP 거부로 1006 종료되는데
+//   `close` event 가 즉시 안 와서 softTimer(maxDuration-10) 까지 함수가 살아있는 케이스 발견.
+//   relay 가 활성화되면 다시 60 으로 늘려도 안전.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 300;
+export const maxDuration = 30;
 
 // soft timeout — relay/직접 모드 공통. maxDuration 보다 10s 일찍 끊어 클라이언트 reconnect.
 const EFFECTIVE_MAX_DURATION = Math.min(maxDuration, 60); // Hobby 안전선
@@ -247,7 +249,31 @@ export async function GET(req: Request) {
     return handleRelayMode(req, relayBase, relaySecret, symbolsParam, topicsRaw);
   }
 
-  // ─── 2순위: 직접 WS 모드 (로컬·한국 IP 호스트 전용 fallback) ─────
+  // ─── 2순위: 직접 WS 모드 ───────────────────────────────────────────
+  // ⚠ Vercel 운영(NODE_ENV=production)에서는 호스트가 한국 외 IP(sin1/hnd1)라
+  //   KIS WS 가 즉시 1006 종료된다. 그런데 `close` event 가 늦게 도착해
+  //   softTimer(50s)까지 함수가 살아있어 Hobby CPU 한도를 폭주시키는 사고가 있었다.
+  //   → relay 가 없으면 운영에서 즉시 503 + 짧은 SSE body 로 1초 내 종료.
+  //   클라이언트 `useRealtime` 는 503/error 받으면 backoff 후 재시도하지만,
+  //   `NEXT_PUBLIC_REALTIME_ENABLED=false` 로 두면 EventSource 자체를 안 연다.
+  if (process.env.NODE_ENV === "production") {
+    const body =
+      `event: error\ndata: ${JSON.stringify({
+        reason: "realtime-disabled",
+        message:
+          "KIS_WS_RELAY_URL 미설정 — 운영에서는 direct 모드를 자동 비활성화 (CPU 한도 보호). relay 호스팅 후 활성화하세요.",
+        ts: Date.now(),
+      })}\n\n`;
+    return new Response(body, {
+      status: 503,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
+  }
+
+  // 로컬·한국 IP 호스트 전용 fallback (개발 환경)
   return handleDirectMode(req, symbols, topics, trIds);
 }
 
@@ -654,7 +680,10 @@ async function handleDirectMode(
         });
 
         ws.addEventListener("error", () => {
+          // 안전망: spec 상 error 다음에 close 가 와야 하지만 늦게 도착하는 경우
+          // 함수가 softTimer 까지 살아있어 CPU 한도를 먹는다 → 즉시 cleanup.
           sse("error", { reason: "websocket-error", ts: Date.now() });
+          cleanup("ws-error");
         });
 
         ws.addEventListener("close", (ev) => {
