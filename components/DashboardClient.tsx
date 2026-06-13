@@ -43,10 +43,10 @@ async function logout() {
   window.location.replace("/login");
 }
 
-// ─── 폴링 주기 (2026-06 응급 절감) ──────────────────────────────────
-// 기존 5s → 15s default. Vercel Hobby CPU 한도 보호.
-// 사용자가 더 빠르게 보고 싶으면 Vercel env 에서 NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS 등으로 override.
-// 수동 새로고침 버튼은 그대로라 즉시 갱신 가능.
+// ─── 폴링 주기 (2026-06 복원) ──────────────────────────────────
+// 정규장은 5s (사용자 체감 우선). 시간외/오프아워는 길게 유지.
+// sparkline 캐시 TTL 상향 + Yahoo timeout 8s 로 한도 부담 상쇄.
+// 사용자가 절감하고 싶으면 Vercel env 에서 NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS 등으로 override.
 function envInt(key: string, fallback: number): number {
   if (typeof process === "undefined") return fallback;
   const raw = process.env[key];
@@ -55,7 +55,7 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 5_000);
 const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 30_000);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
@@ -67,7 +67,7 @@ const OFF_HOURS_REFRESH_MS = envInt(
 );
 const KIS_REGULAR_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_REGULAR_MS",
-  15_000
+  5_000
 );
 const KIS_EXTENDED_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_EXTENDED_MS",

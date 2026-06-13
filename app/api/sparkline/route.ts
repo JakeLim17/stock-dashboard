@@ -25,9 +25,14 @@ export const revalidate = 0;
 // 응답 크기를 줄이기 위해 OHLC 가 아닌 close 만 내려준다. (sparkline 만 그리므로 충분.)
 //
 // 캐시:
-//   동일 process 안에서 30s 메모리 캐시. 카드 6개 × 5초 폴링 시 KIS/Yahoo 호출이 폭주하지
+//   동일 process 안에서 메모리 캐시. 카드 6개 × 5초 폴링 시 KIS/Yahoo 호출이 폭주하지
 //   않게 마지막 분봉 fetch 결과를 잠시 들고 있는다. 마지막 점은 어차피 클라이언트가
-//   currentPrice 로 덮어쓰므로 30s 정도 stale 해도 그래프 모양엔 영향 없다.
+//   currentPrice 로 덮어쓰므로 stale 해도 그래프 모양엔 거의 영향이 없다.
+//
+//   TTL 분기 (2026-06):
+//     - 정규장(~15:30 KST) 진행중: 60s — 폴링 5s 회복에 맞춰 한도 보호
+//     - 15:30 이후: 300s (5분) — 마감되면 분봉이 더 늘어나지 않으므로 길게 캐시
+//   sparkline 은 시각적 trend 만 보여주는 보조 시각화라 TTL 상향이 사용자 체감에 영향 거의 없다.
 
 export interface SparklinePoint {
   time: number; // epoch ms
@@ -47,8 +52,23 @@ interface SparklineBody {
   marketType: "kr" | "us" | "other";
 }
 
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_REGULAR_MS = 60_000;
+const CACHE_TTL_AFTER_CLOSE_MS = 300_000;
 const cache = new Map<string, CacheEntry>();
+
+// KST 현재 시각의 HH*60+MM 분 단위 값. UTC+9 오프셋만 적용 (서버 timezone 무관).
+function getKstMinuteOfDay(nowMs: number = Date.now()): number {
+  const kst = new Date(nowMs + 9 * 60 * 60 * 1000);
+  return kst.getUTCHours() * 60 + kst.getUTCMinutes();
+}
+
+// 정규장 마감(KST 15:30) 이후면 캐시를 길게, 그 외엔 기본 TTL.
+// 미국 종목도 동일 기준 — 미국 정규장(KST 22:30~05:00)은 거의 항상 15:30 이후 시간대라
+// 한국 시각 기준으로 분기해도 사용자 체감 차이 없음.
+function getCacheTtlMs(nowMs: number = Date.now()): number {
+  const minute = getKstMinuteOfDay(nowMs);
+  return minute >= 15 * 60 + 30 ? CACHE_TTL_AFTER_CLOSE_MS : CACHE_TTL_REGULAR_MS;
+}
 
 const yahoo = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
@@ -255,7 +275,7 @@ export async function GET(req: Request) {
       };
     }
 
-    cache.set(code, { expiresAt: now + CACHE_TTL_MS, body });
+    cache.set(code, { expiresAt: now + getCacheTtlMs(now), body });
     return NextResponse.json(body, {
       headers: { "Cache-Control": "no-store" },
     });

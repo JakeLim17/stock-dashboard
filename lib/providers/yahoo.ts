@@ -13,6 +13,16 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
 });
 
+// Yahoo Finance 호출 timeout — 응답이 8초 이상 늦으면 끊고 catch 로 흘려보낸다.
+// (2026-06) Yahoo 가 가끔 무응답 / 30s+ 지연을 보내며 Vercel function 점유를 늘림.
+// 이걸 강제로 끊어 폴링 5s 회복으로 인한 누적 점유를 막는다.
+// AbortSignal.timeout 은 Node 18+ / 모던 브라우저 모두 지원. AbortError 가 던져지면
+// 호출자(fetchQuotesBatch 또는 각 함수의 catch) 가 그대로 흡수.
+const YAHOO_TIMEOUT_MS = 8_000;
+function yfFetchOpts(): { fetchOptions: { signal: AbortSignal } } {
+  return { fetchOptions: { signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS) } };
+}
+
 // quote는 union 타입을 돌려줘서 직접 narrowing이 까다롭다.
 // → 결과를 record로 받고 안전한 num/str helper로 꺼내쓴다.
 type RawRecord = Record<string, unknown>;
@@ -27,7 +37,10 @@ export interface HistoricalPoint {
 }
 
 export async function fetchQuote(code: string, name: string): Promise<Quote> {
-  const raw = (await yahooFinance.quote(code)) as unknown as RawRecord | RawRecord[] | undefined;
+  const raw = (await yahooFinance.quote(code, {}, yfFetchOpts())) as unknown as
+    | RawRecord
+    | RawRecord[]
+    | undefined;
   const q: RawRecord = Array.isArray(raw) ? (raw[0] ?? {}) : (raw ?? {});
 
   const price = num(q.regularMarketPrice) ?? 0;
@@ -171,11 +184,15 @@ export async function fetchHistorical(
   start.setDate(end.getDate() - days);
 
   try {
-    const raw = (await yahooFinance.chart(code, {
-      period1: start,
-      period2: end,
-      interval: "1d",
-    })) as unknown as { quotes?: Array<RawRecord> };
+    const raw = (await yahooFinance.chart(
+      code,
+      {
+        period1: start,
+        period2: end,
+        interval: "1d",
+      },
+      yfFetchOpts()
+    )) as unknown as { quotes?: Array<RawRecord> };
 
     const list = raw?.quotes ?? [];
     return list
@@ -283,15 +300,19 @@ export async function fetchAnalystAndValuation(
   code: string
 ): Promise<{ consensus: AnalystConsensus | null; valuation: Valuation | null } | null> {
   try {
-    const r = (await yahooFinance.quoteSummary(code, {
-      modules: [
-        "financialData",
-        "recommendationTrend",
-        "defaultKeyStatistics",
-        "price",
-        "summaryDetail",
-      ],
-    })) as unknown as RawRecord | null;
+    const r = (await yahooFinance.quoteSummary(
+      code,
+      {
+        modules: [
+          "financialData",
+          "recommendationTrend",
+          "defaultKeyStatistics",
+          "price",
+          "summaryDetail",
+        ],
+      },
+      yfFetchOpts()
+    )) as unknown as RawRecord | null;
     if (!r) return null;
 
     const fin = (r.financialData ?? {}) as RawRecord;
