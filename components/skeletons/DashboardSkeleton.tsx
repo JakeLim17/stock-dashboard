@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "./Skeleton";
+import { SkeletonStageBanner } from "./SkeletonStageBanner";
 import { SummaryBarSkeleton } from "./SummaryBarSkeleton";
 import { StockCardSkeleton } from "./StockCardSkeleton";
 import { MarketPanelSkeleton } from "./MarketPanelSkeleton";
@@ -38,6 +39,10 @@ export function DashboardSkeleton({
           <Skeleton className="h-9 w-9 rounded-lg" />
         </div>
       </header>
+
+      {/* 라이브 진행 배너 — "지금 무엇을 수집/분석 중인지" 단계 메시지 + 경과 초 + shimmer.
+          5~13초의 cold start 동안 "화면이 멈춘 듯이 보이는" 인지를 없애는 핵심 요소. */}
+      <SkeletonStageBanner />
 
       {/* SummaryBar */}
       <SummaryBarSkeleton />
