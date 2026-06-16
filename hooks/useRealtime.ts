@@ -26,9 +26,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 //   - false / 미설정이면 즉시 status="unsupported" 반환 → 호출자는 기존 polling 사용.
 //   - symbols 가 0개 또는 topics 0개면 연결 안 함.
 //   - 회귀 방지: feature flag OFF 또는 빈 입력이면 네트워크 호출 0.
+//
+// 영구 stop (status="disabled"):
+//   - 운영에서 KIS_WS_RELAY_URL 가 없으면 /api/realtime/stream 이 503 + SSE body 로 응답.
+//     EventSource 는 200 + text/event-stream 만 SSE 로 파싱하므로 503 body 정보가
+//     클라이언트에 전달되지 않고 `onerror` 만 발생 → backoff 재연결 무한 루프 발생.
+//   - 해결: EventSource 를 열기 전에 /api/realtime/health 한 번 fetch 해서 503 이면
+//     이번 페이지 lifetime 동안 영구 disabled. 새로고침 전까지 다시 시도 안 함.
+//   - 호출자 입장에선 "unsupported" 와 동일하게 취급 (폴링만 동작).
 
 export type RealtimeStatus =
   | "unsupported" // feature flag OFF
+  | "disabled" // 서버측 영구 비활성 (relay 미설정 등) — 페이지 새로고침 전까지 재시도 안 함
   | "connecting"
   | "open"
   | "closed"
@@ -79,6 +88,39 @@ function backoffMs(retry: number): number {
 
 const DEFAULT_TOPICS: RealtimeTopic[] = ["price"];
 
+// ─── 영구 disabled 상태 (모듈 레벨, 페이지 새로고침 전까지 유지) ─────
+// 한 페이지 안에서 useRealtime 이 여러 인스턴스로 호출되더라도 health 체크는 1회만.
+// `realtimeDisabled = true` 가 되면 어떤 인스턴스도 EventSource 를 열지 않는다.
+let realtimeDisabled = false;
+let healthProbed = false;
+let healthProbePromise: Promise<void> | null = null;
+
+async function probeRealtimeHealthOnce(): Promise<void> {
+  if (healthProbed) return;
+  if (healthProbePromise) return healthProbePromise;
+  healthProbePromise = (async () => {
+    try {
+      const r = await fetch("/api/realtime/health", {
+        method: "GET",
+        cache: "no-store",
+        // 인증 게이트는 PUBLIC_PATHS 로 우회됨 — credentials 기본값으로 OK
+      });
+      if (r.status === 503) {
+        // 서버가 영구 비활성 응답 — 이번 lifetime 동안 EventSource 안 연다.
+        realtimeDisabled = true;
+      }
+      // 그 외(200, 401, 500…) 는 일시 오류로 보고 EventSource 진행.
+      // ES 자체 backoff 가 처리.
+    } catch {
+      // 네트워크 오류 — 영구 disabled 로 단정하지 않음.
+    } finally {
+      healthProbed = true;
+      healthProbePromise = null;
+    }
+  })();
+  return healthProbePromise;
+}
+
 export function useRealtime(
   symbols: string[],
   topics: RealtimeTopic[] = DEFAULT_TOPICS
@@ -104,9 +146,11 @@ export function useRealtime(
   const [prices, setPrices] = useState<Record<string, RealtimePriceEntry>>({});
   const [trades, setTrades] = useState<Record<string, RealtimeTradeEntry>>({});
   const [asps, setAsps] = useState<Record<string, RealtimeAspEntry>>({});
-  const [status, setStatus] = useState<RealtimeStatus>(
-    enabled ? "connecting" : "unsupported"
-  );
+  const [status, setStatus] = useState<RealtimeStatus>(() => {
+    if (!enabled) return "unsupported";
+    if (realtimeDisabled) return "disabled";
+    return "connecting";
+  });
 
   // 200ms throttle 버퍼 — 같은 code 의 최신 값만 유지(덮어쓰기). 토픽별 분리.
   const priceBufRef = useRef<Record<string, RealtimePriceEntry>>({});
@@ -117,6 +161,11 @@ export function useRealtime(
   useEffect(() => {
     if (!enabled) {
       setStatus("unsupported");
+      return;
+    }
+    if (realtimeDisabled) {
+      // 이전에 503 받은 적 있음 — 페이지 새로고침 전까지 재시도 금지.
+      setStatus("disabled");
       return;
     }
     if (symbolKey.length === 0 || topicKey.length === 0) {
@@ -164,8 +213,20 @@ export function useRealtime(
       }
     };
 
+    // 503/realtime-disabled 감지 시 영구 stop — 어떤 reconnect 도 발화 안 함.
+    const markDisabledPermanently = () => {
+      realtimeDisabled = true;
+      cancelled = true;
+      closeCurrent();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      setStatus("disabled");
+    };
+
     const open = () => {
-      if (cancelled) return;
+      if (cancelled || realtimeDisabled) return;
       setStatus("connecting");
 
       const qs = `symbols=${encodeURIComponent(symbolKey)}&topics=${encodeURIComponent(topicKey)}`;
@@ -260,8 +321,23 @@ export function useRealtime(
         reconnectTimer = setTimeout(open, 200);
       });
 
-      es.addEventListener("error", () => {
+      // 서버가 향후 200 + SSE body 로 realtime-disabled 를 보내주면
+      // named "error" event 의 data 에 reason 이 들어온다 (방어적 처리).
+      // 일반 connection error 는 data 가 없으므로 try/catch 로 안전.
+      es.addEventListener("error", (ev) => {
         if (cancelled) return;
+        try {
+          const me = ev as MessageEvent;
+          if (typeof me.data === "string" && me.data.length > 0) {
+            const j = JSON.parse(me.data) as { reason?: string };
+            if (j?.reason === "realtime-disabled") {
+              markDisabledPermanently();
+              return;
+            }
+          }
+        } catch {
+          // SSE event 가 아니거나 파싱 실패 — 일반 connection error 로 처리
+        }
         closeCurrent();
         setStatus("error");
         retry += 1;
@@ -270,7 +346,15 @@ export function useRealtime(
       });
     };
 
-    open();
+    // 사전 health 체크 후 EventSource 연결 (503 이면 영구 stop, 0번 연결).
+    void probeRealtimeHealthOnce().then(() => {
+      if (cancelled) return;
+      if (realtimeDisabled) {
+        setStatus("disabled");
+        return;
+      }
+      open();
+    });
 
     return () => {
       cancelled = true;
@@ -283,7 +367,8 @@ export function useRealtime(
       priceBufRef.current = {};
       tradeBufRef.current = {};
       aspBufRef.current = {};
-      setStatus("closed");
+      // 영구 disabled 로 결정됐으면 cleanup 으로 덮어쓰지 않음.
+      setStatus(realtimeDisabled ? "disabled" : "closed");
     };
   }, [enabled, symbolKey, topicKey]);
 

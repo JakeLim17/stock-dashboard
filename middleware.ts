@@ -19,7 +19,14 @@ const COOKIE_VERSION = "v1";
 // 게이트·rate-limit 둘 다 면제 (login API 자체는 별도 brute-force 보호).
 //   /api/realtime/stream 은 SSE (text/event-stream) — EventSource 가 307 리다이렉트를
 //   따라가지 못해 middleware 는 통과시키고 라우트 핸들러 내부에서 쿠키 검증 수행.
-const PUBLIC_PATHS = ["/login", "/api/login", "/api/realtime/stream"];
+//   /api/realtime/health 는 useRealtime hook 의 사전 503 점검용 — 인증 redirect 가
+//   걸리면 hook 이 status 를 잘못 해석하므로 PUBLIC_PATHS 로 통과시킴 (시크릿 없음).
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/login",
+  "/api/realtime/stream",
+  "/api/realtime/health",
+];
 
 // rate-limit 대상: 외부에서 빈번히 호출 가능한 데이터 API.
 //   너무 빡빡하면 정상 사용자 폴링이 깨질 수 있어 분당 120회로 여유 있게.
