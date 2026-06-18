@@ -17,6 +17,7 @@ import { CardSparkline } from "./CardSparkline";
 import { PredictionBlock } from "./PredictionBlock";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
+import { VerdictReasonLine } from "./VerdictReasonLine";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
 import {
@@ -151,15 +152,18 @@ export function StockCard({
         </div>
         {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용.
             tone === "sell" 이면 위험 결론 — shake-warn 으로 시선 끌기. */}
-        <div className="inline-flex items-center gap-1.5 shrink-0">
-          <Badge
-            variant={analysis.verdict.tone}
-            size="md"
-            className={analysis.verdict.tone === "sell" ? "shake-warn" : undefined}
-          >
-            {analysis.verdict.label}
-          </Badge>
-          <VerdictHint />
+        <div className="inline-flex flex-col items-end gap-0.5 shrink-0">
+          <div className="inline-flex items-center gap-1.5">
+            <Badge
+              variant={analysis.verdict.tone}
+              size="md"
+              className={analysis.verdict.tone === "sell" ? "shake-warn" : undefined}
+            >
+              {analysis.verdict.label}
+            </Badge>
+            <VerdictHint />
+          </div>
+          <VerdictReasonLine line={analysis.verdict.reasonLine} className="text-right" />
         </div>
       </CardHeader>
       <CardBody className="space-y-4">

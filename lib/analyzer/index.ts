@@ -1,6 +1,12 @@
 export { analyze, marketMoodLabel } from "./rules";
 export type { AnalyzeInput } from "./rules";
 export {
+  detectMomentumOverride,
+  bumpShortSignalForMomentum,
+  applyMomentumVerdict,
+} from "./momentumOverride";
+export type { MomentumOverrideResult } from "./momentumOverride";
+export {
   assessDataQuality,
   applyThinHistoryAnalysisGate,
   applyThinHistoryPredictionGate,

@@ -9,7 +9,7 @@ import {
 import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
-import { analyze, evaluateSignalMarks, pickTopSignalMarks } from "./analyzer";
+import { analyze, evaluateSignalMarks, pickTopSignalMarks, detectMomentumOverride } from "./analyzer";
 import {
   assessDataQuality,
   applyThinHistoryAnalysisGate,
@@ -406,6 +406,7 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
           fxRate: ctxNumbers.fxRate,
           vix: ctxNumbers.vix,
         },
+        history: hist,
       });
 
       const dataQuality = assessDataQuality({
@@ -424,7 +425,21 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
 
       const sector = meta.sector;
       const contextBonus = computeContextBonus(sector, ctxNumbers);
-      const rankScore = analysis.buyScore + contextBonus;
+      const momentumBonus = detectMomentumOverride({
+        quote,
+        tech,
+        flow,
+        consensus,
+        valuation: bundle.valuation,
+        context: {
+          semiHeat,
+          nasdaqRate: ctxNumbers.nasdaqRate,
+          fxRate: ctxNumbers.fxRate,
+          vix: ctxNumbers.vix,
+        },
+        history: hist,
+      }).rankBonus;
+      const rankScore = analysis.buyScore + contextBonus + momentumBonus;
 
       // 시그널 마크 — 추천 카드 헤더에도 같이 노출. 작은 카드라 3개로 컷.
       // 추천 빌드 단계에선 종목별 upcomingEvents 를 별도로 fetch 하지 않으므로

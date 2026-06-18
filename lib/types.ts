@@ -266,6 +266,10 @@ export interface ActionVerdict {
   detail: string; // 작은 부연 (예: "단기 SELL · 장기 BUY")
   // 외부 리스크(트럼프·관세·지정학 등)로 인해 한 단계 보수적으로 시프트되었는지
   riskShifted?: boolean;
+  /** 배지 옆 1줄 — 왜 관망/추세인지 (예: "반도체 과열 78/100") */
+  reasonLine?: string;
+  /** 모멘텀 override 레인 적용 여부 */
+  momentumOverride?: boolean;
 }
 
 // 외부 이벤트 리스크 평가 결과를 types에 일급 노출.

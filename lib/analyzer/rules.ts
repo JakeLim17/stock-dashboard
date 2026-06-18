@@ -1,3 +1,4 @@
+import type { HistoricalPoint } from "../providers/yahoo";
 import type {
   ActionRecommendation,
   ActionVerdict,
@@ -16,6 +17,14 @@ import type {
   Valuation,
 } from "../types";
 import { emptyRiskAssessment } from "../news/riskScore";
+import {
+  applyMomentumScoreAdjust,
+  applyMomentumVerdict,
+  bumpShortSignalForMomentum,
+  buildHoldReasonLine,
+  detectMomentumOverride,
+  type MomentumOverrideResult,
+} from "./momentumOverride";
 
 // 분석 입력. provider에서 모은 1차 데이터.
 export interface AnalyzeInput {
@@ -39,6 +48,8 @@ export interface AnalyzeInput {
     vix: number; // VIX 수치
     overseasNightRate?: number | null; // 해외 개별 GDR/DR 등락률
   };
+  // 모멘텀 override — 거래량·연속상승·52주 돌파 등 (옵션)
+  history?: HistoricalPoint[];
 }
 
 // 단기 룰 hit — 추격 위험(heat) / 매수 우위(buy) 양방향.
@@ -533,13 +544,20 @@ function decideLongTermSignal(score: number): SignalStatus {
 function shortTermHeadline(
   shortSignal: SignalStatus,
   longSignal: SignalStatus,
-  heat: number
+  heat: number,
+  momentum?: MomentumOverrideResult
 ): string {
   const longBullish = longSignal === "BUY" || longSignal === "ADD";
   const longBearish = longSignal === "WATCH" || longSignal === "SELL";
 
   // 단·장기 조합 통합 메시지 우선
   if ((shortSignal === "HOLD" || shortSignal === "WATCH") && longBullish) {
+    if (momentum?.active && momentum.strongTrend) {
+      return "장기 양호 + 강한 상승 추세 — 추세 지속 관찰";
+    }
+    if (momentum?.active) {
+      return "장기 양호 + 단기 모멘텀 — 추세 추종 관찰";
+    }
     return "장기 펀더 양호, 단기 추격 자제 — 눌림목 대기";
   }
   if ((shortSignal === "BUY" || shortSignal === "ADD") && longBullish) {
@@ -861,12 +879,23 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   }
   heat = clamp(heat);
   buy = clamp(buy);
+
+  const momentumPre = detectMomentumOverride(input);
+  const scoreAdj = applyMomentumScoreAdjust(heat, buy, momentumPre);
+  heat = clamp(scoreAdj.heat);
+  buy = clamp(scoreAdj.buy);
+
   let shortSignal = decideShortTermSignal(
     heat,
     buy,
     input.quote.marketState
   );
-  // 급락 + 수급 악화 — 단기 BUY/ADD/SELL 상한 WATCH
+
+  if (momentumPre.active) {
+    shortSignal = bumpShortSignalForMomentum(shortSignal);
+  }
+
+  // 급락 + 수급 악화 — 단기 BUY/ADD/SELL 상한 WATCH (모멘텀 override 예외 없음)
   if (isCrashWithBadFlow(input.quote.changeRate, input.flow)) {
     if (shortSignal === "BUY" || shortSignal === "ADD" || shortSignal === "SELL") {
       shortSignal = "WATCH";
@@ -885,7 +914,12 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   const longSignal = decideLongTermSignal(longScore);
 
   // 헤드라인 — 단기는 단·장기 조합 통합 메시지 우선
-  const shortBaseHeadline = shortTermHeadline(shortSignal, longSignal, heat);
+  const shortBaseHeadline = shortTermHeadline(
+    shortSignal,
+    longSignal,
+    heat,
+    momentumPre
+  );
   const shortHeadline = isRegularMarket(input.quote.marketState)
     ? shortBaseHeadline
     : `${shortBaseHeadline} (비장중 기준)`;
@@ -901,6 +935,13 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     shortReasons.unshift("· 비장중이라 종가/야간 지표 기준으로 판정");
   }
   if (shortReasons.length === 0) shortReasons.push("특이 신호 없음");
+
+  if (momentumPre.active) {
+    for (const r of momentumPre.reasons) {
+      shortReasons.unshift(`+ 모멘텀: ${r}`);
+    }
+    shortReasons.splice(3);
+  }
 
   // 장기 reasons — score 절대값 큰 순 3개
   const longReasons = longHits
@@ -951,12 +992,30 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   );
   // 시장경보 시프트 — warning/risk/admin이면 추가로 한 단계 보수, halt면 AVOID 고정.
   // 외부 리스크 시프트 이후에 적용해 누적이 가능하게(예: high 뉴스 + 투자경고).
-  const verdict = applyMarketAlertShift(
+  let verdict = applyMarketAlertShift(
     riskShifted,
     input.quote.marketAlert,
     shortSignal,
     longSignal
   );
+
+  verdict = applyMomentumVerdict(
+    verdict,
+    shortSignal,
+    longSignal,
+    momentumPre,
+    { semiHeat: input.context.semiHeat, heat, buy }
+  );
+
+  if (!verdict.reasonLine) {
+    const holdReason = buildHoldReasonLine(
+      verdict,
+      heat,
+      input.context.semiHeat,
+      shortReasons
+    );
+    if (holdReason) verdict = { ...verdict, reasonLine: holdReason };
+  }
 
   return {
     shortTerm,

@@ -213,6 +213,10 @@ export function getRecommendationScreenPool(): SymbolMeta[] {
     (c): c is SymbolMeta & { sector: SectorTag } => !!c.sector
   );
   const byCode = new Map<string, SymbolMeta>();
+  // 메인 관심 3종(삼전·하닉·삼성전기)은 항상 스크리닝 — 급등·모멘텀 추적 누락 방지
+  for (const m of PRIMARY_SYMBOLS) {
+    if (m.sector) byCode.set(m.code, m as SymbolMeta & { sector: SectorTag });
+  }
   for (const m of withSector) {
     if (m.isSectorLeader) byCode.set(m.code, m);
   }

@@ -5,6 +5,7 @@ import { Badge } from "./ui/Badge";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { VerdictHint } from "./VerdictHint";
+import { VerdictReasonLine } from "./VerdictReasonLine";
 import {
   changeColor,
   currencyOf,
@@ -138,15 +139,18 @@ export function PredictionHero({
             >
               {fmtSigned(primary.changeAbs)} ({fmtPercent(primary.changeRate)})
             </div>
-            <div className="pt-1 inline-flex items-center gap-1.5">
-              <Badge
-                variant={verdict.tone}
-                size="lg"
-                className={verdict.tone === "sell" ? "shake-warn" : undefined}
-              >
-                {verdict.label}
-              </Badge>
-              <VerdictHint />
+            <div className="pt-1 inline-flex flex-col items-start gap-0.5">
+              <div className="inline-flex items-center gap-1.5">
+                <Badge
+                  variant={verdict.tone}
+                  size="lg"
+                  className={verdict.tone === "sell" ? "shake-warn" : undefined}
+                >
+                  {verdict.label}
+                </Badge>
+                <VerdictHint />
+              </div>
+              <VerdictReasonLine line={verdict.reasonLine} />
             </div>
           </div>
 

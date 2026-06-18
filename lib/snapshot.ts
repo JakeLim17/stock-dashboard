@@ -633,6 +633,7 @@ export async function fetchWatchlistSnapshots(
           ...context!,
           overseasNightRate: overseasNight?.changeRate ?? null,
         },
+        history: hist,
       });
       const dataQuality = assessDataQuality({
         code: meta.code,

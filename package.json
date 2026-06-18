@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev -p 9700",
     "build": "next build",
-    "start": "next start -p 9700"
+    "start": "next start -p 9700",
+    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
