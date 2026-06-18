@@ -19,11 +19,14 @@ import { PanelSkeleton } from "./PanelSkeleton";
 interface DashboardSkeletonProps {
   marketPanelSlot?: ReactNode;
   newsPanelSlot?: ReactNode;
+  /** lite — Phase A 대기 중 (시세 우선 메시지) */
+  phase?: "lite" | "full";
 }
 
 export function DashboardSkeleton({
   marketPanelSlot,
   newsPanelSlot,
+  phase = "full",
 }: DashboardSkeletonProps = {}) {
   return (
     <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-6 space-y-6">
@@ -42,7 +45,7 @@ export function DashboardSkeleton({
 
       {/* 라이브 진행 배너 — "지금 무엇을 수집/분석 중인지" 단계 메시지 + 경과 초 + shimmer.
           5~13초의 cold start 동안 "화면이 멈춘 듯이 보이는" 인지를 없애는 핵심 요소. */}
-      <SkeletonStageBanner />
+      <SkeletonStageBanner phase={phase} />
 
       {/* SummaryBar */}
       <SummaryBarSkeleton />

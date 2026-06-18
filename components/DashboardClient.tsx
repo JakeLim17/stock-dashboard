@@ -144,11 +144,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   // 데스크탑에서도 setSheetOpen(true) 자체는 호출되지만, MobileDetailSheet 컴포넌트가
   // `lg:hidden` 으로 자기 자신을 가리므로 화면엔 영향 없음.
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [showNews, setShowNews] = useState(initial.phase !== "lite");
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootedRef = useRef(false);
+  const fullFetchStartedRef = useRef(false);
   const watchCodesRef = useRef(watchCodes);
   const overseasNightRef = useRef(useOverseasNight);
   // 선택 종목이 잠깐 응답에서 빠질 때(API 갱신 사이) 마지막 본 데이터를 유지하는 안정화 ref.
@@ -165,13 +167,19 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     overseasNightRef.current = useOverseasNight;
   }, [useOverseasNight]);
   const refreshMs = resolveRefreshMs(snap);
+  const analysisPending = snap.phase === "lite";
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
   // force=true 면 서버 in-memory 캐시(컨센서스/시장경보)도 비우고 새로 fetch — 사용자 새로고침 버튼 전용.
   // 자동 폴링은 force=false (기본) — 30분 TTL이라 자연 만료로도 충분히 신선하고,
   // 매 폴링마다 force=true면 Yahoo/Naver 호출량이 폭증한다.
   const refresh = useCallback(
-    async (codes?: string[], nightMode?: boolean, force = false) => {
+    async (
+      codes?: string[],
+      nightMode?: boolean,
+      force = false,
+      silent = false
+    ) => {
       const target = codes ?? watchCodesRef.current;
       const query = encodeURIComponent(target.join(","));
       const includeNight = nightMode ?? overseasNightRef.current;
@@ -184,7 +192,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      setRefreshing(true);
+      if (!silent) setRefreshing(true);
       setError(null);
       try {
         const r = await fetch(
@@ -207,12 +215,44 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       } finally {
         if (abortRef.current === ctrl) {
           abortRef.current = null;
-          setRefreshing(false);
+          if (!silent) setRefreshing(false);
         }
       }
     },
     []
   );
+
+  // Phase B — lite 도착 직후 full snapshot 백그라운드 fetch (UI 블로킹 없음).
+  useEffect(() => {
+    if (snap.phase !== "lite") return;
+    if (fullFetchStartedRef.current) return;
+    fullFetchStartedRef.current = true;
+    void refresh(undefined, undefined, false, true);
+  }, [snap.phase, refresh]);
+
+  // full snapshot 도착 후 뉴스 패널 defer — 카드·시세 우선, 글로벌 뉴스는 idle/2s 후.
+  useEffect(() => {
+    if (analysisPending) {
+      setShowNews(false);
+      return;
+    }
+    let cancelled = false;
+    const reveal = () => {
+      if (!cancelled) setShowNews(true);
+    };
+    if (typeof requestIdleCallback !== "undefined") {
+      const id = requestIdleCallback(reveal, { timeout: 2000 });
+      return () => {
+        cancelled = true;
+        cancelIdleCallback(id);
+      };
+    }
+    const t = setTimeout(reveal, 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [analysisPending]);
 
   const toggleOverseasNight = useCallback(() => {
     const next = !overseasNightRef.current;
@@ -680,6 +720,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             <StockCard
               snap={p}
               selected={p.meta.code === selected}
+              analysisPending={analysisPending}
               onSelect={(code) => {
                 setSelected(code);
                 // 모바일에서는 모달 오픈. 데스크탑에선 MobileDetailSheet 컴포넌트가 lg:hidden
@@ -724,15 +765,21 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         <EventCalendar snapshot={snap} />
       </div>
 
-      {/* 뉴스 */}
-      <NewsPanel
-        items={snap.news}
-        selectedSymbol={
-          selectedSnap
-            ? { code: selectedSnap.meta.code, name: selectedSnap.meta.name }
-            : null
-        }
-      />
+      {/* 뉴스 — full snapshot + idle/2s defer */}
+      {showNews ? (
+        <NewsPanel
+          items={snap.news}
+          selectedSymbol={
+            selectedSnap
+              ? { code: selectedSnap.meta.code, name: selectedSnap.meta.name }
+              : null
+          }
+        />
+      ) : (
+        <div className="rounded-2xl border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
+          뉴스 수집 중…
+        </div>
+      )}
 
       {/* 에러/디버그 영역 */}
       {Object.keys(snap.errors).length > 0 && (

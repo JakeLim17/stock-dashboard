@@ -45,6 +45,8 @@ interface Props {
   kisActive?: boolean;
   // Phase 3 — KIS WS H0STCNT0 누적거래량·거래대금 실시간 override. 있으면 quote.volume 위에 덮어쓰기.
   tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
+  /** Phase A — 수급·RSI 분석 대기 */
+  analysisPending?: boolean;
 }
 
 export function StockFundamentalsBlock({
@@ -53,6 +55,7 @@ export function StockFundamentalsBlock({
   variant = "card",
   kisActive = false,
   tradeOverride,
+  analysisPending = false,
 }: Props) {
   const { meta, quote, tech, flow } = snap;
   const { secondary } = pickPrimaryQuote(quote);
@@ -139,7 +142,13 @@ export function StockFundamentalsBlock({
         <Row label="거래량" value={fmtNumber(liveVolume)} />
         <Row
           label="RSI(14)"
-          value={tech.rsi14 != null ? tech.rsi14.toFixed(0) : "—"}
+          value={
+            analysisPending
+              ? "분석 중"
+              : tech.rsi14 != null
+                ? tech.rsi14.toFixed(0)
+                : "—"
+          }
         />
         {/* 거래대금 — KIS WS 가 줄 때만 노출 (한국 종목 + Phase 3 active). 단위 자동 (억/조). */}
         {liveTradeValue != null && (
@@ -151,12 +160,18 @@ export function StockFundamentalsBlock({
       </div>
 
       {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 (한국 종목만 실데이터, 그 외는 placeholder) */}
-      <FlowSection
-        flow={flow}
-        code={meta.code}
-        variant={variant}
-        kisActive={kisActive}
-      />
+      {analysisPending ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+          수급(외인·기관) 분석 중…
+        </div>
+      ) : (
+        <FlowSection
+          flow={flow}
+          code={meta.code}
+          variant={variant}
+          kisActive={kisActive}
+        />
+      )}
 
       {/* 프로그램 매매 — KIS 활성 시 종목별 차익/비차익. 데이터 없으면 미노출. */}
       {snap.programTrade && (

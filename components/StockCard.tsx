@@ -29,7 +29,7 @@ import {
   priceFreshness,
   priceTimeLabel,
 } from "@/lib/utils";
-import { TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { TrendingDown, TrendingUp, Minus, Loader2 } from "lucide-react";
 
 // 단기·장기 시그널 → 사용자 표시 라벨/색 (상세 영역에서만 사용)
 const SIGNAL_LABEL: Record<string, string> = {
@@ -67,6 +67,7 @@ export function StockCard({
   kisActive,
   priceOverride,
   tradeOverride,
+  analysisPending = false,
 }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -75,6 +76,8 @@ export function StockCard({
   krwRate?: number | null;
   /** KIS Open API 활성 여부. DashboardSnapshot.kisActive 미러 — 펀더멘털 안내 분기. */
   kisActive?: boolean;
+  /** Phase A — 예측·수급·배지 분석 대기 중 placeholder */
+  analysisPending?: boolean;
   /**
    * Phase 1 — KIS WebSocket H0STCNT0(체결가) 실시간 override.
    * 정규장 진행 중일 때만 적용. 등락은 `quote.prevClose` 로 즉석 재계산.
@@ -265,21 +268,23 @@ export function StockCard({
           variant="card"
           kisActive={kisActive}
           tradeOverride={tradeOverride}
+          analysisPending={analysisPending}
         />
         
 
-        {/* 분석 — 메인 결론(verdict)을 위로 크게, 단기/장기 상세는 접힘으로 정리.
-            "사라는 건지 말라는 건지" 피드백에 맞춰 1초 안에 행동을 정하도록 통합.
-
-            데스크탑에서 여러 카드를 한 줄에 두고 비교할 때 모든 카드에 같은 배지가
-            보여야 직관적이라는 사용자 피드백에 따라, 선택 여부와 무관하게 단·장기/
-            변동성/기회/리스크 배지를 항상 노출한다. 모바일 중복은 W4(Detail 패널이
-            열렸을 때 카드 자동 숨김)로 이미 해결됨. */}
+        {/* 분석 — Phase B 전에는 placeholder. full 도착 후 verdict·배지·예측 노출. */}
         <div className="border-t border-border pt-3 space-y-2">
           <div className="text-xs text-muted-foreground tracking-wide uppercase">
             분석
           </div>
 
+          {analysisPending ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+              <span>예측·수급·배지 분석 중…</span>
+            </div>
+          ) : (
+            <>
           <div className="flex items-center gap-2 flex-wrap">
             <SignalDetailBadges
               short={analysis.shortTerm.signal}
@@ -335,16 +340,15 @@ export function StockCard({
               </ul>
             </div>
           </details>
+            </>
+          )}
         </div>
 
-        {/* 예측 블록 — 기존 상단 PredictionHero 의 핵심(1일/1주 범위 막대 · 매수/매도 강도 ·
-            손익비 · 손절·목표가 · 오늘 진폭 · 변동성 점수 · 변동성 모델 · 이벤트 부풀림)
-            을 카드 안으로 흡수. 모바일에서 카드 자체로 결정 가능하도록. */}
-        <PredictionBlock snap={snap} krwRate={krwRate} />
+        {!analysisPending && (
+          <PredictionBlock snap={snap} krwRate={krwRate} />
+        )}
 
-        {/* 컨센서스 한 줄 — 평균 목표가, 상승여력, Strong Buy / Buy / Hold 분포.
-            한국 종목인 경우 국내(국내 N사) 평균 + 통합 평균 두 줄로 분리 노출. */}
-        {consensus && consensus.targetMean != null && (
+        {!analysisPending && consensus && consensus.targetMean != null && (
           <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
             {consensus.domesticMean != null &&
               (consensus.domesticCount ?? 0) > 0 && (

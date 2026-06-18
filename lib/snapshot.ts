@@ -42,19 +42,62 @@ import {
   resolveWatchSymbols,
 } from "./symbols";
 import type {
+  AnalysisResult,
   DashboardSnapshot,
   EventItem,
+  FlowData,
   MarketIndicator,
   NewsItem,
   OverseasNightIndicator,
   Quote,
   SymbolMeta,
   StockSnapshot,
+  TechIndicators,
 } from "./types";
 
 export interface BuildSnapshotOptions {
   includeOverseasNight?: boolean;
 }
+
+// Phase A(lite) 카드용 — 분석·예측·수급 전 도착 시 UI placeholder.
+const PENDING_ANALYSIS: AnalysisResult = {
+  shortTerm: {
+    signal: "HOLD",
+    headline: "분석 중…",
+    reasons: [],
+    score: 50,
+  },
+  longTerm: {
+    signal: "HOLD",
+    headline: "분석 중…",
+    reasons: [],
+    score: 50,
+  },
+  externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+  verdict: {
+    action: "HOLD",
+    label: "분석 중",
+    headline: "예측·수급 분석 중…",
+    tone: "hold",
+    detail: "",
+  },
+  signal: "HOLD",
+  heatScore: 50,
+  buyScore: 50,
+  headline: "예측·수급 분석 중…",
+  reasons: [],
+};
+
+const PENDING_FLOW: FlowData = {
+  foreignNet: null,
+  institutionNet: null,
+  individualNet: null,
+};
+
+const PENDING_TECH: TechIndicators = {
+  trend: "sideways",
+  heat: 50,
+};
 
 // 시장 분위기·반도체 과열도 계산에 쓰이는 컨텍스트.
 // fetchMarketIndicators() 결과로 자동 도출되며, 이후 fetchWatchlistSnapshots()의
@@ -705,6 +748,103 @@ export async function fetchWatchlistSnapshots(
 }
 
 // ──────────────────────────────────────────────────────────────
+// Phase A — 시세 우선 경량 스냅샷 (1~3초 목표).
+//   indicators(cached) + watchlist quote batch 만. 분석·뉴스·예측·수급 fanout 제외.
+// ──────────────────────────────────────────────────────────────
+async function buildSnapshotLiteCore(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  _options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  const errors: Record<string, string> = {};
+  const watchSymbols = resolveWatchSymbols(requestedSymbols);
+  const indicatorResult = await cachedMarketIndicators();
+  Object.assign(errors, indicatorResult.errors);
+
+  const quoteResults = await fetchQuotesBatch(watchSymbols);
+  const primaries: StockSnapshot[] = [];
+
+  for (let i = 0; i < watchSymbols.length; i++) {
+    const meta = watchSymbols[i];
+    const qr = quoteResults[i];
+    if (!qr.ok) {
+      errors[meta.code] = qr.error;
+      continue;
+    }
+    saveQuote(qr.quote);
+    primaries.push({
+      meta,
+      quote: qr.quote,
+      flow: PENDING_FLOW,
+      tech: PENDING_TECH,
+      analysis: PENDING_ANALYSIS,
+      predictions: null,
+      consensus: null,
+      consensusValuation: null,
+      researches: [],
+      signalMarks: [],
+      upcomingEvents: [],
+      programTrade: null,
+      shortBalance: null,
+    });
+  }
+
+  return {
+    generatedAt: Date.now(),
+    phase: "lite",
+    primaries,
+    indicators: indicatorResult.indicators,
+    marketMood: buildMarketMood(
+      indicatorResult.indicators,
+      [],
+      indicatorResult.context.semiHeat
+    ),
+    news: [],
+    errors,
+    macroEvents: fetchMacroEvents(),
+    kisActive: kisEnabled(),
+  };
+}
+
+const LITE_SNAPSHOT_TTL_MS = 3_000;
+type LiteSnapshotCache = { data: DashboardSnapshot; at: number };
+const liteSnapshotCache = new Map<string, LiteSnapshotCache>();
+const liteSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
+
+function liteSnapshotKey(
+  symbols: string[],
+  options: BuildSnapshotOptions
+): string {
+  const normalized = Array.from(new Set(symbols)).sort().join(",");
+  return `lite:${normalized}|night=${options.includeOverseasNight ? "1" : "0"}`;
+}
+
+export async function buildSnapshotLite(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  const key = liteSnapshotKey(requestedSymbols, options);
+  const now = Date.now();
+  const hit = liteSnapshotCache.get(key);
+  if (hit && now - hit.at < LITE_SNAPSHOT_TTL_MS) return hit.data;
+  const inflight = liteSnapshotInFlight.get(key);
+  if (inflight) return inflight;
+  const p = buildSnapshotLiteCore(requestedSymbols, options)
+    .then((data) => {
+      liteSnapshotCache.set(key, { data, at: Date.now() });
+      if (liteSnapshotCache.size > 64) {
+        const firstKey = liteSnapshotCache.keys().next().value;
+        if (firstKey !== undefined) liteSnapshotCache.delete(firstKey);
+      }
+      return data;
+    })
+    .finally(() => {
+      liteSnapshotInFlight.delete(key);
+    });
+  liteSnapshotInFlight.set(key, p);
+  return p;
+}
+
+// ──────────────────────────────────────────────────────────────
 // 기존 호환 — 메인 대시보드 1회 분의 통합 스냅샷.
 //   indicators + news 를 병렬로 받고 → watchlist 분석에 deps로 주입.
 //   외부 인터페이스(반환 shape)는 종전과 동일.
@@ -750,6 +890,7 @@ export async function buildSnapshot(
 
   return {
     generatedAt: Date.now(),
+    phase: "full",
     primaries: watchResult.primaries,
     indicators: indicatorResult.indicators,
     marketMood: buildMarketMood(
@@ -805,6 +946,7 @@ export async function buildSnapshotShared(
 // 강제 갱신용 — `/api/snapshot?refresh=1` 진입 시 호출.
 export function invalidateSnapshotCache(): void {
   snapshotCache.clear();
+  liteSnapshotCache.clear();
   marketIndicatorCache = null;
 }
 

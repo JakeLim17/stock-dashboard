@@ -869,6 +869,8 @@ export interface MarketIndicator {
 
 export interface DashboardSnapshot {
   generatedAt: number;
+  // lite — 시세·지표만 (Phase A). full 또는 생략 — 예측·수급·뉴스 포함 (Phase B).
+  phase?: "lite" | "full";
   primaries: StockSnapshot[]; // 관심 종목 카드
   indicators: MarketIndicator[]; // 시장 신호 패널
   marketMood: {

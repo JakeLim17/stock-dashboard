@@ -15,7 +15,13 @@ import { Activity, Loader2 } from "lucide-react";
 // 데이터가 도착하면 부모(DashboardShell)가 통째로 DashboardClient 로 교체하므로
 // 별도 종료 로직 없이 그대로 unmount 된다.
 
-const STAGES = [
+const STAGES_LITE = [
+  "시장 지표 받는 중...",
+  "관심 종목 시세 수집 중...",
+  "카드 표시 준비 중...",
+] as const;
+
+const STAGES_FULL = [
   "시장 지표 받는 중...",
   "관심 종목 시세 수집 중...",
   "수급(외인·기관) 분석 중...",
@@ -27,13 +33,23 @@ const STAGES = [
 
 const STAGE_INTERVAL_MS = 1600;
 
-export function SkeletonStageBanner() {
+export function SkeletonStageBanner({
+  phase = "full",
+}: {
+  phase?: "lite" | "full";
+}) {
+  const stages = phase === "lite" ? STAGES_LITE : STAGES_FULL;
   const [stage, setStage] = useState(0);
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
+    setStage(0);
+    setElapsed(0);
+  }, [phase]);
+
+  useEffect(() => {
     const stageTimer = setInterval(() => {
-      setStage((s) => Math.min(s + 1, STAGES.length - 1));
+      setStage((s) => Math.min(s + 1, stages.length - 1));
     }, STAGE_INTERVAL_MS);
     const secTimer = setInterval(() => {
       setElapsed((s) => s + 1);
@@ -42,10 +58,10 @@ export function SkeletonStageBanner() {
       clearInterval(stageTimer);
       clearInterval(secTimer);
     };
-  }, []);
+  }, [stages.length]);
 
-  const message = STAGES[stage];
-  const progress = Math.min(((stage + 1) / STAGES.length) * 100, 92);
+  const message = stages[stage];
+  const progress = Math.min(((stage + 1) / stages.length) * 100, phase === "lite" ? 85 : 92);
 
   return (
     <div
@@ -66,7 +82,9 @@ export function SkeletonStageBanner() {
             {message}
           </p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다.
+            {phase === "lite"
+              ? "시세·카드를 먼저 보여 드리고, 예측·추천·뉴스는 뒤에서 채웁니다."
+              : "첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다."}
           </p>
         </div>
         <span className="tabular text-[11px] text-muted-foreground inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card shrink-0">

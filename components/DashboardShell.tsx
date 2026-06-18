@@ -7,18 +7,11 @@ import { DashboardSkeleton } from "./skeletons/DashboardSkeleton";
 import { toFriendlyErrorMessage } from "@/lib/utils";
 
 // 페이지가 server 측 fetch 를 기다리지 않고 즉시 응답되도록 하는 client wrapper.
-//   1) mount 즉시 DashboardSkeleton 표시 (헤더 + SummaryBar + 카드 그리드 자리)
-//   2) /api/snapshot 을 한 번 fetch 해서 데이터 도착 시 DashboardClient 로 교체
-//   3) 이후 폴링·갱신은 DashboardClient 가 기존대로 담당
-//
-// 이전 구조(server Suspense + DashboardLoader → WatchlistLoader)는 page.tsx 가
-// snapshot 완료까지 응답을 보류해 첫 진입이 수십초 hang 되는 사고가 있었다.
-// 이 wrapper 로 페이지 진입 자체를 ~즉시(<200ms) 로 만든다.
+//   1) mount 즉시 DashboardSkeleton 표시
+//   2) Phase A: /api/snapshot?lite=1 — 시세·지표만 (~1~3초) → DashboardClient 교체
+//   3) Phase B: DashboardClient 가 full snapshot 을 백그라운드 fetch 후 merge
+//   4) 이후 폴링·갱신은 DashboardClient 가 기존대로 담당
 
-// localStorage 의 워치리스트를 읽어 첫 fetch URL 에 ?symbols=... 로 동봉.
-// 이 단계가 없으면 서버는 PRIMARY_SYMBOLS(KR 3종)만 응답해 미국 종목 카드가
-// "처음엔 안 보이다가 폴링 한 사이클 뒤에 등장"하는 깜빡임이 생긴다.
-// SSR 안전을 위해 typeof window 가드 + try/catch 로 감싼다.
 const STORAGE_KEY = "watchlist.codes.v1";
 const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";
 
@@ -47,6 +40,16 @@ function readSavedNightFlag(): boolean {
   }
 }
 
+function buildSnapshotUrl(lite: boolean): string {
+  const symbolsParam = readSavedSymbolsParam();
+  const nightOn = readSavedNightFlag();
+  const qs = new URLSearchParams();
+  if (symbolsParam) qs.set("symbols", symbolsParam);
+  if (nightOn) qs.set("night", "1");
+  if (lite) qs.set("lite", "1");
+  return qs.toString() ? `/api/snapshot?${qs.toString()}` : `/api/snapshot${lite ? "?lite=1" : ""}`;
+}
+
 export function DashboardShell() {
   const [snap, setSnap] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,15 +60,7 @@ export function DashboardShell() {
     const ctrl = new AbortController();
     (async () => {
       try {
-        const symbolsParam = readSavedSymbolsParam();
-        const nightOn = readSavedNightFlag();
-        const qs = new URLSearchParams();
-        if (symbolsParam) qs.set("symbols", symbolsParam);
-        if (nightOn) qs.set("night", "1");
-        const url = qs.toString()
-          ? `/api/snapshot?${qs.toString()}`
-          : "/api/snapshot";
-        const r = await fetch(url, {
+        const r = await fetch(buildSnapshotUrl(true), {
           cache: "no-store",
           signal: ctrl.signal,
         });
@@ -87,10 +82,9 @@ export function DashboardShell() {
 
   if (snap) return <DashboardClient initial={snap} />;
 
-  // 첫 fetch 실패 시에도 일단 skeleton 위에 작은 안내. 사용자가 새로고침으로 재시도 가능.
   return (
     <>
-      <DashboardSkeleton />
+      <DashboardSkeleton phase="lite" />
       {error && (
         <div
           role="alert"

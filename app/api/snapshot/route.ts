@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   buildSnapshot,
+  buildSnapshotLite,
   buildSnapshotShared,
   invalidateSnapshotCache,
 } from "@/lib/snapshot";
@@ -21,6 +22,9 @@ export async function GET(req: Request) {
       .filter(Boolean)
       .slice(0, 8);
     const includeOverseasNight = url.searchParams.get("night") === "1";
+    const liteMode =
+      url.searchParams.get("lite") === "1" ||
+      url.searchParams.get("phase") === "quotes";
 
     // ?refresh=1 또는 ?refresh=true → 해당 종목들의 컨센서스/시장경보 캐시를 비우고 새로 fetch.
     // (시세·뉴스는 항상 fresh 호출이라 캐시 무관. 캐시 대상은 consensus + marketAlert 두 in-memory 맵.)
@@ -42,6 +46,14 @@ export async function GET(req: Request) {
       }
       // 스냅샷 + 시장지표 soft TTL 캐시도 함께 비움 — refresh 의도와 일치.
       invalidateSnapshotCache();
+    }
+
+    // Phase A — 시세·지표만 (lite=1 | phase=quotes). refresh 와 무관하게 항상 경량 경로.
+    if (liteMode) {
+      const snap = await buildSnapshotLite(symbols, { includeOverseasNight });
+      return NextResponse.json(snap, {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
 
     // 평상시는 in-flight dedup + 2s soft TTL 로 동시 호출 압축.
