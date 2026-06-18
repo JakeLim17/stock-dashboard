@@ -16,9 +16,7 @@ const STAGES = [
 ] as const;
 
 const STAGE_INTERVAL_MS = 1400;
-// 콜드 스타트(스냅샷 6종목) 실측 ~13s 까지 가는 경우가 있어 카운트다운 초기값을 8s 로.
-// 0초가 되면 "곧 도착..." 메시지로 자연 폴백된다.
-const COUNTDOWN_INIT_SEC = 8;
+// 콜드 스타트(스냅샷 6종목) 실측 ~20s까지 가는 경우가 있어 경과 초를 함께 표시.
 
 // 로그인 직후 메인 페이지로 들어올 때 즉시 보이는 풀스크린 로딩.
 // app/loading.tsx 가 RSC 트리에서 이 컴포넌트를 렌더한다.
@@ -27,14 +25,14 @@ const COUNTDOWN_INIT_SEC = 8;
 // 카운트다운/단계 메시지가 끝까지 가지 않아도 자연스럽게 사라진다.
 export function LoadingScreen() {
   const [stage, setStage] = useState(0);
-  const [seconds, setSeconds] = useState(COUNTDOWN_INIT_SEC);
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const stageTimer = setInterval(() => {
       setStage((s) => Math.min(s + 1, STAGES.length - 1));
     }, STAGE_INTERVAL_MS);
     const secTimer = setInterval(() => {
-      setSeconds((s) => (s > 0 ? s - 1 : 0));
+      setElapsed((s) => s + 1);
     }, 1000);
     return () => {
       clearInterval(stageTimer);
@@ -64,7 +62,9 @@ export function LoadingScreen() {
             {message}
           </p>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <CountdownPill seconds={seconds} />
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card tabular">
+              <span className="font-semibold text-foreground mr-1">{elapsed}</span>초 경과
+            </span>
             <span className="opacity-70">
               데이터를 모두 받을 때까지 잠시만 기다려주세요.
             </span>
@@ -82,7 +82,7 @@ export function LoadingScreen() {
         </div>
 
         <p className="text-[11px] text-muted-foreground opacity-70">
-          첫 진입은 데이터 수집으로 5~10초 걸릴 수 있어요. 이후엔 자동 갱신됩니다.
+          첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다.
         </p>
       </div>
 
@@ -94,20 +94,5 @@ export function LoadingScreen() {
         }
       `}</style>
     </div>
-  );
-}
-
-function CountdownPill({ seconds }: { seconds: number }) {
-  if (seconds <= 0) {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card tabular">
-        곧 도착...
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card tabular">
-      예상 <span className="font-semibold text-foreground mx-1">{seconds}</span>초
-    </span>
   );
 }

@@ -11,7 +11,11 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { analyze, evaluateSignalMarks, pickTopSignalMarks } from "./analyzer";
 import { assessNewsRisk, emptyRiskAssessment } from "./news/riskScore";
-import { MARKET_INDICATORS, WATCHLIST_CANDIDATES } from "./symbols";
+import {
+  MARKET_INDICATORS,
+  RECOMMENDATION_SCREEN_COUNT,
+  getRecommendationScreenPool,
+} from "./symbols";
 import { buildConsensusSnap, pickCatalystNews } from "./recommendationExtras";
 import type {
   ActionRecommendation,
@@ -249,7 +253,8 @@ function summarizeContext(ctx: {
 }
 
 // ----------------------------------------------------------------------------
-// 메인 빌드 함수 — watchlist candidates 전체를 분석 파이프라인에 돌린다.
+// 메인 빌드 함수 — RECOMMENDATION_SCREEN_POOL(섹터 대장+대표, 현재 ~62종)만 분석.
+// WATCHLIST_CANDIDATES 전수(120)·KRX 전체(~2,500)는 스크리닝하지 않음.
 //
 //   1) 시장 지표 + 뉴스 한 번만 fetch
 //   2) 각 종목당: quote / historical / flow / consensus(캐시) / marketAlert(캐시)
@@ -257,7 +262,9 @@ function summarizeContext(ctx: {
 //   4) 섹터 컨텍스트 보너스 가산 → rankScore 정렬
 //   5) verdict.action 기준으로 카테고리 버킷에 분류
 //
-// 첫 호출은 ~30-50초 (consensus·marketAlert 미캐시). 두 번째 부터는 캐시 hit 으로 빠름.
+// 비용·시간(동시성 6, cold): 풀 ~62종 → 수초~수분 / 120종 → ~1–2분 / KRX 전체 → 불가.
+// 대시보드 snapshot(관심 6종) cold ~8–14s·warm ~0.6s — 종목당 fanout 기준.
+// 첫 호출 consensus·marketAlert 미캐시. 이후 30min TTL 캐시 hit.
 // ----------------------------------------------------------------------------
 export async function buildRecommendations(): Promise<RecommendationsResponse> {
   const startedAt = Date.now();
@@ -322,10 +329,10 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
     favorableSectors: ctxSummary.favorableSectors,
   };
 
-  // 2) 후보 전체 분석. 동시성 6 — Yahoo 레이트리밋·블록 회피.
-  const candidates = WATCHLIST_CANDIDATES.filter((c): c is SymbolMeta & {
-    sector: SectorTag;
-  } => !!c.sector);
+  // 2) 경량 스크리닝 풀 분석. 동시성 6 — Yahoo 레이트리밋·블록 회피.
+  const candidates = getRecommendationScreenPool().filter(
+    (c): c is SymbolMeta & { sector: SectorTag } => !!c.sector
+  );
 
   const items = await mapWithConcurrency(candidates, 6, async (meta) => {
     try {
@@ -468,6 +475,7 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
     items: recommendations,
     errors,
     buildMs: Date.now() - startedAt,
+    screenCount: RECOMMENDATION_SCREEN_COUNT,
     cached: false,
   };
 

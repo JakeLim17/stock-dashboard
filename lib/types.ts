@@ -891,7 +891,7 @@ export interface DashboardSnapshot {
 }
 
 // ----------------------------------------------------------------------------
-// 추천 — watchlist candidates 전체를 분석 파이프라인에 돌려서 카테고리별로 정렬한 결과.
+// 추천 — RECOMMENDATION_SCREEN_POOL(섹터 대장+대표)을 분석 파이프라인에 돌려 카테고리별 정렬.
 // 새 데이터 소스 없이 기존 analyze + 컨센서스 + 뉴스리스크 + 시장경보 결과를 재사용한다.
 // ----------------------------------------------------------------------------
 
@@ -990,6 +990,8 @@ export interface RecommendationsResponse {
   errors: Record<string, string>;
   // 빌드 소요 시간 (디버그/UI 안내용)
   buildMs: number;
+  // 실제 스크리닝한 후보 종목 수 (UI 로딩 안내용)
+  screenCount: number;
   // 이 응답이 캐시에서 나온 것인지
   cached: boolean;
 }

@@ -1,4 +1,4 @@
-import type { OverseasNightIndicator, SymbolMeta } from "./types";
+import type { OverseasNightIndicator, SectorTag, SymbolMeta } from "./types";
 
 // 메인 관심 종목 (기본 카드 3개)
 export const PRIMARY_SYMBOLS: SymbolMeta[] = [
@@ -192,6 +192,34 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // 거래소: Nasdaq Global Select Market + Nasdaq Texas. 공모가 $135, 첫날 $150 시초가.
   { code: "SPCX", name: "스페이스X", kind: "us-stock", sector: "글로벌우주", isSectorLeader: true, sectorLeaderLabel: "우주·발사체 대장", currency: "USD" },
 ];
+
+// 추천 스크리닝 풀 — WATCHLIST_CANDIDATES 전수(120) 대신 경량 후보만 분석.
+//   1) 섹터 대장주(isSectorLeader) 전부
+//   2) 대장주 없는 섹터는 후보 목록 첫 종목 1개
+// 전체 KRX(~2,500) 전수 스크리닝은 하지 않음 — Yahoo/KIS fanout·Vercel CPU 한도 초과.
+// 비용 추정(동시성 6): 풀 62종 cold ~30–60s / 전체 120종 ~60–120s / KRX 전체 수십 분+.
+export function getRecommendationScreenPool(): SymbolMeta[] {
+  const withSector = WATCHLIST_CANDIDATES.filter(
+    (c): c is SymbolMeta & { sector: SectorTag } => !!c.sector
+  );
+  const byCode = new Map<string, SymbolMeta>();
+  for (const m of withSector) {
+    if (m.isSectorLeader) byCode.set(m.code, m);
+  }
+  const covered = new Set(
+    [...byCode.values()].map((m) => m.sector as SectorTag)
+  );
+  for (const m of withSector) {
+    if (!covered.has(m.sector as SectorTag)) {
+      byCode.set(m.code, m);
+      covered.add(m.sector as SectorTag);
+    }
+  }
+  return [...byCode.values()];
+}
+
+export const RECOMMENDATION_SCREEN_POOL = getRecommendationScreenPool();
+export const RECOMMENDATION_SCREEN_COUNT = RECOMMENDATION_SCREEN_POOL.length;
 
 // 시장 지표 패널
 // KOSPI/KOSDAQ는 KIS가 활성이면 우선 조회되고 Yahoo 폴백. 라우팅은 providers/index.ts.

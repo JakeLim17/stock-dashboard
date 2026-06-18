@@ -32,7 +32,7 @@ import { PriceWithKrw } from "./PriceWithKrw";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
 import { VerdictHint } from "./VerdictHint";
-import { WATCHLIST_CANDIDATES, MARKET_INDICATORS } from "@/lib/symbols";
+import { WATCHLIST_CANDIDATES, MARKET_INDICATORS, RECOMMENDATION_SCREEN_COUNT } from "@/lib/symbols";
 
 // 분야 대장주 메타 조회용 맵 — code → leader meta. RecommendationsPanel 카드에서 배지 렌더링에 사용.
 // Recommendation 객체에 leader 정보가 없어 client-side에서 lookup.
@@ -78,7 +78,7 @@ const CATEGORY_VARIANT: Record<
 // 대시보드 상단에 펼침 패널 형태로 노출되는 종목 추천.
 // - 기본 접힘. 헤더 클릭 시 펼침.
 // - 펼치면 컨텍스트 한 줄 → 섹터 탭 → 추천 카드 그리드.
-// - 첫 fetch 는 ~30-50초 가능 (콘센·시장경보 미캐시), 그래서 안내 문구 추가.
+// - 첫 fetch 는 수초~수분 가능 (콘센·시장경보 미캐시), 그래서 안내 문구 추가.
 // - 각 카드 하단에는 "이유 보기" 토글이 있어 펼치면 단·장기 reason / 컨센서스 / 카탈리스트 뉴스 /
 //   외부 위험·시장경보를 함께 본다.
 export function RecommendationsPanel({
@@ -174,6 +174,7 @@ export function RecommendationsPanel({
   }, [filtered]);
 
   const topCount = grouped.buy.length;
+  const screenCount = data?.screenCount ?? RECOMMENDATION_SCREEN_COUNT;
   const buildAgeLabel = data
     ? `${fmtRelative(data.generatedAt)} 기준${
         data.cached ? " · 캐시" : ""
@@ -198,7 +199,7 @@ export function RecommendationsPanel({
               </span>
             ) : (
               <span className="text-[11px] text-muted-foreground">
-                {open ? "분석 중…" : "펼쳐서 추천 받기 (첫 분석 약 1분 소요)"}
+                {open ? "분석 중…" : "펼쳐서 추천 받기 (첫 분석 수초~수분 소요)"}
               </span>
             )}
             {buildAgeLabel && (
@@ -247,10 +248,10 @@ export function RecommendationsPanel({
             <div className="text-xs text-muted-foreground py-6 text-center space-y-1">
               <div className="flex items-center justify-center gap-2">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                <span>40여개 종목 분석 중…</span>
+                <span>{screenCount}개 종목 분석 중…</span>
               </div>
               <p className="text-[11px]">
-                처음 분석엔 약 1분 소요됩니다. 이후 1시간은 캐시에서 즉시 표시.
+                처음 분석엔 수초~수분 걸릴 수 있습니다. 이후 30분은 캐시에서 즉시 표시.
               </p>
             </div>
           )}

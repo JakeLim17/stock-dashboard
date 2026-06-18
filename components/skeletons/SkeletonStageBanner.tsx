@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
 
 // DashboardSkeleton 상단에 띄우는 "지금 무엇을 하고 있는지" 라이브 배너.
-// 첫 진입(또는 새로고침) 후 /api/snapshot 응답이 도착하기 전까지의 5~13초 동안
+// 첫 진입(또는 새로고침) 후 /api/snapshot 응답이 도착하기 전까지
 // "화면이 멈춘 듯이 보이는" 인지를 없앤다.
 //
 //   - 단계 메시지를 1.6초 간격으로 순환 (시세 → 수급 → 컨센서스 → 뉴스 → 예측 → 마무리)
@@ -66,7 +66,7 @@ export function SkeletonStageBanner() {
             {message}
           </p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            첫 진입은 데이터 수집으로 보통 5~10초 걸려요. 이후엔 자동 갱신됩니다.
+            첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다.
           </p>
         </div>
         <span className="tabular text-[11px] text-muted-foreground inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card shrink-0">
