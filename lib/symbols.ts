@@ -133,6 +133,16 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // 물류·택배
   { code: "000120.KS", name: "CJ대한통운", kind: "kr-stock", sector: "물류", isSectorLeader: true, sectorLeaderLabel: "물류 대장" },
 
+  // ─── 2026-06-18 대장주·계열 지주 (8종) ───────────────────────────────────
+  { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock", sector: "통신", isSectorLeader: true, sectorLeaderLabel: "SK 지주" },
+  { code: "361610.KQ", name: "SK아이이테크놀로지", kind: "kr-stock", sector: "배터리", isSectorLeader: true, sectorLeaderLabel: "분리막 대장" },
+  { code: "079550.KS", name: "LIG넥스원", kind: "kr-stock", sector: "방산", isSectorLeader: true, sectorLeaderLabel: "유도무기 대장" },
+  { code: "267250.KS", name: "HD현대", kind: "kr-stock", sector: "조선", isSectorLeader: true, sectorLeaderLabel: "HD 지주" },
+  { code: "003670.KS", name: "포스코퓨처엠", kind: "kr-stock", sector: "배터리", isSectorLeader: true, sectorLeaderLabel: "양극재 대장" },
+  { code: "086280.KS", name: "현대글로비스", kind: "kr-stock", sector: "자동차" },
+  { code: "010120.KS", name: "LS ELECTRIC", kind: "kr-stock", sector: "원전전력" },
+  { code: "377300.KS", name: "카카오페이", kind: "kr-stock", sector: "금융" },
+
   // ─── 미국 빅테크 (kind: "us-stock") ─────────────────────────────────────
   // 한국식 flow(외인/기관) 데이터는 fetchFlowOrMock에서 자동 mock 처리됨.
   // 야후 quote/chart/quoteSummary로 시세·컨센서스 모두 가능.
@@ -312,7 +322,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "AI 반도체",
     emoji: "🧠",
     description: "AI 학습·추론용 메모리·로직 반도체",
-    codes: ["005930.KS", "000660.KS", "042700.KS", "NVDA"],
+    codes: ["005930.KS", "000660.KS", "042700.KS", "402340.KS", "NVDA"],
   },
   {
     id: "battery",
@@ -322,6 +332,8 @@ export const THEMES: ThemeDefinition[] = [
     codes: [
       "373220.KS",
       "006400.KS",
+      "003670.KS",
+      "361610.KQ",
       "247540.KQ",
       "086520.KQ",
       "051910.KS",
@@ -332,14 +344,14 @@ export const THEMES: ThemeDefinition[] = [
     label: "방산",
     emoji: "🛡️",
     description: "방산·항공우주·지정학 수혜",
-    codes: ["012450.KS", "047810.KS", "064350.KS"],
+    codes: ["012450.KS", "047810.KS", "064350.KS", "079550.KS"],
   },
   {
     id: "auto",
     label: "완성차",
     emoji: "🚗",
     description: "현대·기아·부품",
-    codes: ["005380.KS", "000270.KS", "012330.KS"],
+    codes: ["005380.KS", "000270.KS", "012330.KS", "086280.KS"],
   },
   {
     id: "internet_game",
@@ -367,7 +379,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "원전·전력",
     emoji: "⚛️",
     description: "원전·송배전·전력기기",
-    codes: ["034020.KS", "267260.KS", "015760.KS"],
+    codes: ["034020.KS", "267260.KS", "010120.KS", "015760.KS"],
   },
   {
     id: "biotech",
@@ -381,7 +393,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "조선",
     emoji: "⚓",
     description: "선가 사이클 + 친환경 선박",
-    codes: ["329180.KS", "010140.KS", "042660.KS"],
+    codes: ["329180.KS", "267250.KS", "010140.KS", "042660.KS"],
   },
   {
     id: "finance",
@@ -394,6 +406,7 @@ export const THEMES: ThemeDefinition[] = [
       "086790.KS",
       "032830.KS",
       "323410.KS",
+      "377300.KS",
     ],
   },
   // ─── 2026-06 카탈로그 확장 테마 ───────────────────────────────────────
