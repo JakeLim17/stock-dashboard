@@ -4,6 +4,13 @@ import type { StockSnapshot } from "@/lib/types";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { DataQualityBadge, predictionQualityHint } from "./DataQualityBadge";
 import {
+  buildConfidenceBreakdown,
+  buildMacroImpactLine,
+  buildPredictionCompactLine,
+  estimateAtrPct,
+  takeProfit2SourceLabel,
+} from "@/lib/prediction-display";
+import {
   currencyOf,
   fmtNumber,
   fmtPercent,
@@ -53,6 +60,20 @@ export function PredictionBlock({
     modelConfidenceLabel: modelConfidence?.label ?? null,
   });
   const thinHistory = dq?.thinHistory === true;
+  const confidenceBreakdown = buildConfidenceBreakdown(snap);
+  const macroImpactLine = buildMacroImpactLine(snap);
+  const compactLine = buildPredictionCompactLine(snap, decimals);
+  const oneDayDrift =
+    oneDay && snap.quote.price > 0
+      ? oneDay.center / snap.quote.price - 1
+      : null;
+  const atrPct =
+    p?.targets
+      ? estimateAtrPct(p.targets.entry, p.targets.takeProfit1)
+      : null;
+  const tp2SourceLabel = takeProfit2SourceLabel(
+    p?.targets?.takeProfit2Source
+  );
 
   // 데이터 부족·변동 구간 없음 — 카드가 비대해지지 않게 (얇은 히스토리는 안내만).
   const hasAny =
@@ -134,6 +155,24 @@ export function PredictionBlock({
         </div>
       </div>
 
+      {compactLine && (
+        <p className="text-[11px] tabular text-muted-foreground leading-snug">
+          {compactLine}
+        </p>
+      )}
+
+      {confidenceBreakdown.length > 0 && (
+        <p className="text-[10px] tabular text-muted-foreground leading-snug">
+          {confidenceBreakdown.map((c) => `${c.label} ${c.score}`).join(" · ")}
+        </p>
+      )}
+
+      {macroImpactLine && (
+        <p className="text-[10px] text-muted-foreground leading-snug">
+          매크로: {macroImpactLine}
+        </p>
+      )}
+
       {/* 1일/1주 변동 참고 구간 */}
       {thinHistory ? (
         <p className="text-[11px] text-warn leading-snug rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5">
@@ -150,6 +189,7 @@ export function PredictionBlock({
                 high={oneDay.high}
                 center={oneDay.center}
                 decimals={decimals}
+                driftPct={oneDayDrift}
               />
             )}
             {oneWeek && (
@@ -209,62 +249,104 @@ export function PredictionBlock({
         <StrengthGauge label="매도 강도" value={sellStrength} kind="down" />
       </div>
 
-      {/* 손익비 + 손절/목표1 한 줄 */}
+      {/* 손익비 + 손절/목표1·2 + ATR% 근거 */}
       {(p?.targets || rr != null) && (
-        <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-          <div className="rounded-md bg-muted/40 px-2 py-1.5">
-            <div className="text-muted-foreground text-[10px]">손익비</div>
-            <div className="tabular font-semibold">
-              {rr != null ? (
-                <>
-                  1:{rr.toFixed(2)}
-                  {rr >= 2 && (
-                    <span className="ml-1 text-up text-[10px]">우수</span>
-                  )}
-                  {rr < 1 && rr > 0 && (
-                    <span className="ml-1 text-down text-[10px]">불리</span>
-                  )}
-                </>
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )}
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
+            <div className="rounded-md bg-muted/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">손익비</div>
+              <div className="tabular font-semibold">
+                {rr != null ? (
+                  <>
+                    1:{rr.toFixed(2)}
+                    {rr >= 2 && (
+                      <span className="ml-1 text-up text-[10px]">우수</span>
+                    )}
+                    {rr < 1 && rr > 0 && (
+                      <span className="ml-1 text-down text-[10px]">불리</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
             </div>
+            {p?.targets && (
+              <>
+                <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                  <div className="text-muted-foreground text-[10px]">손절</div>
+                  <div className="tabular font-semibold text-down">
+                    {fmtNumber(p.targets.stopLoss, decimals)}
+                  </div>
+                  {currency === "USD" && (
+                    <div className="mt-0.5">
+                      <PriceWithKrw
+                        price={p.targets.stopLoss}
+                        currency={currency}
+                        krwRate={krwRate ?? null}
+                        prefix=""
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                  <div className="text-muted-foreground text-[10px]">목표1</div>
+                  <div className="tabular font-semibold text-up">
+                    {fmtNumber(p.targets.takeProfit1, decimals)}
+                  </div>
+                  {currency === "USD" && (
+                    <div className="mt-0.5">
+                      <PriceWithKrw
+                        price={p.targets.takeProfit1}
+                        currency={currency}
+                        krwRate={krwRate ?? null}
+                        prefix=""
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                  <div className="text-muted-foreground text-[10px]">
+                    목표2
+                    {tp2SourceLabel && (
+                      <span className="ml-1 text-[9px] opacity-70">
+                        ({tp2SourceLabel})
+                      </span>
+                    )}
+                  </div>
+                  <div className="tabular font-semibold text-up">
+                    {fmtNumber(p.targets.takeProfit2, decimals)}
+                  </div>
+                  {currency === "USD" && (
+                    <div className="mt-0.5">
+                      <PriceWithKrw
+                        price={p.targets.takeProfit2}
+                        currency={currency}
+                        krwRate={krwRate ?? null}
+                        prefix=""
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
-          {p?.targets && (
-            <>
-              <div className="rounded-md bg-muted/40 px-2 py-1.5">
-                <div className="text-muted-foreground text-[10px]">손절</div>
-                <div className="tabular font-semibold text-down">
-                  {fmtNumber(p.targets.stopLoss, decimals)}
-                </div>
-                {currency === "USD" && (
-                  <div className="mt-0.5">
-                    <PriceWithKrw
-                      price={p.targets.stopLoss}
-                      currency={currency}
-                      krwRate={krwRate ?? null}
-                      prefix=""
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="rounded-md bg-muted/40 px-2 py-1.5">
-                <div className="text-muted-foreground text-[10px]">목표1</div>
-                <div className="tabular font-semibold text-up">
-                  {fmtNumber(p.targets.takeProfit1, decimals)}
-                </div>
-                {currency === "USD" && (
-                  <div className="mt-0.5">
-                    <PriceWithKrw
-                      price={p.targets.takeProfit1}
-                      currency={currency}
-                      krwRate={krwRate ?? null}
-                      prefix=""
-                    />
-                  </div>
-                )}
-              </div>
-            </>
+          {atrPct != null && (
+            <p className="text-[10px] text-muted-foreground tabular">
+              ATR(14) ≈ {(atrPct * 100).toFixed(1)}% · TP1=2×ATR · SL=1.5×ATR
+              {volModel?.adjustedDailySigma != null && (
+                <span className="ml-1">
+                  · σ {((volModel.adjustedDailySigma ?? 0) * 100).toFixed(2)}%/일
+                </span>
+              )}
+            </p>
+          )}
+          {modelConfidence && modelConfidence.factors.length > 0 && (
+            <ul className="text-[10px] text-muted-foreground space-y-0.5">
+              {modelConfidence.factors.slice(0, 3).map((f) => (
+                <li key={f}>· {f}</li>
+              ))}
+            </ul>
           )}
         </div>
       )}
@@ -289,6 +371,7 @@ function PredictionRangeRow({
   high,
   center,
   decimals,
+  driftPct,
 }: {
   horizonLabel: string;
   currentPrice: number;
@@ -296,6 +379,7 @@ function PredictionRangeRow({
   high: number;
   center: number;
   decimals: number;
+  driftPct?: number | null;
 }) {
   const span = high - low;
   if (span <= 0 || currentPrice <= 0) return null;
@@ -321,6 +405,11 @@ function PredictionRangeRow({
         </span>
         <span className="tabular text-muted-foreground">
           ± {fmtPercent((high - low) / (2 * currentPrice), 1).replace("+", "")}
+          {driftPct != null && Math.abs(driftPct) >= 0.0005 && (
+            <span className="ml-1">
+              · drift {fmtPercent(driftPct, 1)}
+            </span>
+          )}
         </span>
       </div>
       <div className="relative h-2.5 w-full">

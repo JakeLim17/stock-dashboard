@@ -15,6 +15,7 @@ import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { AskingPricePanel } from "./AskingPricePanel";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
+import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { fmtRelative } from "@/lib/utils";
 import { isNewsRelated } from "@/lib/news/symbolKeywords";
@@ -67,6 +68,8 @@ interface Props {
   mobileSheet?: boolean;
   // Phase 3 — KIS WS H0STASP0 호가 실시간. 있으면 AskingPricePanel 에 우선 표시.
   aspOverride?: RealtimeAspEntry | null;
+  /** 시장 전체 반도체 과열 — verdict 근거 bullet용 */
+  marketSemiHeat?: number | null;
 }
 
 const TAB_META: Record<
@@ -82,7 +85,7 @@ const TAB_META: Record<
 
 export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
   function StockDetailPanel(
-    { snap, allNews, krwRate, kisActive, mobileSheet = false, aspOverride },
+    { snap, allNews, krwRate, kisActive, mobileSheet = false, aspOverride, marketSemiHeat },
     ref
   ) {
     const [tab, setTab] = useState<DetailTabKey>("prediction");
@@ -148,6 +151,11 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
             <p className="text-sm font-semibold leading-snug mt-2">
               {verdict.headline}
             </p>
+            <VerdictReasonBullets
+              snap={snap}
+              marketSemiHeat={marketSemiHeat}
+              className="mt-1"
+            />
           </div>
           {/* 탭 — 호가 탭은 한국 종목에만 노출. KIS 미활성도 동일하게 노출하되 안에서 빈 메시지.
               좁은 폭(360~414px) 에서도 5탭 한 줄 안정 표시되도록:

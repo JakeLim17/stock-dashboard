@@ -18,6 +18,7 @@ import { PredictionBlock } from "./PredictionBlock";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
+import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
 import {
@@ -62,6 +63,7 @@ export function StockCard({
   priceOverride,
   tradeOverride,
   analysisPending = false,
+  marketSemiHeat,
 }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -72,6 +74,8 @@ export function StockCard({
   kisActive?: boolean;
   /** Phase A — 예측·수급·배지 분석 대기 중 placeholder */
   analysisPending?: boolean;
+  /** 시장 전체 반도체 과열 — verdict 근거 bullet용 */
+  marketSemiHeat?: number | null;
   /**
    * Phase 1 — KIS WebSocket H0STCNT0(체결가) 실시간 override.
    * 정규장 진행 중일 때만 적용. 등락은 `quote.prevClose` 로 즉석 재계산.
@@ -164,6 +168,11 @@ export function StockCard({
             <VerdictHint />
           </div>
           <VerdictReasonLine line={analysis.verdict.reasonLine} className="text-right" />
+          <VerdictReasonBullets
+            snap={snap}
+            marketSemiHeat={marketSemiHeat}
+            className="text-right max-w-[220px]"
+          />
         </div>
       </CardHeader>
       <CardBody className="space-y-4">

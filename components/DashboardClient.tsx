@@ -704,6 +704,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           krwRate={krwRate}
           kisActive={snap.kisActive}
           aspOverride={selectedAspOverride}
+          marketSemiHeat={snap.marketMood.semiHeat}
         />
       </div>
 
@@ -729,6 +730,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               }}
               krwRate={krwRate}
               kisActive={snap.kisActive}
+              marketSemiHeat={snap.marketMood.semiHeat}
               priceOverride={realtimeFresh(p.meta.code)}
               tradeOverride={realtimeTradeFresh(p.meta.code)}
             />
@@ -750,6 +752,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
         kisActive={snap.kisActive}
         aspOverride={selectedAspOverride}
+        marketSemiHeat={snap.marketMood.semiHeat}
       />
 
       {error && (

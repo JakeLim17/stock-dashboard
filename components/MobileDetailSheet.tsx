@@ -48,6 +48,7 @@ export function MobileDetailSheet({
   krwRate,
   kisActive,
   aspOverride,
+  marketSemiHeat,
 }: {
   open: boolean;
   onClose: () => void;
@@ -57,6 +58,7 @@ export function MobileDetailSheet({
   kisActive?: boolean;
   // Phase 3 — KIS WS 호가 실시간. StockDetailPanel 의 AskingPricePanel 에 forwarding.
   aspOverride?: RealtimeAspEntry | null;
+  marketSemiHeat?: number | null;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
@@ -143,6 +145,7 @@ export function MobileDetailSheet({
             kisActive={kisActive}
             mobileSheet
             aspOverride={aspOverride}
+            marketSemiHeat={marketSemiHeat}
           />
         </div>
       </div>

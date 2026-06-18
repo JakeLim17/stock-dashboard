@@ -6,6 +6,12 @@ import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { PriceWithKrw } from "./PriceWithKrw";
 import {
+  buildConfidenceBreakdown,
+  buildMacroImpactLine,
+  estimateAtrPct,
+  takeProfit2SourceLabel,
+} from "@/lib/prediction-display";
+import {
   changeColor,
   currencyOf,
   fmtNumber,
@@ -115,6 +121,13 @@ export function PredictionPanel({
   const primaryRange = oneDay ?? oneWeek ?? p.ranges[0];
   // 활성 종목 통화 — USD면 진입/손절/목표 가격에 원화 병기. KRW면 보조 표시 생략(회귀 방지).
   const currency = currencyOf(snap.meta.code, snap.meta.currency);
+  const confidenceBreakdown = buildConfidenceBreakdown(snap);
+  const macroImpactLine = buildMacroImpactLine(snap);
+  const oneDayDrift =
+    oneDay && price > 0 ? oneDay.center / price - 1 : null;
+  const atrPct =
+    p.targets ? estimateAtrPct(p.targets.entry, p.targets.takeProfit1) : null;
+  const tp2SourceLabel = takeProfit2SourceLabel(p.targets?.takeProfit2Source);
 
   const inner = (
     <>
@@ -292,6 +305,11 @@ export function PredictionPanel({
                     )}
                   </span>
                 </div>
+                {atrPct != null && (
+                  <p className="text-[11px] text-muted-foreground tabular mt-2">
+                    ATR(14) ≈ {(atrPct * 100).toFixed(1)}% · TP1=2×ATR · SL=1.5×ATR
+                  </p>
+                )}
               </Section>
             )}
 
@@ -428,6 +446,11 @@ export function PredictionPanel({
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="text-[11px] text-muted-foreground">{modelLabel}</span>
           <div className="flex items-center gap-2">
+            {p.modelConfidence && (
+              <Badge variant="neutral" size="sm" className="tabular shrink-0">
+                신뢰 {Math.round(p.modelConfidence.score * 100)}%
+              </Badge>
+            )}
             {p.eventVolatility && (
               <Badge
                 variant="warn"
@@ -451,6 +474,21 @@ export function PredictionPanel({
             </Badge>
           </div>
         </div>
+        {confidenceBreakdown.length > 0 && (
+          <p className="text-[11px] tabular text-muted-foreground">
+            {confidenceBreakdown.map((c) => `${c.label} ${c.score}`).join(" · ")}
+          </p>
+        )}
+        {macroImpactLine && (
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            매크로: {macroImpactLine}
+          </p>
+        )}
+        {oneDayDrift != null && Math.abs(oneDayDrift) >= 0.0005 && (
+          <p className="text-[11px] text-muted-foreground tabular">
+            1일 중심 drift {fmtPercent(oneDayDrift, 1)}
+          </p>
+        )}
         {inner}
       </div>
     );
