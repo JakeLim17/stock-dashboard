@@ -1,5 +1,14 @@
 export { analyze, marketMoodLabel } from "./rules";
 export type { AnalyzeInput } from "./rules";
+export {
+  assessDataQuality,
+  applyThinHistoryAnalysisGate,
+  applyThinHistoryPredictionGate,
+  kstDateKey,
+  MIN_HISTORY_TRADING_DAYS,
+  shouldDemoteRecommendationBuy,
+} from "./dataQuality";
+export type { DataQualityInfo } from "../types";
 export { predict } from "./predictor";
 export type { PredictorInput } from "./predictor";
 export { assessVolatility } from "./volatilityScore";

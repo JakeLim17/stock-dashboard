@@ -2,6 +2,7 @@
 
 import type { StockSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
+import { DataQualityBadge } from "./DataQualityBadge";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
 import {
@@ -414,10 +415,18 @@ function FlowSection({
       <div
         className={
           isDetail
-            ? "rounded-lg border border-dashed border-border bg-muted/10 p-3"
-            : "border-t border-border pt-3"
+            ? "rounded-lg border border-dashed border-border bg-muted/10 p-3 space-y-2"
+            : "border-t border-border pt-3 space-y-2"
         }
       >
+        <DataQualityBadge
+          dq={{
+            historyDays: 0,
+            thinHistory: false,
+            overseasNoFlow: !isKR,
+            flowIsMock: flow.source === "mock",
+          }}
+        />
         <div className="text-[11px] text-muted-foreground leading-snug">
           {isKR
             ? "수급 데이터 일시 미수신"

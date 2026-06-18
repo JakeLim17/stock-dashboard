@@ -7,6 +7,7 @@ import type {
   RecommendationsResponse,
   SectorTag,
 } from "@/lib/types";
+import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { Badge } from "./ui/Badge";
 import { Card, CardBody } from "./ui/Card";
 import {
@@ -177,7 +178,11 @@ export function RecommendationsPanel({
   const screenCount = data?.screenCount ?? RECOMMENDATION_SCREEN_COUNT;
   const buildAgeLabel = data
     ? `${fmtRelative(data.generatedAt)} 기준${
-        data.cached ? " · 캐시" : ""
+        data.fixedDaily
+          ? ` · 오늘(${data.dateKey ?? "—"}) 고정`
+          : data.cached
+            ? " · 캐시"
+            : ""
       }`
     : null;
 
@@ -251,7 +256,7 @@ export function RecommendationsPanel({
                 <span>{screenCount}개 종목 분석 중…</span>
               </div>
               <p className="text-[11px]">
-                처음 분석엔 수초~수분 걸릴 수 있습니다. 이후 30분은 캐시에서 즉시 표시.
+                처음 분석엔 수초~수분 걸릴 수 있습니다. 같은 KST 거래일에는 DB에 고정 저장됩니다.
               </p>
             </div>
           )}
@@ -414,6 +419,18 @@ export function RecommendationsPanel({
                     ))}
                   </ul>
                 </details>
+              )}
+
+              {data.dateKey && (
+                <p className="text-[10px] text-muted-foreground pt-2 border-t border-border/40">
+                  오늘({data.dateKey}) 기준 고정
+                  {data.fixedDaily
+                    ? " · KST 거래일 스냅샷"
+                    : " · 새로고침 시 갱신"}
+                  {" · "}
+                  Vercel 서버리스는 인스턴스별 :memory: DB라 cold start마다 재빌드될 수
+                  있습니다. 로컬 file DB는 영구 고정.
+                </p>
               )}
             </>
           )}
@@ -860,12 +877,14 @@ function SignalBadge({
     WATCH: "bg-warn/10 text-warn border-warn/30",
     SELL: "bg-down/10 text-down border-down/30",
   };
+  const display = SIGNAL_LABEL[signal];
   return (
     <span
       className={`inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-md border tabular ${tone[signal]}`}
+      title={`${label} ${display} (내부 ${signal})`}
     >
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-semibold">{signal}</span>
+      <span className="font-semibold">{display}</span>
     </span>
   );
 }

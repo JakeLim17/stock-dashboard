@@ -685,6 +685,16 @@ export interface StockSnapshot {
   shortBalance?: ShortBalanceData | null;
   // 최근 일별 close — 카드 안 미니 추세 차트 렌더용. 최대 ~30개.
   closeHistory?: number[];
+  /** 데이터 품질 — IPO·얇은 히스토리·해외 수급 등 UI 배지·게이트용. */
+  dataQuality?: DataQualityInfo;
+}
+
+/** 종목별 데이터 충분성 — snapshot·추천 게이트 공통. */
+export interface DataQualityInfo {
+  historyDays: number;
+  thinHistory: boolean;
+  overseasNoFlow: boolean;
+  flowIsMock: boolean;
 }
 
 // ─── KIS 신규 데이터 타입 ────────────────────────────────────────────────────
@@ -996,4 +1006,8 @@ export interface RecommendationsResponse {
   screenCount: number;
   // 이 응답이 캐시에서 나온 것인지
   cached: boolean;
+  /** KST 거래일 기준 DB 고정 스냅샷 (오늘의 추천 SSOT) */
+  fixedDaily?: boolean;
+  /** fixedDaily 일 때 KST YYYY-MM-DD */
+  dateKey?: string;
 }

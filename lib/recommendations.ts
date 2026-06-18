@@ -10,6 +10,13 @@ import { getConsensusBundle } from "./providers/consensusCache";
 import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { analyze, evaluateSignalMarks, pickTopSignalMarks } from "./analyzer";
+import {
+  assessDataQuality,
+  applyThinHistoryAnalysisGate,
+  kstDateKey,
+  shouldDemoteRecommendationBuy,
+} from "./analyzer/dataQuality";
+import { getDailyPicks, saveDailyPicks } from "./db";
 import { assessNewsRisk, emptyRiskAssessment } from "./news/riskScore";
 import {
   MARKET_INDICATORS,
@@ -71,7 +78,7 @@ declare global {
 }
 
 // 시세·뉴스 신선도와 보조를 맞추기 위해 1h → 30min.
-// 첫 빌드는 30~50초 무거우니 더 짧추면 비용이 폭증 — 30min이 균형.
+// 일일 DB 스냅샷(KST)이 SSOT — 인메모리는 같은 인스턴스 내 보조 레이어만.
 const TTL_MS = 30 * 60 * 1000; // 30min
 
 export function getCachedRecommendations(): RecommendationsResponse | null {
@@ -386,7 +393,7 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
           ? assessNewsRisk(relatedNews)
           : emptyRiskAssessment();
 
-      const analysis = analyze({
+      const analysisRaw = analyze({
         quote,
         tech,
         flow,
@@ -401,11 +408,23 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
         },
       });
 
+      const dataQuality = assessDataQuality({
+        code: meta.code,
+        historyLength: hist.length,
+        flow,
+      });
+      const analysis = applyThinHistoryAnalysisGate(analysisRaw, dataQuality);
+
+      let category = CATEGORY_BY_ACTION[analysis.verdict.action];
+      let subCategory = SUBCATEGORY_BY_ACTION[analysis.verdict.action];
+      if (shouldDemoteRecommendationBuy(dataQuality, category)) {
+        category = "hold";
+        subCategory = undefined;
+      }
+
       const sector = meta.sector;
       const contextBonus = computeContextBonus(sector, ctxNumbers);
       const rankScore = analysis.buyScore + contextBonus;
-      const category = CATEGORY_BY_ACTION[analysis.verdict.action];
-      const subCategory = SUBCATEGORY_BY_ACTION[analysis.verdict.action];
 
       // 시그널 마크 — 추천 카드 헤더에도 같이 노출. 작은 카드라 3개로 컷.
       // 추천 빌드 단계에선 종목별 upcomingEvents 를 별도로 fetch 하지 않으므로
@@ -468,6 +487,7 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
     new Set(recommendations.map((r) => r.sector))
   ).sort((a, b) => a.localeCompare(b, "ko"));
 
+  const dateKey = kstDateKey();
   const response: RecommendationsResponse = {
     generatedAt: Date.now(),
     context: marketContext,
@@ -477,7 +497,15 @@ export async function buildRecommendations(): Promise<RecommendationsResponse> {
     buildMs: Date.now() - startedAt,
     screenCount: RECOMMENDATION_SCREEN_COUNT,
     cached: false,
+    fixedDaily: false,
+    dateKey,
   };
+
+  try {
+    saveDailyPicks(dateKey, response, response.generatedAt);
+  } catch {
+    /* :memory: 등 — 무시 */
+  }
 
   setCache(response);
   return response;
@@ -491,9 +519,25 @@ let inFlightBuild: Promise<RecommendationsResponse> | null = null;
 export async function getOrBuildRecommendations(options?: {
   forceRefresh?: boolean;
 }): Promise<RecommendationsResponse> {
+  const dateKey = kstDateKey();
+
   if (!options?.forceRefresh) {
+    try {
+      const daily = getDailyPicks(dateKey);
+      if (daily) {
+        return {
+          ...daily,
+          cached: true,
+          fixedDaily: true,
+          dateKey,
+        };
+      }
+    } catch {
+      /* DB unavailable */
+    }
+
     const hit = getCachedRecommendations();
-    if (hit) return { ...hit, cached: true };
+    if (hit) return { ...hit, cached: true, dateKey: hit.dateKey ?? dateKey };
   }
   if (inFlightBuild) return inFlightBuild;
   inFlightBuild = buildRecommendations().finally(() => {

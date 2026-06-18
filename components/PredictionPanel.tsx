@@ -62,18 +62,18 @@ export function PredictionPanel({
     if (embedded) {
       return (
         <p className="text-sm text-muted-foreground">
-          예측할 종목 데이터가 없습니다.
+          데이터가 충분하지 않아 변동 참고 구간을 표시할 수 없습니다.
         </p>
       );
     }
     return (
       <Card>
         <CardHeader>
-          <CardTitle>예측</CardTitle>
+          <CardTitle>가격 변동 추정</CardTitle>
         </CardHeader>
         <CardBody>
           <p className="text-sm text-muted-foreground">
-            예측할 종목 데이터가 없습니다.
+            데이터가 충분하지 않아 변동 참고 구간을 표시할 수 없습니다.
           </p>
         </CardBody>
       </Card>
@@ -87,14 +87,14 @@ export function PredictionPanel({
     if (embedded) {
       return (
         <p className="text-sm text-muted-foreground">
-          데이터가 충분하지 않아 예측을 표시할 수 없습니다.
+          데이터가 충분하지 않아 변동 참고 구간을 표시할 수 없습니다.
         </p>
       );
     }
     return (
       <Card>
         <CardHeader>
-          <CardTitle>예측 — {snap.meta.name}</CardTitle>
+          <CardTitle>가격 변동 추정 — {snap.meta.name}</CardTitle>
         </CardHeader>
         <CardBody>
           <StockSelector
@@ -103,7 +103,7 @@ export function PredictionPanel({
             onSelect={setActiveCode}
           />
           <p className="text-sm text-muted-foreground">
-            데이터가 충분하지 않아 예측을 표시할 수 없습니다.
+            데이터가 충분하지 않아 변동 참고 구간을 표시할 수 없습니다.
           </p>
         </CardBody>
       </Card>
@@ -136,7 +136,7 @@ export function PredictionPanel({
         >
           {!embedded && (
             <SummaryCard
-              label={primaryRange ? `${primaryRange.horizonLabel} 예상 범위` : "예상 범위"}
+              label={primaryRange ? `${primaryRange.horizonLabel} 변동 참고` : "변동 참고"}
               value={
                 primaryRange
                   ? `${fmtNumber(primaryRange.low)} ~ ${fmtNumber(primaryRange.high)}`
@@ -183,7 +183,7 @@ export function PredictionPanel({
           open={detailDefaultOpen ? true : undefined}
         >
           <summary className="cursor-pointer text-sm font-medium">
-            상세 예측 보기
+            상세 변동 구간 보기
           </summary>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-5 pt-4">
             {/* A. 가격 범위 — 변동성 신뢰구간 (drift=0).
@@ -460,7 +460,7 @@ export function PredictionPanel({
     <Card>
       <CardHeader className="flex items-start justify-between gap-3">
         <div>
-          <CardTitle>예측</CardTitle>
+          <CardTitle>가격 변동 추정</CardTitle>
           <p className="text-[11px] text-muted-foreground mt-1">{modelLabel}</p>
         </div>
         <div className="flex items-center gap-2">

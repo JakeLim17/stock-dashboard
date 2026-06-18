@@ -1,4 +1,9 @@
 import type { SignalStatus } from "@/lib/types";
+import {
+  signalContextHint,
+  signalHorizonLabel,
+  SIGNAL_LABEL,
+} from "@/lib/signal-labels";
 import { Badge } from "./ui/Badge";
 
 const SIGNAL_VARIANT: Record<
@@ -20,31 +25,49 @@ export function SignalDetailBadges({
   long,
   title,
   className,
+  showHint = true,
 }: {
   short: SignalStatus;
   long: SignalStatus;
   title?: string;
   className?: string;
+  /** 단기 BUY vs ADD 구분 힌트 — 기본 켜짐 */
+  showHint?: boolean;
 }) {
+  const hint = showHint ? signalContextHint(short, long) : null;
+  const tooltip = [title, hint].filter(Boolean).join(" · ");
+
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${className ?? ""}`}
-      title={title}
-    >
-      <Badge
-        variant={SIGNAL_VARIANT[short]}
-        size="sm"
-        className={short === "SELL" ? "shake-warn" : undefined}
+    <span className={`inline-flex flex-col gap-1 ${className ?? ""}`}>
+      <span
+        className="inline-flex items-center gap-1.5 flex-wrap"
+        title={tooltip || undefined}
       >
-        단기 {short}
-      </Badge>
-      <Badge
-        variant={SIGNAL_VARIANT[long]}
-        size="sm"
-        className={long === "SELL" ? "shake-warn" : undefined}
-      >
-        장기 {long}
-      </Badge>
+        <Badge
+          variant={SIGNAL_VARIANT[short]}
+          size="sm"
+          className={short === "SELL" ? "shake-warn" : undefined}
+          title={`${signalHorizonLabel("short", short)} — 내부코드 ${short}`}
+        >
+          {signalHorizonLabel("short", short)}
+        </Badge>
+        <Badge
+          variant={SIGNAL_VARIANT[long]}
+          size="sm"
+          className={long === "SELL" ? "shake-warn" : undefined}
+          title={`${signalHorizonLabel("long", long)} — 내부코드 ${long}`}
+        >
+          {signalHorizonLabel("long", long)}
+        </Badge>
+      </span>
+      {hint && (
+        <span className="text-[10px] text-muted-foreground leading-snug max-w-[280px]">
+          {hint}
+        </span>
+      )}
     </span>
   );
 }
+
+/** 상세 접힘 영역 등 — 시그널 배지만 (힌트 없음). */
+export { SIGNAL_LABEL };

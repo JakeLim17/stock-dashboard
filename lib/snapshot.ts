@@ -32,6 +32,11 @@ import {
   pickTopSignalMarks,
 } from "./analyzer";
 import { dailySigmaFromCloses } from "./analyzer/statHelpers";
+import {
+  assessDataQuality,
+  applyThinHistoryAnalysisGate,
+  applyThinHistoryPredictionGate,
+} from "./analyzer/dataQuality";
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
@@ -50,6 +55,7 @@ import type {
   NewsItem,
   OverseasNightIndicator,
   Quote,
+  Predictions,
   SymbolMeta,
   StockSnapshot,
   TechIndicators,
@@ -77,14 +83,14 @@ const PENDING_ANALYSIS: AnalysisResult = {
   verdict: {
     action: "HOLD",
     label: "분석 중",
-    headline: "예측·수급 분석 중…",
+    headline: "가격 변동·수급 분석 중…",
     tone: "hold",
     detail: "",
   },
   signal: "HOLD",
   heatScore: 50,
   buyScore: 50,
-  headline: "예측·수급 분석 중…",
+  headline: "가격 변동·수급 분석 중…",
   reasons: [],
 };
 
@@ -615,7 +621,7 @@ export async function fetchWatchlistSnapshots(
         meta.name
       );
 
-      const analysis = analyze({
+      const analysisRaw = analyze({
         quote,
         tech,
         flow,
@@ -628,6 +634,12 @@ export async function fetchWatchlistSnapshots(
           overseasNightRate: overseasNight?.changeRate ?? null,
         },
       });
+      const dataQuality = assessDataQuality({
+        code: meta.code,
+        historyLength: hist.length,
+        flow,
+      });
+      let analysis = applyThinHistoryAnalysisGate(analysisRaw, dataQuality);
       const volatility = assessVolatility({
         history: hist,
         flow,
@@ -653,7 +665,7 @@ export async function fetchWatchlistSnapshots(
         ...upcomingEvents,
         ...getMacroEventsCached(),
       ];
-      const predictions = predict({
+      let predictions: Predictions | null = predict({
         quote,
         history: hist,
         nasdaqHistory,
@@ -673,10 +685,11 @@ export async function fetchWatchlistSnapshots(
         intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
         events: eventsForVolatility,
       });
+      predictions = applyThinHistoryPredictionGate(predictions, dataQuality);
       // H2: verdict ↔ target 정합성 — 비중 축소·관망 verdict 인데 1·2차 목표가가
       //     entry 대비 +3% 이상이면 "팔라는데 목표가 한참 위" 모순. UI 노출 회색·숨김
       //     처리할 수 있도록 데이터 측에 suppressed 플래그를 박는다 (UI 노출은 후속).
-      if (predictions.targets) {
+      if (predictions?.targets) {
         const REDUCE_ACTIONS = new Set([
           "REDUCE",
           "TRIM",
@@ -730,6 +743,7 @@ export async function fetchWatchlistSnapshots(
         programTrade: null,
         shortBalance: null,
         closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
+        dataQuality,
       };
     })
   );

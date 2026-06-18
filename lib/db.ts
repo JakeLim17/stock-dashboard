@@ -8,6 +8,7 @@ import type {
   AnalysisResult,
   TechIndicators,
   FlowData,
+  RecommendationsResponse,
 } from "./types";
 
 // Vercel/serverless 환경에서는 파일 쓰기가 안 되거나 휘발성이므로 :memory: 로 동작.
@@ -107,6 +108,12 @@ function init(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_news_ts ON news(ts DESC);
     CREATE INDEX IF NOT EXISTS idx_news_symbol ON news(symbol);
+
+    CREATE TABLE IF NOT EXISTS daily_picks (
+      date          TEXT PRIMARY KEY,
+      payload       TEXT NOT NULL,
+      generated_at  INTEGER NOT NULL
+    );
   `);
 
   // 기존 DB 호환 — flows 테이블에 individual_net / individual_net_5d 컬럼이 없으면 추가.
@@ -298,4 +305,32 @@ function safeParseArray(s: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+// ──────── 일일 추천 스냅샷 (KST YYYY-MM-DD 키) ────────
+// 로컬: data/stock.db 영구. Vercel :memory: — 인스턴스별 휘발(동일 날짜도 cold start마다 재빌드 가능).
+
+export function getDailyPicks(dateKey: string): RecommendationsResponse | null {
+  const row = getDb()
+    .prepare(`SELECT payload FROM daily_picks WHERE date = ?`)
+    .get(dateKey) as { payload: string } | undefined;
+  if (!row?.payload) return null;
+  try {
+    return JSON.parse(row.payload) as RecommendationsResponse;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDailyPicks(
+  dateKey: string,
+  payload: RecommendationsResponse,
+  generatedAt: number
+): void {
+  getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO daily_picks (date, payload, generated_at)
+       VALUES (?, ?, ?)`
+    )
+    .run(dateKey, JSON.stringify(payload), generatedAt);
 }

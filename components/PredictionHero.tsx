@@ -80,7 +80,7 @@ export function PredictionHero({
         <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-wider text-accent font-semibold">
             <LineChart className="h-3.5 w-3.5" />
-            예측 Hero · 선택 종목
+            가격 변동 Hero · 선택 종목
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {/* 이벤트 부풀림 배지 — D-day 임박 시 noisy하지 않도록 factor>1.05 일 때만 노출.
@@ -175,7 +175,7 @@ export function PredictionHero({
               </>
             ) : (
               <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-                예측 데이터를 산정하지 못했습니다.
+                변동 참고 구간을 산정하지 못했습니다.
               </div>
             )}
             {/* verdict.headline 한 줄 */}
@@ -295,7 +295,7 @@ export function PredictionHero({
         {onJumpToPrediction && (
           <div className="mt-3 text-[11px] text-muted-foreground inline-flex items-center gap-1">
             <TrendingUp className="h-3 w-3" />
-            상세 예측 보기 · 클릭하면 아래 예측 탭으로 이동
+            상세 변동 구간 보기 · 클릭하면 아래 탭으로 이동
           </div>
         )}
       </div>

@@ -69,21 +69,59 @@ function clamp(n: number, lo = 0, hi = 100) {
 // 펀더(컨센·PER·PBR) 룰은 장기 갈래로 이동했다. 단, 단기 헤드라인 분기에서는
 // longTerm.signal 을 함께 본다 (예: 단기 HOLD인데 장기 BUY → "장기 양호…").
 // ----------------------------------------------------------------------------
+/** 급락(-5%↑) + 수급 악화 시 분할 매수 보너스·강한 BUY 억제용. */
+const CRASH_NET_SELL_THRESHOLD = 3e10; // 300억 순매도
+
+function isCrashWithBadFlow(
+  changeRate: number,
+  flow: FlowData
+): boolean {
+  if (changeRate > -0.05) return false;
+  if (flow.source === "mock") return false;
+  const foreign = flow.foreignNet;
+  const institution = flow.institutionNet;
+  if (foreign == null && institution == null) return false;
+  const f = foreign ?? 0;
+  const i = institution ?? 0;
+  if (f < 0 && i < 0) return true;
+  return -(f + i) > CRASH_NET_SELL_THRESHOLD;
+}
+
 function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
   const { quote, tech, flow, context } = input;
   const hits: ShortTermHit[] = [];
-  const flowWeight = flow.source === "mock" ? 0.35 : 1;
-  const flowSuffix = flow.source === "mock" ? " (mock 가중치 축소)" : "";
+  // mock 수급은 해외 등 가짜 값 — 룰 전체 스킵 (가중치 0과 동일).
+  const flowWeight = flow.source === "mock" ? 0 : 1;
+  const flowSuffix = "";
 
   // 1) 단기 등락률
   //    한국 시장 상한가/하한가는 ±30%. ±29% 이상이면 별도 룰로 처리해
   //    단순 "+4% 이상 급등"과 다르게 점수 가산하고 reason에 명시.
   const r = quote.changeRate;
+  const crashBadFlow = isCrashWithBadFlow(r, flow);
   if (r >= 0.295) hits.push({ label: "상한가 도달 (+30%) — 시장경보 위험권", heat: 40, buy: -20, good: false });
   else if (r >= 0.04) hits.push({ label: "오늘 +4% 이상 급등", heat: 25, buy: -10, good: false });
   else if (r >= 0.02) hits.push({ label: "오늘 +2% 강세", heat: 10, buy: 0, good: true });
   else if (r <= -0.295) hits.push({ label: "하한가 도달 (-30%) — 단기 반등 vs 추가 하락 분기", heat: 0, buy: 25, good: true });
-  else if (r <= -0.03) hits.push({ label: "오늘 -3% 이상 급락", heat: -10, buy: 15, good: true });
+  else if (r <= -0.05) {
+    if (crashBadFlow) {
+      hits.push({
+        label: "급락 + 수급 악화 — 분할 매수 보류",
+        heat: 8,
+        buy: -12,
+        good: false,
+      });
+    } else {
+      hits.push({ label: "오늘 -5% 이상 급락", heat: -5, buy: 10, good: true });
+    }
+  } else if (r <= -0.03) {
+    hits.push({
+      label: "오늘 -3% 이상 급락",
+      heat: -10,
+      buy: 8,
+      good: true,
+    });
+  }
 
   // 2) RSI 과열/침체
   if (tech.rsi14 != null) {
@@ -99,8 +137,8 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
     if (tech.sma5 < tech.sma20 * 0.99) hits.push({ label: "단기 이평 하향 (5<20)", heat: -5, buy: -10, good: false });
   }
 
-  // 4) 외인 수급
-  if (flow.foreignNet != null) {
+  // 4) 외인 수급 — mock 이면 flowWeight=0 으로 전체 스킵
+  if (flowWeight > 0 && flow.foreignNet != null) {
     if (flow.foreignNet > 5e10) hits.push({ label: `외인 +500억 이상 순매수${flowSuffix}`, heat: Math.round(-5 * flowWeight), buy: Math.round(20 * flowWeight), good: true });
     else if (flow.foreignNet > 1e10) hits.push({ label: `외인 순매수${flowSuffix}`, heat: 0, buy: Math.round(10 * flowWeight), good: true });
     else if (flow.foreignNet < -5e10) hits.push({ label: `외인 -500억 이상 순매도${flowSuffix}`, heat: Math.round(5 * flowWeight), buy: Math.round(-20 * flowWeight), good: false });
@@ -108,7 +146,7 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
   }
 
   // 5) 기관 수급
-  if (flow.institutionNet != null) {
+  if (flowWeight > 0 && flow.institutionNet != null) {
     if (flow.institutionNet > 3e10) hits.push({ label: `기관 순매수${flowSuffix}`, heat: 0, buy: Math.round(10 * flowWeight), good: true });
     else if (flow.institutionNet < -3e10) hits.push({ label: `기관 순매도${flowSuffix}`, heat: 0, buy: Math.round(-10 * flowWeight), good: false });
   }
@@ -204,9 +242,9 @@ function evaluateShortTermRules(input: AnalyzeInput): ShortTermHit[] {
  *
  * 장중(REGULAR) — 우선순위 위→아래 (먼저 매치되는 branch 채택):
  *   - heat ≥ 80 & buy ≤ 35              → SELL    (과열 + 매수 약함)
- *   - buy ≥ 68 & heat ≤ 55              → BUY     (매수 강 + 과열 약)
+ *   - buy ≥ 62 & heat ≤ 55              → BUY     (매수 강 + 과열 약) — 경계 히스테리시스
  *   - buy ≥ 90 & heat ≤ 80              → ADD     (극강 매수면 과열 일부 무시)
- *   - buy ≥ 56 & heat ≤ 62              → ADD     (일반 매수 + 과열 보통 이하)
+ *   - buy ≥ 58 & heat ≤ 60              → ADD     (일반 매수 + 과열 보통 이하) — 경계 히스테리시스
  *   - heat ≥ 65 & buy < 60              → WATCH   (과열인데 매수 약)
  *   - buy ≤ 35 & heat ≤ 45              → WATCH   (매수 없음, 과열도 없음 — 무근거)
  *   - 그 외                              → HOLD
@@ -237,9 +275,9 @@ function decideShortTermSignal(
   // 강한 매수 근거가 있으면 과열만으로 바로 관망/축소로 밀지 않는다.
   if (isRegularMarket(marketState)) {
     if (heat >= 80 && buy <= 35) return "SELL";
-    if (buy >= 68 && heat <= 55) return "BUY";
+    if (buy >= 62 && heat <= 55) return "BUY";
     if (buy >= 90 && heat <= 80) return "ADD"; // 강한 매수 근거가 단기 과열을 덮음
-    if (buy >= 56 && heat <= 62) return "ADD";
+    if (buy >= 58 && heat <= 60) return "ADD";
     if (heat >= 65 && buy < 60) return "WATCH";
     if (buy <= 35 && heat <= 45) return "WATCH";
     return "HOLD";
@@ -823,11 +861,17 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
   }
   heat = clamp(heat);
   buy = clamp(buy);
-  const shortSignal = decideShortTermSignal(
+  let shortSignal = decideShortTermSignal(
     heat,
     buy,
     input.quote.marketState
   );
+  // 급락 + 수급 악화 — 단기 BUY/ADD/SELL 상한 WATCH
+  if (isCrashWithBadFlow(input.quote.changeRate, input.flow)) {
+    if (shortSignal === "BUY" || shortSignal === "ADD" || shortSignal === "SELL") {
+      shortSignal = "WATCH";
+    }
+  }
 
   // 장기
   const longHits = evaluateLongTermRules({

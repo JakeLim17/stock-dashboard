@@ -2,6 +2,7 @@
 
 import type { StockSnapshot } from "@/lib/types";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { DataQualityBadge, predictionQualityHint } from "./DataQualityBadge";
 import {
   currencyOf,
   fmtNumber,
@@ -46,15 +47,21 @@ export function PredictionBlock({
   const eventVol = p?.eventVolatility ?? null;
   const macroBetas = p?.macroBetas ?? null;
   const modelConfidence = p?.modelConfidence ?? null;
+  const dq = snap.dataQuality ?? null;
+  const qualityHint = predictionQualityHint({
+    dq,
+    modelConfidenceLabel: modelConfidence?.label ?? null,
+  });
+  const thinHistory = dq?.thinHistory === true;
 
-  // 데이터가 거의 없으면 렌더 스킵 — 카드가 비대해지지 않게.
+  // 데이터 부족·변동 구간 없음 — 카드가 비대해지지 않게 (얇은 히스토리는 안내만).
   const hasAny =
     !!oneDay ||
     !!oneWeek ||
     (intradayRange?.expectedRangePct ?? 0) > 0 ||
     !!p?.targets ||
     typeof buyStrength === "number";
-  if (!hasAny) return null;
+  if (!hasAny && !thinHistory && !qualityHint) return null;
 
   // 모델 라벨 — EWMA + (있으면) 매크로 베타 + VIX 게이팅 한 줄. 카드 폭 좁아 약어로.
   const modelLabel = (() => {
@@ -84,13 +91,14 @@ export function PredictionBlock({
           상세 분석 패널 컨센서스 탭에는 "증권사 컨센서스 · 장기 목표가" 라벨이 따로 있다.
           사용자가 카드의 손절/목표1과 컨센서스 목표가가 다른 시계임을 한눈에 인지하도록. */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-1">
           <div className="text-xs text-muted-foreground tracking-wide uppercase">
-            시스템 예측 · 단기
+            가격 변동 추정 · 단기
           </div>
           <div className="text-[10px] text-muted-foreground/70 leading-snug">
-            (1일 / 1주 — 컨센서스 탭의 장기 목표가와 다름)
+            (통계적 변동 참고 구간 — 방향 예측 아님)
           </div>
+          <DataQualityBadge dq={dq} />
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {eventVol && (
@@ -126,30 +134,40 @@ export function PredictionBlock({
         </div>
       </div>
 
-      {/* 1일/1주 예측 범위 */}
-      {(oneDay || oneWeek) && (
-        <div className="space-y-2">
-          {oneDay && (
-            <PredictionRangeRow
-              horizonLabel="1일 후"
-              currentPrice={snap.quote.price}
-              low={oneDay.low}
-              high={oneDay.high}
-              center={oneDay.center}
-              decimals={decimals}
-            />
-          )}
-          {oneWeek && (
-            <PredictionRangeRow
-              horizonLabel="1주 후"
-              currentPrice={snap.quote.price}
-              low={oneWeek.low}
-              high={oneWeek.high}
-              center={oneWeek.center}
-              decimals={decimals}
-            />
-          )}
-        </div>
+      {/* 1일/1주 변동 참고 구간 */}
+      {thinHistory ? (
+        <p className="text-[11px] text-warn leading-snug rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5">
+          데이터 부족 ({dq?.historyDays ?? 0}일) — 변동 참고 구간을 표시하지 않습니다.
+        </p>
+      ) : (
+        (oneDay || oneWeek) && (
+          <div className="space-y-2">
+            {oneDay && (
+              <PredictionRangeRow
+                horizonLabel="1일 후"
+                currentPrice={snap.quote.price}
+                low={oneDay.low}
+                high={oneDay.high}
+                center={oneDay.center}
+                decimals={decimals}
+              />
+            )}
+            {oneWeek && (
+              <PredictionRangeRow
+                horizonLabel="1주 후"
+                currentPrice={snap.quote.price}
+                low={oneWeek.low}
+                high={oneWeek.high}
+                center={oneWeek.center}
+                decimals={decimals}
+              />
+            )}
+          </div>
+        )
+      )}
+
+      {qualityHint && (
+        <p className="text-[10px] text-muted-foreground leading-snug">{qualityHint}</p>
       )}
 
       {/* 오늘 진폭 + 변동성 점수 한 줄 */}

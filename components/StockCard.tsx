@@ -10,12 +10,14 @@ import { MarketAlertBadge } from "./MarketAlertBadge";
 import { VolatilityBadge } from "./VolatilityBadge";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
+import { DataQualityBadge } from "./DataQualityBadge";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { CardSparkline } from "./CardSparkline";
 import { PredictionBlock } from "./PredictionBlock";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
+import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
 import {
   changeColor,
@@ -30,15 +32,6 @@ import {
   priceTimeLabel,
 } from "@/lib/utils";
 import { TrendingDown, TrendingUp, Minus, Loader2 } from "lucide-react";
-
-// 단기·장기 시그널 → 사용자 표시 라벨/색 (상세 영역에서만 사용)
-const SIGNAL_LABEL: Record<string, string> = {
-  BUY: "신규 매수",
-  ADD: "분할 추매",
-  HOLD: "보유 유지",
-  WATCH: "관망",
-  SELL: "비중 축소",
-};
 
 // 카드 우측 고저가 라벨용 정확 금액 포맷.
 // 사용자 요청 — 축약 단위("1.84M")가 아닌 천단위 콤마("1,840,000") 로 정확 표기.
@@ -147,6 +140,7 @@ export function StockCard({
             <Badge variant={market.variant}>{market.label}</Badge>
             {/* 한국거래소 시장경보 — 헤더에서 한눈에 보이도록 시장 상태 배지 옆에 노출 */}
             <MarketAlertBadge alert={quote.marketAlert} />
+            <DataQualityBadge dq={snap.dataQuality} />
             {/* 시그널 마크 — 신고가/거래량폭발/외인픽 등 한눈에 보이는 신호. 자리가 좁으면 wrap. */}
             <SignalMarkBadges marks={snap.signalMarks} size="sm" />
             {/* 7일 이내 가격 이벤트(실적/배당) D-N — 임박 알림용. 7일 초과는 EventCalendar에서만. */}
@@ -281,7 +275,7 @@ export function StockCard({
           {analysisPending ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-              <span>예측·수급·배지 분석 중…</span>
+              <span>가격 변동·수급·배지 분석 중…</span>
             </div>
           ) : (
             <>
