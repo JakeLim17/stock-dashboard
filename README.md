@@ -14,7 +14,7 @@
 - **펀더멘털 보강**: Yahoo `quoteSummary` + 네이버 `integration` 으로 컨센서스 목표주가·애널리스트 분포·PER/PBR/52주·리서치 노트까지 룰과 UI에 정식 반영 (단기 기술 신호만이 아닌 장기 컨센서스도 함께 본다)
 - **Provider 패턴**: Yahoo / Naver / KIS / 뉴스 RSS 각각 모듈화 — 나중에 교체 쉬움
 - **컨센서스 캐시**: 6시간 메모리 TTL (`lib/providers/consensusCache.ts`). 5~15초 시세 갱신마다 컨센서스를 재호출하지 않아 차단 위험·비용 최소화
-- **다크/라이트 토글**, 자동 새로고침(소스/장상태 연동: Yahoo 장중 10초·비장중 120초, KIS 장중 2초·비장중 30초), 빈상태/에러 처리
+- **다크/라이트 토글**, 자동 새로고침(소스/장상태 연동: Yahoo 장중 5초·시간외 30초·비장중 180초, KIS 장중 5초·시간외 30초·비장중 120초), 빈상태/에러 처리
 
 ## 빠른 시작
 
@@ -62,7 +62,7 @@ stock-dashboard/
 │       └── refresh/          # POST /api/refresh    - 수동 새로고침
 ├── components/
 │   ├── ui/{Card,Badge}.tsx   # 가벼운 자체 UI 키트
-│   ├── DashboardClient.tsx   # 전체 조립 + 60s polling
+│   ├── DashboardClient.tsx   # 전체 조립 + 장상태·소스 연동 폴링 (기본 장중 5s)
 │   ├── SummaryBar.tsx        # 상단 요약 바
 │   ├── StockCard.tsx         # 관심종목 카드
 │   ├── MarketPanel.tsx       # 시장 신호 패널
@@ -105,7 +105,7 @@ buildSnapshot()
  └─ saveQuote / saveFlow / saveTech / saveAnalysis / saveNews
        │
        ▼
-DashboardClient (60s polling)
+DashboardClient (장상태·소스 연동 폴링, 기본 장중 5s)
  ├─ SummaryBar      ── 시간 · 분위기 · 반도체 과열 · 환율 · 뉴스 수
  ├─ AnalysisBox     ── "지금 추격매수 위험" 같은 한 줄 결론
  ├─ PriceChart      ── 1주/1개월/3개월 토글

@@ -2,18 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
+import {
+  LOADING_FOOTER_FULL,
+  LOADING_STAGES_FULL,
+  LOADING_WAIT_HINT,
+} from "@/lib/loadingMessages";
 
 // 단계 메시지 — 약 1.4초 간격으로 순환. 마지막 단계는 데이터가 늦어질 때 그대로 유지.
 // "지금 무엇을 하고 있는지" 사용자에게 시각적으로 안내해 체감 대기 시간을 줄인다.
-const STAGES = [
-  "시장 지표 받는 중...",
-  "관심 종목 시세 수집 중...",
-  "수급(외인·기관) 분석 중...",
-  "컨센서스 정리 중...",
-  "뉴스 수집 중...",
-  "예측·차트 계산 중...",
-  "마무리 중...",
-] as const;
+const STAGES = LOADING_STAGES_FULL;
 
 const STAGE_INTERVAL_MS = 1400;
 // 콜드 스타트(스냅샷 6종목) 실측 ~20s까지 가는 경우가 있어 경과 초를 함께 표시.
@@ -66,7 +63,7 @@ export function LoadingScreen() {
               <span className="font-semibold text-foreground mr-1">{elapsed}</span>초 경과
             </span>
             <span className="opacity-70">
-              데이터를 모두 받을 때까지 잠시만 기다려주세요.
+              {LOADING_WAIT_HINT}
             </span>
           </div>
         </div>
@@ -82,7 +79,7 @@ export function LoadingScreen() {
         </div>
 
         <p className="text-[11px] text-muted-foreground opacity-70">
-          첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다.
+          {LOADING_FOOTER_FULL}
         </p>
       </div>
 

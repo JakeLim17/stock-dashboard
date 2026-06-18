@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Activity, Loader2 } from "lucide-react";
+import {
+  LOADING_FOOTER_FULL,
+  LOADING_FOOTER_LITE,
+  LOADING_STAGES_FULL,
+  LOADING_STAGES_LITE,
+} from "@/lib/loadingMessages";
 
 // DashboardSkeleton 상단에 띄우는 "지금 무엇을 하고 있는지" 라이브 배너.
 // 첫 진입(또는 새로고침) 후 /api/snapshot 응답이 도착하기 전까지
@@ -15,21 +21,8 @@ import { Activity, Loader2 } from "lucide-react";
 // 데이터가 도착하면 부모(DashboardShell)가 통째로 DashboardClient 로 교체하므로
 // 별도 종료 로직 없이 그대로 unmount 된다.
 
-const STAGES_LITE = [
-  "시장 지표 받는 중...",
-  "관심 종목 시세 수집 중...",
-  "카드 표시 준비 중...",
-] as const;
-
-const STAGES_FULL = [
-  "시장 지표 받는 중...",
-  "관심 종목 시세 수집 중...",
-  "수급(외인·기관) 분석 중...",
-  "컨센서스 정리 중...",
-  "뉴스 수집 중...",
-  "예측·차트 계산 중...",
-  "마무리 중...",
-] as const;
+const STAGES_LITE = LOADING_STAGES_LITE;
+const STAGES_FULL = LOADING_STAGES_FULL;
 
 const STAGE_INTERVAL_MS = 1600;
 
@@ -82,9 +75,7 @@ export function SkeletonStageBanner({
             {message}
           </p>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            {phase === "lite"
-              ? "시세·카드를 먼저 보여 드리고, 예측·추천·뉴스는 뒤에서 채웁니다."
-              : "첫 진입은 데이터 수집으로 수초 ~ 수분 걸릴 수 있어요. 이후엔 자동 갱신됩니다."}
+            {phase === "lite" ? LOADING_FOOTER_LITE : LOADING_FOOTER_FULL}
           </p>
         </div>
         <span className="tabular text-[11px] text-muted-foreground inline-flex items-center px-2 py-0.5 rounded-full border border-border bg-card shrink-0">

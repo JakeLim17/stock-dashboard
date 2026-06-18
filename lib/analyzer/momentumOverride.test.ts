@@ -100,6 +100,36 @@ describe("momentumOverride", () => {
     assert.equal(m.active, false);
   });
 
+  it("naver fallback(어제 bizdate) 수급이면 override 비활성", () => {
+    const m = detectMomentumOverride(
+      baseInput({
+        flow: {
+          source: "naver",
+          foreignNet: 80_000_000_000,
+          institutionNet: 20_000_000_000,
+          individualNet: -100_000_000_000,
+          foreignNet5d: 320_000_000_000,
+          bizdate: "20260617",
+        },
+      })
+    );
+    assert.equal(m.active, false);
+  });
+
+  it("kis-unavailable 수급이면 override 비활성", () => {
+    const m = detectMomentumOverride(
+      baseInput({
+        flow: {
+          source: "kis-unavailable",
+          foreignNet: null,
+          institutionNet: null,
+          individualNet: null,
+        },
+      })
+    );
+    assert.equal(m.active, false);
+  });
+
   it("점수 보정 후 HOLD→ADD 상향 + verdict 관망→추세 추종", () => {
     const momentum = {
       active: true,
@@ -131,6 +161,23 @@ describe("momentumOverride", () => {
     );
     assert.equal(verdict.action, "SCALE_IN");
     assert.equal(verdict.label, "과열 추세");
+    assert.equal(verdict.tone, "add");
     assert.ok(verdict.momentumOverride);
+
+    const shortTrade = applyMomentumVerdict(
+      {
+        action: "AVOID",
+        label: "관망",
+        headline: "방향성 불명확 — 관망",
+        tone: "watch",
+        detail: "단기 WATCH · 장기 SELL",
+      },
+      "ADD",
+      "SELL",
+      momentum,
+      { semiHeat: 78, heat: 65, buy: 62 }
+    );
+    assert.equal(shortTrade.action, "SHORT_TRADE");
+    assert.equal(shortTrade.tone, "watch");
   });
 });

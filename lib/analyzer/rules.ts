@@ -701,7 +701,7 @@ function actionMeta(
     case "SHORT_TRADE":
       return {
         label: "짧게 매매",
-        tone: "add",
+        tone: "watch",
         headline: "단기 모멘텀 살아있으나 장기 고평가 — 짧게 가져갈 것",
       };
     case "TRIM":

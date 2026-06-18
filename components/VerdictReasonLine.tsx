@@ -11,7 +11,7 @@ export function VerdictReasonLine({
   if (!line) return null;
   return (
     <span
-      className={`text-[10px] leading-tight text-muted-foreground max-w-[220px] truncate block ${
+      className={`text-[10px] leading-snug text-muted-foreground max-w-[220px] line-clamp-2 block ${
         className ?? ""
       }`}
       title={line}

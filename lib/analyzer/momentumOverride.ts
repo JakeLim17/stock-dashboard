@@ -56,8 +56,13 @@ function volumeRatio(history: HistoricalPoint[], quote: Quote): number | null {
   return quote.volume / avg;
 }
 
+/** KIS 실시간 수급만 모멘텀 override 에 사용 (mock·naver·kis-unavailable 제외). */
+function isKisRealFlow(flow: FlowData): boolean {
+  return flow.source === "kis";
+}
+
 function hasPositiveFlow(flow: FlowData): boolean {
-  if (flow.source === "mock") return false;
+  if (!isKisRealFlow(flow)) return false;
   const f = flow.foreignNet ?? 0;
   const i = flow.institutionNet ?? 0;
   return f > 0 || i > 0;
@@ -79,7 +84,7 @@ function markKeysFromInput(
   if (
     flow.foreignNet5d != null &&
     flow.foreignNet5d >= 5_000_000_000 &&
-    flow.source !== "mock"
+    isKisRealFlow(flow)
   ) {
     keys.add("foreign_pick");
   }
@@ -125,7 +130,7 @@ export function detectMomentumOverride(
   };
 
   const { quote, flow, valuation, context, history } = input;
-  if (flow.source === "mock") return inactive;
+  if (!isKisRealFlow(flow)) return inactive;
   if (!hasPositiveFlow(flow)) return inactive;
 
   const marks = markKeysFromInput(quote, history, flow, valuation);
@@ -197,7 +202,7 @@ export function detectMomentumFromMarks(
   flow: FlowData,
   quote: Quote
 ): Pick<MomentumOverrideResult, "active" | "reasons"> {
-  if (flow.source === "mock" || !hasPositiveFlow(flow)) {
+  if (!isKisRealFlow(flow) || !hasPositiveFlow(flow)) {
     return { active: false, reasons: [] };
   }
   const keys = new Set(marks.map((m) => m.key));
@@ -283,7 +288,7 @@ export function applyMomentumVerdict(
     return {
       action: "SHORT_TRADE",
       label: "모멘텀 주의",
-      tone: "add",
+      tone: "watch",
       headline: "단기 돌파·수급 강세 — 짧은 추세 추종만 참고",
       detail: verdict.detail,
       reasonLine,
