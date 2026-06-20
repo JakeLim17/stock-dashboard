@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { StockSnapshot } from "@/lib/types";
+import type { OverseasNightIndicator, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { PriceWithKrw } from "./PriceWithKrw";
@@ -88,6 +88,7 @@ export function PredictionPanel({
 
   const p = snap.predictions;
   const price = snap.quote.price;
+  const night = snap.overseasNight;
 
   if (!p) {
     if (embedded) {
@@ -160,11 +161,11 @@ export function PredictionPanel({
           <SummaryCard
             label="해외 환산"
             value={
-              p.nightSignal?.impliedKrwPrice
-                ? fmtNumber(p.nightSignal.impliedKrwPrice)
+              night?.impliedKrwPrice
+                ? fmtNumber(night.impliedKrwPrice)
                 : "OFF/없음"
             }
-            color={p.nightSignal ? changeColor(p.nightSignal.premiumRate) : ""}
+            color={night ? changeColor(night.premiumRate) : ""}
           />
           <SummaryCard
             label="밸류 위험"
@@ -189,7 +190,7 @@ export function PredictionPanel({
           )}
         </div>
 
-        {p.nightSignal && <NightValuationCard signal={p.nightSignal} />}
+        {night && <NightValuationCard signal={night} />}
 
         <details
           className="rounded-xl border border-border bg-muted/20 p-3"
@@ -558,16 +559,14 @@ function StockSelector({
   );
 }
 
-type NightSignal = NonNullable<
-  NonNullable<StockSnapshot["predictions"]>["nightSignal"]
->;
+type NightSignal = OverseasNightIndicator;
 
 function NightValuationCard({ signal }: { signal: NightSignal }) {
   const premium = signal.premiumRate;
   const state = nightMarketState(signal.marketState);
   const staleMs =
-    signal.time && signal.marketState?.toUpperCase() === "REGULAR"
-      ? Date.now() - signal.time
+    signal.priceTime && signal.marketState?.toUpperCase() === "REGULAR"
+      ? Date.now() - signal.priceTime
       : 0;
   const isDelayed = staleMs > 15 * 60 * 1000;
   const isEur = signal.currency?.toUpperCase() === "EUR";
@@ -584,12 +583,12 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
             {state.label}
           </Badge>
           <div className="text-sm text-muted-foreground">
-            {signal.label} · {signal.source}
+            {signal.name} · {signal.exchange}
           </div>
         </div>
         <div className="text-right text-[11px] text-muted-foreground tabular whitespace-nowrap">
           {signal.fetchedAt && <div>조회 {fmtRelative(signal.fetchedAt)}</div>}
-          {signal.time && <div>체결 {fmtRelative(signal.time)}</div>}
+          {signal.priceTime && <div>체결 {fmtRelative(signal.priceTime)}</div>}
         </div>
       </div>
 
@@ -632,8 +631,8 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
         <MiniMetric label="USDKRW" value={fmtNumber(signal.usdKrw, 0)} />
         <MiniMetric
           label="GDR 등락"
-          value={fmtPercent(signal.expectedRate)}
-          color={changeColor(signal.expectedRate)}
+          value={fmtPercent(signal.changeRate)}
+          color={changeColor(signal.changeRate)}
         />
       </div>
 

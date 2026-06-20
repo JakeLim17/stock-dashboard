@@ -435,31 +435,13 @@ export interface Predictions {
     label: "낮음" | "보통" | "주의" | "높음";
     reasons: string[];
   } | null;
-  // 해외 GDR/DR 등 개별 야간 참고 지표. 토글이 켜졌을 때만 채움.
-  nightSignal?: {
-    label: string;
-    expectedRate: number;
-    source: string;
-    price: number;
-    currency?: string;
-    sharesPerReceipt?: number;
-    fxToKrw?: number | null;
-    usdKrw?: number | null;
-    eurUsd?: number | null;
-    impliedKrwPrice?: number | null;
-    krxClose?: number | null;
-    premiumRate?: number | null;
-    marketState?: string;
-    time?: number | null;
-    fetchedAt?: number;
-  } | null;
   // 신호 강도 (양방향 0~100)
   strength: {
     buy: number;
     sell: number;
   };
   // 1일(오늘) 진폭 예측 — ATR(14) 또는 GBM σ 기반의 예상 high/low 밴드.
-  // PredictionHero 한 줄 노출, StockCard "예상 변동 범위" 박스에 사용.
+  // StockCard "예상 변동 범위" 박스에 사용.
   // 분봉 어댑터가 살아 있고 장중이면 intraday Parkinson vol을 가중해 정밀화한다.
   intradayRange?: {
     expectedHigh: number;

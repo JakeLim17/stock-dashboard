@@ -721,6 +721,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             <StockCard
               snap={p}
               selected={p.meta.code === selected}
+              detailActive={p.meta.code === selected}
               analysisPending={analysisPending}
               onSelect={(code) => {
                 setSelected(code);

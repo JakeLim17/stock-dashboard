@@ -1,4 +1,70 @@
-import type { StockSnapshot } from "./types";
+import type { Quote, StockSnapshot } from "./types";
+
+/** Ticker 자체 추정가 — GDR·σ드리프트·현재가 가중 혼합 (kospilab Binance 방식 아님) */
+export interface FairValueEstimate {
+  price: number;
+  /** 전일 종가 대비 */
+  vsCloseRate: number;
+  /** 현재가 대비 */
+  vsLiveRate: number;
+  methodLabel: string;
+  detail: string;
+}
+
+function isKrMarketClosed(quote: Quote): boolean {
+  const s = (quote.marketState ?? "").toUpperCase();
+  return (
+    s === "PREPRE" ||
+    s === "POSTPOST" ||
+    s === "CLOSED" ||
+    s === "PRE"
+  );
+}
+
+/** 우리식 추정가 — overseasNight(GDR) + predictions.ranges 중심 + 현재가 블렌드 */
+export function buildFairValueEstimate(
+  snap: StockSnapshot
+): FairValueEstimate | null {
+  const { quote, overseasNight, predictions } = snap;
+  const live = quote.price;
+  const prevClose = quote.prevClose;
+  if (!live || live <= 0 || !prevClose || prevClose <= 0) return null;
+
+  const oneDay = predictions?.ranges.find((r) => r.horizonDays === 1);
+  const driftCenter = oneDay?.center ?? live;
+  const gdr = overseasNight?.impliedKrwPrice ?? null;
+  const closed = isKrMarketClosed(quote);
+
+  let price: number;
+  let methodLabel: string;
+  let detail: string;
+
+  if (gdr != null && gdr > 0) {
+    if (closed) {
+      price = gdr * 0.55 + driftCenter * 0.3 + live * 0.15;
+      methodLabel = "야간 혼합";
+      detail = "GDR 55% · σ드리프트 30% · 종가 15%";
+    } else {
+      price = gdr * 0.25 + driftCenter * 0.35 + live * 0.4;
+      methodLabel = "장중 혼합";
+      detail = "GDR 25% · σ드리프트 35% · 현재가 40%";
+    }
+  } else if (oneDay) {
+    price = driftCenter * 0.4 + live * 0.6;
+    methodLabel = "σ 드리프트";
+    detail = "1일 통계 중심 40% · 현재가 60%";
+  } else {
+    return null;
+  }
+
+  return {
+    price: Math.round(price),
+    vsCloseRate: price / prevClose - 1,
+    vsLiveRate: price / live - 1,
+    methodLabel,
+    detail,
+  };
+}
 
 /** TP2 산출 근거 한국어 라벨 */
 export function takeProfit2SourceLabel(

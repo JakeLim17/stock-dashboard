@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { NewsItem, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
@@ -247,9 +247,7 @@ function FlowTab({
   );
 }
 
-// 뉴스 탭 — 종목 한정 24시간 뉴스.
-// - 매칭은 한·영 키워드 기반 isNewsRelated() 로 (워커A).
-// - 표시는 titleKo(번역본) 우선 + 원문 작은 회색 병기 (워커B).
+// 뉴스 탭 — snapshot.news 에서 종목 필터 (별도 API 재호출 없음).
 function NewsTab({
   snap,
   allNews,
@@ -258,39 +256,10 @@ function NewsTab({
   allNews: NewsItem[];
 }) {
   const { meta } = snap;
-  const [perCodeNews, setPerCodeNews] = useState<NewsItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setPerCodeNews(null);
-    fetch(`/api/news?symbols=${encodeURIComponent(meta.code)}`, {
-      credentials: "include",
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((j) => {
-        if (cancelled) return;
-        const items: NewsItem[] = Array.isArray(j?.items) ? j.items : [];
-        setPerCodeNews(items);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setPerCodeNews([]);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [meta.code]);
 
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  // 종목별 fetch 결과가 도착하면 그것을 우선, 아직 없으면 snapshot.news + isNewsRelated 폴백.
-  const baseNews =
-    perCodeNews ??
-    allNews.filter((n) => isNewsRelated(n, meta.code, meta.name));
-  const news = baseNews
+  const news = allNews
+    .filter((n) => isNewsRelated(n, meta.code, meta.name))
     .filter((n) => n.publishedAt >= cutoff)
     .sort((a, b) => b.publishedAt - a.publishedAt)
     .slice(0, 10);
@@ -301,11 +270,7 @@ function NewsTab({
         {meta.name} 관련 뉴스 · 24h
       </h4>
       <div className="rounded-lg border border-border bg-muted/20 p-3 max-h-96 overflow-y-auto">
-        {loading && news.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">
-            뉴스 불러오는 중…
-          </p>
-        ) : news.length === 0 ? (
+        {news.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
             최근 24시간 내 종목 관련 뉴스가 없습니다.
           </p>

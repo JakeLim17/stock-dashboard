@@ -19,6 +19,7 @@ import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
+import { buildFairValueEstimate } from "@/lib/prediction-display";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
 import {
@@ -64,6 +65,8 @@ export function StockCard({
   tradeOverride,
   analysisPending = false,
   marketSemiHeat,
+  /** 상세 패널/시트가 열려 같은 종목 — 중복 블록 숨김 */
+  detailActive = false,
 }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -76,6 +79,7 @@ export function StockCard({
   analysisPending?: boolean;
   /** 시장 전체 반도체 과열 — verdict 근거 bullet용 */
   marketSemiHeat?: number | null;
+  detailActive?: boolean;
   /**
    * Phase 1 — KIS WebSocket H0STCNT0(체결가) 실시간 override.
    * 정규장 진행 중일 때만 적용. 등락은 `quote.prevClose` 로 즉석 재계산.
@@ -88,6 +92,7 @@ export function StockCard({
   tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
 }) {
   const { meta, quote, tech, analysis, consensus } = snap;
+  const fairValue = buildFairValueEstimate(snap);
 
   // 메인 가격 — "지금 진행 중인 거래"가 있으면 그게 메인.
   // secondary(시간외 vs 정규장 종가)는 StockFundamentalsBlock에서 자동 노출.
@@ -154,8 +159,8 @@ export function StockCard({
             <ShortBalanceBadge short={snap.shortBalance} />
           </div>
         </div>
-        {/* 메인 결론 — 단·장기 통합 verdict. 카드 한눈 스캔용.
-            tone === "sell" 이면 위험 결론 — shake-warn 으로 시선 끌기. */}
+        {/* 메인 결론 — detailActive 시 상세 패널과 중복이라 숨김 */}
+        {!detailActive && (
         <div className="inline-flex flex-col items-end gap-0.5 shrink-0">
           <div className="inline-flex items-center gap-1.5">
             <Badge
@@ -174,6 +179,7 @@ export function StockCard({
             className="text-right max-w-[220px]"
           />
         </div>
+        )}
       </CardHeader>
       <CardBody className="space-y-4">
         {/* 가격 + 인라인 sparkline.
@@ -221,6 +227,22 @@ export function StockCard({
                 </span>
               </div>
             </div>
+            {fairValue && !analysisPending && (
+              <div className="mt-2 rounded-lg border border-border/80 bg-muted/30 px-3 py-2">
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                  Ticker 추정가 · {fairValue.methodLabel}
+                </div>
+                <div className={`tabular text-lg font-bold mt-0.5 ${changeColor(fairValue.vsCloseRate)}`}>
+                  {fmtNumber(fairValue.price, currency === "USD" ? 2 : 0)}
+                </div>
+                <div className="text-[11px] text-muted-foreground tabular mt-0.5 flex flex-wrap gap-x-2">
+                  <span className={changeColor(fairValue.vsCloseRate)}>
+                    종가 대비 {fmtSigned(fairValue.vsCloseRate * quote.prevClose)} ({fmtPercent(fairValue.vsCloseRate)})
+                  </span>
+                  <span className="text-muted-foreground/80">· {fairValue.detail}</span>
+                </div>
+              </div>
+            )}
             {primary.isExtended && primary.isLive ? (
               <div className="text-[11px] mt-1 tabular flex items-center gap-1.5 flex-wrap">
                 <span
@@ -267,8 +289,8 @@ export function StockCard({
             ) : null}
         </div>
 
-        {/* 펀더멘털 블록 — 시간외 secondary + 거래량/RSI + 수급(외인/기관/개인 당일·5일·출처).
-            StockDetailPanel "수급" 탭과 동일 컴포넌트 재사용. */}
+        {/* 펀더멘털 — detailActive 시 수급 탭과 중복 */}
+        {!detailActive && (
         <StockFundamentalsBlock
           snap={snap}
           krwRate={krwRate}
@@ -277,9 +299,16 @@ export function StockCard({
           tradeOverride={tradeOverride}
           analysisPending={analysisPending}
         />
-        
+        )}
 
-        {/* 분석 — Phase B 전에는 placeholder. full 도착 후 verdict·배지·예측 노출. */}
+        {detailActive && (
+          <p className="text-[11px] text-muted-foreground text-center py-1">
+            예측·컨센서스·수급은 상세 패널에서 확인
+          </p>
+        )}
+
+        {/* 분석 — detailActive 시 상세 패널 헤더와 중복 */}
+        {!detailActive && (
         <div className="border-t border-border pt-3 space-y-2">
           <div className="text-xs text-muted-foreground tracking-wide uppercase">
             분석
@@ -350,12 +379,13 @@ export function StockCard({
             </>
           )}
         </div>
+        )}
 
-        {!analysisPending && (
+        {!analysisPending && !detailActive && (
           <PredictionBlock snap={snap} krwRate={krwRate} />
         )}
 
-        {!analysisPending && consensus && consensus.targetMean != null && (
+        {!analysisPending && !detailActive && consensus && consensus.targetMean != null && (
           <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
             {consensus.domesticMean != null &&
               (consensus.domesticCount ?? 0) > 0 && (

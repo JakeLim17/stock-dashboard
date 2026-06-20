@@ -657,25 +657,6 @@ export function predict(input: PredictorInput): Predictions {
     targets,
     scenarios,
     valuation: valuationRisk(quote.valuation),
-    nightSignal: overseasNight
-      ? {
-          label: overseasNight.name,
-          expectedRate: overseasNight.changeRate,
-          source: overseasNight.exchange,
-          price: overseasNight.price,
-          currency: overseasNight.currency,
-          sharesPerReceipt: overseasNight.sharesPerReceipt,
-          fxToKrw: overseasNight.fxToKrw,
-          usdKrw: overseasNight.usdKrw,
-          eurUsd: overseasNight.eurUsd,
-          impliedKrwPrice: overseasNight.impliedKrwPrice,
-          krxClose: overseasNight.krxClose,
-          premiumRate: overseasNight.premiumRate,
-          marketState: overseasNight.marketState,
-          time: overseasNight.priceTime,
-          fetchedAt: overseasNight.fetchedAt,
-        }
-      : null,
     strength: {
       buy: Math.round(buyStrength),
       sell: Math.round(sellStrength),
