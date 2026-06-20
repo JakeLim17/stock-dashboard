@@ -7,11 +7,10 @@ export const FAIR_VALUE_WEIGHTS = {
   noGdr: { drift: 0.45, live: 0.55 },
 } as const;
 
-/** 백테스트 요약 — 삼성전자+SMSN.IL 92샘플 (scripts/backtest-fair-value.ts) */
+/** 백테스트 요약 — 삼성전자+SMSN.IL 92샘플 */
 export const FAIR_VALUE_BACKTEST_META = {
   symbol: "005930.KS",
   samples: 92,
-  openToClose: { mape: 0.0216, direction: 0.837 },
   nightToNextClose: { mape: 0.0288, direction: 0.87 },
   nightToNextOpen: { mape: 0.0253, direction: 0.913 },
 } as const;
@@ -25,6 +24,14 @@ export type FairValueWeights = {
   noGdr: FairValueWeightPair;
 };
 
+export interface SettlementContext {
+  settlementPrice: number;
+  prevSettlement: number;
+  ready: boolean;
+  pendingReason?: string;
+  settlementLabel: string;
+}
+
 export interface FairValueInput {
   live: number;
   prevClose: number;
@@ -34,13 +41,113 @@ export interface FairValueInput {
   weights?: FairValueWeights;
 }
 
-/** Ticker 자체 추정가 — GDR·σ드리프트·현재가 가중 혼합 */
 export interface FairValueEstimate {
   price: number;
-  vsCloseRate: number;
-  vsLiveRate: number;
+  /** 오늘 최종 기준가(앱장 포함) 대비 */
+  vsSettlementRate: number;
+  settlementPrice: number;
+  settlementLabel: string;
   methodLabel: string;
   detail: string;
+  ready: true;
+}
+
+export interface FairValuePending {
+  ready: false;
+  pendingReason: string;
+  settlementLabel?: string;
+}
+
+export type FairValueResult = FairValueEstimate | FairValuePending;
+
+function isKrStockCode(code: string): boolean {
+  return /^\d{6}\.K[SQ]$/.test(code);
+}
+
+/** KST 기준 앱장(시간외 단일가) 거래 시간대 — 평일 15:30~18:00 */
+function isKrAfterHoursWindow(now = new Date()): boolean {
+  const kst = new Date(
+    now.toLocaleString("en-US", { timeZone: "Asia/Seoul" })
+  );
+  const day = kst.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = kst.getHours() * 60 + kst.getMinutes();
+  return mins >= 15 * 60 + 30 && mins < 18 * 60;
+}
+
+/**
+ * 오늘 "진짜 종가" — 정규장 15:30이 아니라 앱장(시간외 단일가)까지 끝난 뒤 확정가.
+ * 익일 추정가는 ready=true 일 때만 산출한다.
+ */
+export function getSettlementContext(
+  quote: Quote,
+  code: string
+): SettlementContext {
+  const state = (quote.marketState ?? "").toUpperCase();
+  const ext = quote.extendedHours ?? null;
+  const regular = quote.price;
+  const prev = quote.prevClose;
+  const isKr = isKrStockCode(code);
+
+  if (state === "REGULAR") {
+    return {
+      settlementPrice: regular,
+      prevSettlement: prev,
+      ready: false,
+      pendingReason: "장중 — 앱장 마감 후 익일 추정가 공개",
+      settlementLabel: "정규장",
+    };
+  }
+
+  if (ext?.active) {
+    return {
+      settlementPrice: ext.price,
+      prevSettlement: prev,
+      ready: false,
+      pendingReason:
+        ext.session === "kr-after"
+          ? "앱장 거래중 — 확정 후 익일 추정가 공개"
+          : "시간외 거래중 — 확정 후 익일 추정가 공개",
+      settlementLabel:
+        ext.session === "kr-after" ? "앱장" : "시간외",
+    };
+  }
+
+  // 앱장·장전 시간외 종료 — kr-after 종가가 오늘 최종 기준가
+  if (ext && !ext.active) {
+    const afterClose =
+      ext.session === "kr-after" || ext.session === "post"
+        ? ext.price
+        : regular;
+    return {
+      settlementPrice: afterClose,
+      prevSettlement: prev,
+      ready: true,
+      settlementLabel:
+        ext.session === "kr-after"
+          ? "앱장 종가"
+          : ext.session === "post"
+            ? "애프터마켓 종가"
+            : "정규장 종가",
+    };
+  }
+
+  if (isKr && isKrAfterHoursWindow()) {
+    return {
+      settlementPrice: regular,
+      prevSettlement: prev,
+      ready: false,
+      pendingReason: "앱장 데이터 수집 중 — 종가 확정 후 공개",
+      settlementLabel: "정규장 종가(임시)",
+    };
+  }
+
+  return {
+    settlementPrice: regular,
+    prevSettlement: prev,
+    ready: true,
+    settlementLabel: "정규장 종가",
+  };
 }
 
 export function isKrMarketClosed(quote: Quote): boolean {
@@ -92,25 +199,45 @@ export function blendFairValuePrice(input: FairValueInput): {
 export function buildFairValueEstimate(
   snap: StockSnapshot,
   weights?: FairValueWeights
-): FairValueEstimate | null {
-  const { quote, overseasNight, predictions } = snap;
+): FairValueResult {
+  const { quote, overseasNight, predictions, meta } = snap;
+  const settlement = getSettlementContext(quote, meta.code);
+
+  if (!settlement.ready) {
+    return {
+      ready: false,
+      pendingReason: settlement.pendingReason ?? "종가 확정 대기",
+      settlementLabel: settlement.settlementLabel,
+    };
+  }
+
   const oneDay = predictions?.ranges.find((r) => r.horizonDays === 1);
-  const driftCenter = oneDay?.center ?? quote.price;
+  const driftCenter = oneDay?.center ?? settlement.settlementPrice;
 
   const blended = blendFairValuePrice({
-    live: quote.price,
-    prevClose: quote.prevClose,
+    live: settlement.settlementPrice,
+    prevClose: settlement.prevSettlement,
     driftCenter,
     gdrImpliedKrw: overseasNight?.impliedKrwPrice,
     marketClosed: isKrMarketClosed(quote),
     weights,
   });
-  if (!blended) return null;
+
+  if (!blended) {
+    return {
+      ready: false,
+      pendingReason: "예측 데이터 부족",
+      settlementLabel: settlement.settlementLabel,
+    };
+  }
 
   return {
+    ready: true,
     price: blended.price,
-    vsCloseRate: blended.price / quote.prevClose - 1,
-    vsLiveRate: blended.price / quote.price - 1,
+    vsSettlementRate:
+      blended.price / settlement.settlementPrice - 1,
+    settlementPrice: settlement.settlementPrice,
+    settlementLabel: settlement.settlementLabel,
     methodLabel: blended.methodLabel,
     detail: blended.detail,
   };

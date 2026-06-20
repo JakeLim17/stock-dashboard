@@ -3,10 +3,15 @@ import type { StockSnapshot } from "./types";
 export {
   buildFairValueEstimate,
   blendFairValuePrice,
+  getSettlementContext,
   isKrMarketClosed,
   FAIR_VALUE_WEIGHTS,
+  FAIR_VALUE_BACKTEST_META,
   type FairValueEstimate,
+  type FairValuePending,
+  type FairValueResult,
   type FairValueWeights,
+  type SettlementContext,
 } from "./fair-value";
 
 /** TP2 산출 근거 한국어 라벨 */

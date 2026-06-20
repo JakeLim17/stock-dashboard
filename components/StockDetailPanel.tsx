@@ -4,18 +4,10 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { NewsItem, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { SignalDetailBadges } from "./SignalDetailBadges";
-import { RiskBadge } from "./RiskBadge";
-import { OpportunityBadge } from "./OpportunityBadge";
-import { MarketAlertBadge } from "./MarketAlertBadge";
-import { VolatilityBadge } from "./VolatilityBadge";
 import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { AskingPricePanel } from "./AskingPricePanel";
-import { VerdictHint } from "./VerdictHint";
-import { VerdictReasonLine } from "./VerdictReasonLine";
-import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { fmtRelative } from "@/lib/utils";
 import { isNewsRelated } from "@/lib/news/symbolKeywords";
@@ -68,7 +60,7 @@ interface Props {
   mobileSheet?: boolean;
   // Phase 3 — KIS WS H0STASP0 호가 실시간. 있으면 AskingPricePanel 에 우선 표시.
   aspOverride?: RealtimeAspEntry | null;
-  /** 시장 전체 반도체 과열 — verdict 근거 bullet용 */
+  /** @deprecated 카드에서 제거 — 상세 탭 내부에서만 사용 */
   marketSemiHeat?: number | null;
 }
 
@@ -119,74 +111,38 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
       );
     }
 
-    const a = snap.analysis;
-    const verdict = a.verdict;
-
     return (
       <div ref={rootRef}>
       <Card>
-        <CardHeader className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <CardTitle>{snap.meta.name} 상세 분석</CardTitle>
-            <div className="mt-2 flex items-center gap-2 flex-wrap">
-              <Badge
-                variant={verdict.tone}
-                size="md"
-                className={verdict.tone === "sell" ? "shake-warn" : undefined}
-              >
-                {verdict.label}
-              </Badge>
-              <VerdictHint />
-              <VerdictReasonLine line={verdict.reasonLine} />
-              <SignalDetailBadges
-                short={a.shortTerm.signal}
-                long={a.longTerm.signal}
-                title={verdict.detail}
-              />
-              <VolatilityBadge assessment={a.volatility} size="sm" />
-              <OpportunityBadge assessment={a.externalOpportunity} size="sm" />
-              <RiskBadge assessment={a.externalRisk} size="sm" />
-              <MarketAlertBadge alert={snap.quote.marketAlert} size="sm" />
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-base">{snap.meta.name}</CardTitle>
+            <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-muted/30 p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {(Object.keys(TAB_META) as DetailTabKey[])
+                .filter((k) => k !== "asking" || isKrStockCode(snap.meta.code))
+                .map((k) => {
+                  const m = TAB_META[k];
+                  const active = tab === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setTab(k)}
+                      className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                        active
+                          ? "bg-foreground text-background font-medium"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {m.icon}
+                      {m.label}
+                    </button>
+                  );
+                })}
             </div>
-            <p className="text-sm font-semibold leading-snug mt-2">
-              {verdict.headline}
-            </p>
-            <VerdictReasonBullets
-              snap={snap}
-              marketSemiHeat={marketSemiHeat}
-              className="mt-1"
-            />
-          </div>
-          {/* 탭 — 호가 탭은 한국 종목에만 노출. KIS 미활성도 동일하게 노출하되 안에서 빈 메시지.
-              좁은 폭(360~414px) 에서도 5탭 한 줄 안정 표시되도록:
-                - 모바일: 패딩 px-2 + gap-1 + 텍스트 [11px] (5×약60px = 약300px)
-                - sm 이상: 기존 px-3 + gap-1.5 + text-xs
-              컨테이너는 max-w-full overflow-x-auto 로 그래도 안 맞으면 좌우 스와이프 폴백. */}
-          <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-muted/30 p-0.5 self-start [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {(Object.keys(TAB_META) as DetailTabKey[])
-              .filter((k) => k !== "asking" || isKrStockCode(snap.meta.code))
-              .map((k) => {
-                const m = TAB_META[k];
-                const active = tab === k;
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setTab(k)}
-                    className={`inline-flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-xs px-2 sm:px-3 py-1.5 rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                      active
-                        ? "bg-foreground text-background font-medium"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {m.icon}
-                    {m.label}
-                  </button>
-                );
-              })}
           </div>
         </CardHeader>
-        <CardBody>
+        <CardBody className="pt-0">
           {tab === "prediction" && (
             <PredictionPanel
               snaps={[snap]}

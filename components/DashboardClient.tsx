@@ -721,19 +721,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             <StockCard
               snap={p}
               selected={p.meta.code === selected}
-              detailActive={p.meta.code === selected}
-              analysisPending={analysisPending}
               onSelect={(code) => {
                 setSelected(code);
-                // 모바일에서는 모달 오픈. 데스크탑에선 MobileDetailSheet 컴포넌트가 lg:hidden
-                // 자체 가드라 setSheetOpen(true) 호출이 화면에 영향 없음.
                 setSheetOpen(true);
               }}
               krwRate={krwRate}
-              kisActive={snap.kisActive}
-              marketSemiHeat={snap.marketMood.semiHeat}
               priceOverride={realtimeFresh(p.meta.code)}
-              tradeOverride={realtimeTradeFresh(p.meta.code)}
             />
           </div>
         ))}
