@@ -673,6 +673,18 @@ export interface StockSnapshot {
   closeHistory?: number[];
   /** 데이터 품질 — IPO·얇은 히스토리·해외 수급 등 UI 배지·게이트용. */
   dataQuality?: DataQualityInfo;
+  /** 시장 매크로 컨텍스트 — 익일 추정가 매크로 보정용 (VIX·코스피·SOX·환율 등). */
+  marketContext?: StockMarketContext | null;
+}
+
+/** 종목 익일 추정에 쓰는 시장 전반 지표 — snapshot 빌드 시 indicators/context 에서 주입. */
+export interface StockMarketContext {
+  semiHeat: number | null;
+  nasdaqRate: number;
+  fxRate: number;
+  vix: number;
+  kospiRate: number;
+  soxRate: number;
 }
 
 /** 종목별 데이터 충분성 — snapshot·추천 게이트 공통. */

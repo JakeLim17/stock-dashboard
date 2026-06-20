@@ -183,7 +183,43 @@ describe("buildFairValueEstimate", () => {
     const fv = buildFairValueEstimate(snap);
     assert.equal(fv.ready, true);
     if (fv.ready) {
+      assert.equal(fv.baseBlendedPrice, 106_250);
       assert.equal(fv.price, 106_250);
+      assert.ok(fv.targetDateLabel.length > 0);
+    }
+  });
+
+  it("VIX 공포 시 매크로 하향 보정", () => {
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: 100_000,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: 100_000,
+        },
+        price: 100_000,
+        prevClose: 95_000,
+      })
+    );
+    snap.meta.code = "005930.KS";
+    snap.marketContext = {
+      semiHeat: 50,
+      nasdaqRate: 0,
+      fxRate: 0,
+      vix: 32,
+      kospiRate: 0,
+      soxRate: 0,
+    };
+    const fv = buildFairValueEstimate(snap);
+    assert.equal(fv.ready, true);
+    if (fv.ready) {
+      assert.ok(fv.macroRate < 0);
+      assert.ok(fv.price < fv.baseBlendedPrice);
+      assert.ok(fv.macroFactors.some((f) => f.label.includes("VIX")));
     }
   });
 });

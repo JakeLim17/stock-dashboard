@@ -1,4 +1,12 @@
+import {
+  computeMacroFairValueAdjustment,
+  type MacroAdjustmentFactor,
+} from "./fair-value-macro";
+import { formatNextTradingSessionLabel } from "./fair-value-trading-day";
 import type { OverseasNightIndicator, Quote, StockSnapshot } from "./types";
+
+export type { MacroAdjustmentFactor, MacroFairValueAdjustment } from "./fair-value-macro";
+export { formatNextTradingSessionLabel, getNextTradingSessionDate } from "./fair-value-trading-day";
 
 /** 가중치 — 삼성전자 92영업일 백테스트(2026-06) 튜닝 */
 export const FAIR_VALUE_WEIGHTS = {
@@ -43,12 +51,20 @@ export interface FairValueInput {
 
 export interface FairValueEstimate {
   price: number;
+  /** GDR·σ 혼합 직후 가격 (매크로 보정 전) */
+  baseBlendedPrice: number;
   /** 오늘 최종 기준가(앱장 포함) 대비 */
   vsSettlementRate: number;
   settlementPrice: number;
   settlementLabel: string;
   methodLabel: string;
   detail: string;
+  /** 익일 거래일 라벨 — "6/23(월)" */
+  targetDateLabel: string;
+  targetIsoDate: string;
+  /** 매크로·심리·지정학 보정 합산 (0.01 = +1%) */
+  macroRate: number;
+  macroFactors: MacroAdjustmentFactor[];
   ready: true;
 }
 
@@ -231,14 +247,31 @@ export function buildFairValueEstimate(
     };
   }
 
+  const macro = computeMacroFairValueAdjustment(snap);
+  const baseBlendedPrice = blended.price;
+  const price = Math.round(baseBlendedPrice * (1 + macro.rate));
+  const session = formatNextTradingSessionLabel(meta.code);
+  const macroDetail =
+    Math.abs(macro.rate) >= 0.0001
+      ? ` · 매크로 ${macro.rate >= 0 ? "+" : ""}${(macro.rate * 100).toFixed(2)}%`
+      : "";
+  const methodLabel =
+    Math.abs(macro.rate) >= 0.0005
+      ? `${blended.methodLabel}+매크로`
+      : blended.methodLabel;
+
   return {
     ready: true,
-    price: blended.price,
-    vsSettlementRate:
-      blended.price / settlement.settlementPrice - 1,
+    price,
+    baseBlendedPrice,
+    vsSettlementRate: price / settlement.settlementPrice - 1,
     settlementPrice: settlement.settlementPrice,
     settlementLabel: settlement.settlementLabel,
-    methodLabel: blended.methodLabel,
-    detail: blended.detail,
+    methodLabel,
+    detail: blended.detail + macroDetail,
+    targetDateLabel: session.shortLabel,
+    targetIsoDate: session.isoDate,
+    macroRate: macro.rate,
+    macroFactors: macro.factors,
   };
 }

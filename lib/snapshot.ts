@@ -115,6 +115,8 @@ export interface MarketContextSnapshot {
   nasdaqRate: number;
   fxRate: number;
   vix: number;
+  kospiRate: number;
+  soxRate: number;
 }
 
 // 매크로 히스토리 재사용 — watchlist 가 동일 심볼 90일치를 다시 fetch 하지 않도록.
@@ -272,6 +274,7 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
 
   const sox = indicators.find((i) => i.code === "^SOX");
   const nvda = indicators.find((i) => i.code === "NVDA");
+  const kospi = indicators.find((i) => i.code === "^KS11");
   const nq = indicators.find((i) => i.code === "NQ=F");
   const fx = indicators.find((i) => i.code === "KRW=X");
   const vix = indicators.find((i) => i.code === "^VIX");
@@ -297,6 +300,8 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
       nasdaqRate: nq?.changeRate ?? 0,
       fxRate: fx?.changeRate ?? 0,
       vix: vix?.value ?? 15,
+      kospiRate: kospi?.changeRate ?? 0,
+      soxRate: soxRate ?? 0,
     },
     usdKrw: fx?.value ?? null,
     macroHistories,
@@ -776,6 +781,14 @@ export async function fetchWatchlistSnapshots(
         shortBalance: null,
         closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
         dataQuality,
+        marketContext: {
+          semiHeat: context!.semiHeat,
+          nasdaqRate: context!.nasdaqRate,
+          fxRate: context!.fxRate,
+          vix: context!.vix,
+          kospiRate: context!.kospiRate,
+          soxRate: context!.soxRate,
+        },
       };
     })
   );

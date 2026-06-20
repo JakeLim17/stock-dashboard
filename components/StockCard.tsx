@@ -277,10 +277,14 @@ function FairValueSection({
   currency: string;
 }) {
   if (fairValue.ready) {
+    const topMacro = fairValue.macroFactors
+      .filter((f) => Math.abs(f.bps) >= 1)
+      .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
+      .slice(0, 3);
     return (
       <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5">
         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-          익일 추정가 · {fairValue.methodLabel}
+          익일 추정가 · {fairValue.targetDateLabel} · {fairValue.methodLabel}
         </div>
         <div
           className={`tabular text-lg font-bold mt-0.5 ${changeColor(fairValue.vsSettlementRate)}`}
@@ -295,6 +299,23 @@ function FairValueSection({
             ({fmtPercent(fairValue.vsSettlementRate)})
           </span>
         </div>
+        {topMacro.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {topMacro.map((f) => (
+              <span
+                key={f.label}
+                className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
+                  f.bps >= 0
+                    ? "bg-rise/10 text-rise"
+                    : "bg-fall/10 text-fall"
+                }`}
+              >
+                {f.label} {f.bps >= 0 ? "+" : ""}
+                {(f.bps / 100).toFixed(1)}%
+              </span>
+            ))}
+          </div>
+        )}
         <div className="text-[10px] text-muted-foreground/60 mt-1">
           백테스트 오차 익일종가{" "}
           {(FAIR_VALUE_BACKTEST_META.nightToNextClose.mape * 100).toFixed(1)}%
