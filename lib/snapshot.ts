@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import type { HistoricalPoint } from "./providers/yahoo";
 import {
   fetchQuote,
   fetchQuotesBatch,
@@ -116,12 +117,25 @@ export interface MarketContextSnapshot {
   vix: number;
 }
 
+// 매크로 히스토리 재사용 — watchlist 가 동일 심볼 90일치를 다시 fetch 하지 않도록.
+const WATCHLIST_MACRO_CODES = [
+  "NQ=F",
+  "KRW=X",
+  "^IXIC",
+  "^KS11",
+  "^SOX",
+  "DX-Y.NYB",
+  "^TNX",
+] as const;
+
 export interface MarketIndicatorsResult {
   indicators: MarketIndicator[];
   errors: Record<string, string>;
   context: MarketContextSnapshot;
   // 환율(KRW=X) — 해외 야간 지표 계산에 재사용. 없으면 null.
   usdKrw: number | null;
+  /** 90일 일봉 — predictor 매크로 회귀 입력. watchlist 와 공유해 중복 fetch 방지. */
+  macroHistories: Partial<Record<(typeof WATCHLIST_MACRO_CODES)[number], HistoricalPoint[]>>;
 }
 
 export interface WatchlistSnapshotsResult {
@@ -134,6 +148,7 @@ export interface WatchlistDeps {
   news?: NewsItem[];
   context?: MarketContextSnapshot;
   usdKrw?: number | null;
+  macroHistories?: MarketIndicatorsResult["macroHistories"];
   options?: BuildSnapshotOptions;
 }
 
@@ -164,24 +179,32 @@ const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
 // ──────────────────────────────────────────────────────────────
 async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   const errors: Record<string, string> = {};
-  // 시세 batch + 모든 인디케이터 일별 close history(최근 35영업일)를 병렬로.
-  // history는 (1) KRW=X 변동성 σ 계산, (2) 모든 카드의 Sparkline 렌더에 사용.
-  // 실패한 심볼은 빈 배열로 fallback — 시세는 살아 있을 수 있으므로 카드 자체는 그대로 노출.
+  // 시세 batch + 모든 인디케이터 일별 close history(최근 90영업일)를 병렬로.
+  // history는 (1) KRW=X 변동성 σ 계산, (2) Sparkline(-30), (3) watchlist 매크로 회귀에 재사용.
+  const INDICATOR_HISTORY_DAYS = 90;
   const [indicatorResults, historyResults] = await Promise.all([
     fetchYahooQuotesBatch(MARKET_INDICATORS),
     Promise.all(
       MARKET_INDICATORS.map((meta) =>
-        fetchHistorical(meta.code, 35).catch(() => [])
+        fetchHistorical(meta.code, INDICATOR_HISTORY_DAYS).catch(() => [])
       )
     ),
   ]);
   const historyMap = new Map<string, number[]>();
+  const macroHistories: MarketIndicatorsResult["macroHistories"] = {};
   for (let i = 0; i < MARKET_INDICATORS.length; i++) {
     const meta = MARKET_INDICATORS[i];
-    const closes = historyResults[i]
+    const hist = historyResults[i];
+    const closes = hist
       .map((p) => p.close)
       .filter((v) => Number.isFinite(v) && v > 0);
     historyMap.set(meta.code, closes);
+    if (
+      (WATCHLIST_MACRO_CODES as readonly string[]).includes(meta.code) &&
+      hist.length > 0
+    ) {
+      macroHistories[meta.code as (typeof WATCHLIST_MACRO_CODES)[number]] = hist;
+    }
   }
   const indicators: MarketIndicator[] = [];
 
@@ -276,6 +299,7 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
       vix: vix?.value ?? 15,
     },
     usdKrw: fx?.value ?? null,
+    macroHistories,
   };
 }
 
@@ -489,9 +513,16 @@ export async function fetchWatchlistSnapshots(
         return [] as NewsItem[];
       });
 
-  // 베타 시나리오용 시장 시계열 + (옵션) 유로/달러 시세 — 종목 분석 전 병렬 fetch.
-  // Round3 B: 매크로 시계열 풀 확장 — IXIC/KOSPI/SOX/DXY/US10Y 도 함께 fetch.
-  // 모두 90일치(60일 OLS 회귀 + 휴장일 손실 흡수). DXY 는 DX-Y.NYB 가 빈 응답이면 DX=F 로 폴백.
+  // 베타 시나리오용 시장 시계열 — indicators 단계에서 이미 받은 90일 히스토리 재사용.
+  const mh = deps.macroHistories;
+  const histOrFetch = async (
+    code: (typeof WATCHLIST_MACRO_CODES)[number]
+  ): Promise<HistoricalPoint[]> => {
+    const cached = mh?.[code];
+    if (cached && cached.length >= 30) return cached;
+    return fetchHistorical(code, 90).catch(() => []);
+  };
+
   const [
     nasdaqHistory,
     fxHistory,
@@ -503,13 +534,13 @@ export async function fetchWatchlistSnapshots(
     eurUsdQuote,
     newsAll,
   ] = await Promise.all([
-    fetchHistorical("NQ=F", 90).catch(() => []),
-    fetchHistorical("KRW=X", 90).catch(() => []),
-    fetchHistorical("^IXIC", 90).catch(() => []),
-    fetchHistorical("^KS11", 90).catch(() => []),
-    fetchHistorical("^SOX", 90).catch(() => []),
-    fetchHistorical("DX-Y.NYB", 90).catch(() => []),
-    fetchHistorical("^TNX", 90).catch(() => []),
+    histOrFetch("NQ=F"),
+    histOrFetch("KRW=X"),
+    histOrFetch("^IXIC"),
+    histOrFetch("^KS11"),
+    histOrFetch("^SOX"),
+    histOrFetch("DX-Y.NYB"),
+    histOrFetch("^TNX"),
     includeOverseasNight
       ? fetchQuote("EURUSD=X", "유로/달러").catch((e) => {
           errors["EURUSD=X"] = e instanceof Error ? e.message : String(e);
@@ -892,6 +923,7 @@ export async function buildSnapshot(
     news,
     context: indicatorResult.context,
     usdKrw: indicatorResult.usdKrw,
+    macroHistories: indicatorResult.macroHistories,
     options,
   });
   const t2 = TIMING ? performance.now() : 0;

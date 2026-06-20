@@ -82,16 +82,16 @@ describe("buildFairValueEstimate", () => {
     });
     const fv = buildFairValueEstimate(snap);
     assert.ok(fv);
-    // 110000*0.55 + 101000*0.3 + 100000*0.15 = 105800
-    assert.equal(fv!.price, 105_800);
+    // 110000*0.6 + 101000*0.25 + 100000*0.15 = 106250
+    assert.equal(fv!.price, 106_250);
     assert.equal(fv!.methodLabel, "야간 혼합");
   });
 
   it("GDR 없으면 σ 드리프트 혼합", () => {
     const fv = buildFairValueEstimate(minimalSnap());
     assert.ok(fv);
-    // 101000*0.4 + 100000*0.6 = 100400
-    assert.equal(fv!.price, 100_400);
+    // 101000*0.45 + 100000*0.55 = 100450
+    assert.equal(fv!.price, 100_450);
     assert.equal(fv!.methodLabel, "σ 드리프트");
   });
 });

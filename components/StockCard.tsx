@@ -20,6 +20,7 @@ import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import { buildFairValueEstimate } from "@/lib/prediction-display";
+import { FAIR_VALUE_BACKTEST_META } from "@/lib/fair-value";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
 import {
@@ -91,7 +92,7 @@ export function StockCard({
    */
   tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
 }) {
-  const { meta, quote, tech, analysis, consensus } = snap;
+  const { meta, quote, tech, analysis } = snap;
   const fairValue = buildFairValueEstimate(snap);
 
   // 메인 가격 — "지금 진행 중인 거래"가 있으면 그게 메인.
@@ -241,6 +242,11 @@ export function StockCard({
                   </span>
                   <span className="text-muted-foreground/80">· {fairValue.detail}</span>
                 </div>
+                <div className="text-[10px] text-muted-foreground/70 tabular mt-1">
+                  백테스트(삼성 {FAIR_VALUE_BACKTEST_META.samples}일) 익일종가 오차{" "}
+                  {(FAIR_VALUE_BACKTEST_META.nightToNextClose.mape * 100).toFixed(1)}% ·
+                  애프터(시가) {(FAIR_VALUE_BACKTEST_META.nightToNextOpen.mape * 100).toFixed(1)}%
+                </div>
               </div>
             )}
             {primary.isExtended && primary.isLive ? (
@@ -383,49 +389,6 @@ export function StockCard({
 
         {!analysisPending && !detailActive && (
           <PredictionBlock snap={snap} krwRate={krwRate} />
-        )}
-
-        {!analysisPending && !detailActive && consensus && consensus.targetMean != null && (
-          <div className="rounded-md bg-muted/40 px-3 py-2 text-[11px] tabular space-y-1">
-            {consensus.domesticMean != null &&
-              (consensus.domesticCount ?? 0) > 0 && (
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-muted-foreground shrink-0">
-                    국내 {consensus.domesticCount}사 평균
-                  </span>
-                  <span className="font-medium text-right">
-                    <span>{fmtNumber(consensus.domesticMean, 0)}</span>
-                    {consensus.domesticUpsidePercent != null && (
-                      <span
-                        className={`ml-1.5 ${changeColor(consensus.domesticUpsidePercent)}`}
-                      >
-                        ({fmtPercent(consensus.domesticUpsidePercent, 1)})
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground shrink-0">
-                {consensus.domesticMean != null ? "통합 평균" : "컨센서스"}
-              </span>
-              <span className="font-medium text-right">
-                <span>{fmtNumber(consensus.targetMean, 0)}</span>
-                {consensus.upsidePercent != null && (
-                  <span
-                    className={`ml-1.5 ${changeColor(consensus.upsidePercent)}`}
-                  >
-                    ({fmtPercent(consensus.upsidePercent, 1)})
-                  </span>
-                )}
-                {(consensus.strongBuy + consensus.buy + consensus.hold) > 0 && (
-                  <span className="text-muted-foreground ml-1.5 text-[10px]">
-                    · SB {consensus.strongBuy}/{consensus.buy}/{consensus.hold}
-                  </span>
-                )}
-              </span>
-            </div>
-          </div>
         )}
       </CardBody>
     </Card>
