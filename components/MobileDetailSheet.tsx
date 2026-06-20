@@ -1,35 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { NewsItem, StockSnapshot } from "@/lib/types";
 import type { RealtimeAspEntry } from "@/hooks/useRealtime";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { StockDetailPanel } from "./StockDetailPanel";
 import { X } from "lucide-react";
-
-// 모바일 viewport 판정 — Tailwind `lg` breakpoint(1024px) 미만이면 모바일.
-// 컴포넌트는 `lg:hidden` 으로 시각은 이미 가려지지만, body 스크롤 잠금/ESC 리스너 같은
-// side effect 는 viewport 와 무관하게 `open` 만 보고 동작하면 데스크탑에서도 부수효과가
-// 발생한다 (예: 카드 탭 → sheetOpen=true → body 스크롤 잠겨 데스크탑 페이지 못 내림).
-// matchMedia 로 viewport 변화도 추적해 회전·리사이즈 시에도 안전하게.
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const mql = window.matchMedia("(max-width: 1023.5px)");
-    const update = () => setIsMobile(mql.matches);
-    update();
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", update);
-      return () => mql.removeEventListener("change", update);
-    }
-    // Safari < 14 폴백
-    mql.addListener(update);
-    return () => mql.removeListener(update);
-  }, []);
-  return isMobile;
-}
 
 // 모바일(lg 미만) 전용 — 카드 탭 시 StockDetailPanel 을 바닥에서 슬라이드 업하는
 // 풀-너비 sheet 모달로 노출한다.

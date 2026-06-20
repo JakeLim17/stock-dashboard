@@ -10,6 +10,7 @@ import {
 import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
 import { useRealtime } from "@/hooks/useRealtime";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { MarketPanel } from "./MarketPanel";
 import { NewsPanel } from "./NewsPanel";
 import {
@@ -168,6 +169,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   }, [useOverseasNight]);
   const refreshMs = resolveRefreshMs(snap);
   const analysisPending = snap.phase === "lite";
+  const isMobile = useIsMobile();
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
   // force=true 면 서버 in-memory 캐시(컨센서스/시장경보)도 비우고 새로 fetch — 사용자 새로고침 버튼 전용.
@@ -721,12 +723,17 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             <StockCard
               snap={p}
               selected={p.meta.code === selected}
+              variant={isMobile ? "mobile" : "desktop"}
               onSelect={(code) => {
                 setSelected(code);
-                setSheetOpen(true);
+                if (isMobile) setSheetOpen(true);
               }}
               krwRate={krwRate}
+              kisActive={snap.kisActive}
+              analysisPending={analysisPending}
+              marketSemiHeat={snap.marketMood.semiHeat}
               priceOverride={realtimeFresh(p.meta.code)}
+              tradeOverride={realtimeTradeFresh(p.meta.code)}
             />
           </div>
         ))}
