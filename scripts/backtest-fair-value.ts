@@ -7,6 +7,7 @@ import type { HistoricalPoint } from "../lib/providers/yahoo";
 import {
   backtestFairValue,
   optimizeFairValueWeights,
+  optimizeCloseExtension,
 } from "../lib/fair-value-backtest";
 import { FAIR_VALUE_WEIGHTS } from "../lib/fair-value";
 
@@ -69,9 +70,19 @@ async function main() {
   console.log(`MAPE=${(opt.mape * 100).toFixed(2)}%`);
 
   const optAfter = optimizeFairValueWeights(input, "nightToNextOpen");
-  console.log("\n=== nightToNextOpen (애프터장 proxy) 최적 ===");
+  console.log("\n=== nightToNextOpen (익일 시가) 최적 ===");
   console.log(JSON.stringify(optAfter.weights.nightClosed, null, 2));
   console.log(`MAPE=${(optAfter.mape * 100).toFixed(2)}%`);
+
+  const optCloseExt = optimizeCloseExtension(input, "nightToNextClose");
+  console.log("\n=== nightToNextClose 종가 혼합 최적 ===");
+  console.log(JSON.stringify(optCloseExt.extension, null, 2));
+  console.log(`MAPE=${(optCloseExt.mape * 100).toFixed(2)}%`);
+
+  const optAh = optimizeFairValueWeights(input, "ahCloseToNextOpen");
+  console.log("\n=== ahCloseToNextOpen (앱장→익일시가) 최적 ===");
+  console.log(JSON.stringify(optAh.weights.nightClosed, null, 2));
+  console.log(`MAPE=${(optAh.mape * 100).toFixed(2)}%`);
 
   const optOpen = optimizeFairValueWeights(input, "openToClose");
   console.log("\n=== openToClose (당일 종가) 최적 ===");

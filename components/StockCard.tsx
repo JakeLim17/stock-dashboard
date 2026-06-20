@@ -282,25 +282,29 @@ function FairValueSection({
       .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
       .slice(0, 3);
     return (
-      <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5">
+      <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2.5">
         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-          익일 추정가 · {fairValue.targetDateLabel} · {fairValue.methodLabel}
+          익일 추정 · {fairValue.targetDateLabel} · {fairValue.settlementLabel}
         </div>
-        <div
-          className={`tabular text-lg font-bold mt-0.5 ${changeColor(fairValue.vsSettlementRate)}`}
-        >
-          {fmtNumber(fairValue.price, currency === "USD" ? 2 : 0)}
-        </div>
-        <div className="text-[11px] text-muted-foreground tabular mt-0.5">
-          <span className={changeColor(fairValue.vsSettlementRate)}>
-            {fairValue.settlementLabel}(
-            {fmtNumber(fairValue.settlementPrice, 0)}) 대비{" "}
-            {fmtSigned(fairValue.vsSettlementRate * fairValue.settlementPrice)}{" "}
-            ({fmtPercent(fairValue.vsSettlementRate)})
-          </span>
-        </div>
+
+        <FairValueLegRow
+          label="시가"
+          leg={fairValue.open}
+          settlementPrice={fairValue.settlementPrice}
+          currency={currency}
+          mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextOpen.mape}
+          emphasized
+        />
+        <FairValueLegRow
+          label="종가"
+          leg={fairValue.close}
+          settlementPrice={fairValue.settlementPrice}
+          currency={currency}
+          mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
+        />
+
         {topMacro.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
+          <div className="flex flex-wrap gap-1 pt-0.5">
             {topMacro.map((f) => (
               <span
                 key={f.label}
@@ -316,9 +320,11 @@ function FairValueSection({
             ))}
           </div>
         )}
-        <div className="text-[10px] text-muted-foreground/60 mt-1">
-          백테스트 오차 익일종가{" "}
-          {(FAIR_VALUE_BACKTEST_META.nightToNextClose.mape * 100).toFixed(1)}%
+        <div className="text-[10px] text-muted-foreground/60">
+          앱장 기준 백테스트 오차 시가{" "}
+          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
+          · 종가{" "}
+          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
         </div>
       </div>
     );
@@ -326,6 +332,48 @@ function FairValueSection({
   return (
     <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground text-center">
       {fairValue.pendingReason}
+    </div>
+  );
+}
+
+function FairValueLegRow({
+  label,
+  leg,
+  settlementPrice,
+  currency,
+  mapeHint,
+  emphasized = false,
+}: {
+  label: string;
+  leg: { price: number; vsSettlementRate: number; methodLabel: string };
+  settlementPrice: number;
+  currency: string;
+  mapeHint: number;
+  emphasized?: boolean;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-[10px] text-muted-foreground">
+          {label} · {leg.methodLabel}
+        </div>
+        <div
+          className={`tabular font-bold leading-tight ${emphasized ? "text-lg" : "text-base"} ${changeColor(leg.vsSettlementRate)}`}
+        >
+          {fmtNumber(leg.price, currency === "USD" ? 2 : 0)}
+        </div>
+        <div className="text-[10px] text-muted-foreground tabular">
+          <span className={changeColor(leg.vsSettlementRate)}>
+            {fmtSigned(leg.vsSettlementRate * settlementPrice)} (
+            {fmtPercent(leg.vsSettlementRate)})
+          </span>
+        </div>
+      </div>
+      <div className="text-[9px] text-muted-foreground/70 tabular shrink-0 text-right">
+        오차
+        <br />
+        {(mapeHint * 100).toFixed(1)}%
+      </div>
     </div>
   );
 }

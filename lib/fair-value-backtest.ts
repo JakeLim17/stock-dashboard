@@ -1,14 +1,19 @@
 import type { HistoricalPoint } from "./providers/yahoo";
 import {
   blendFairValuePrice,
+  blendCloseFromOpen,
   type FairValueWeights,
+  type FairValueCloseExtension,
   FAIR_VALUE_WEIGHTS,
+  FAIR_VALUE_CLOSE_EXTENSION,
 } from "./fair-value";
 
 export type FairValueScenario =
   | "openToClose"
   | "nightToNextClose"
-  | "nightToNextOpen";
+  | "nightToNextOpen"
+  | "ahCloseToNextOpen"
+  | "ahCloseToNextClose";
 
 export interface FairValueBacktestRow {
   date: number;
@@ -35,6 +40,16 @@ export interface FairValueBacktestInput {
   usdKrwHist?: HistoricalPoint[] | null;
   sharesPerReceipt?: number;
   weights?: FairValueWeights;
+  closeExtension?: FairValueCloseExtension;
+}
+
+/** 정규장 일봉으로 앱장 종가 근사 — 장중 방향의 25%가 앱장에 이어진다고 가정 */
+export function estimateAhClose(bar: HistoricalPoint): number {
+  const reg = bar.close;
+  if (reg <= 0) return reg;
+  if (bar.open <= 0) return reg;
+  const intraday = (reg - bar.open) / bar.open;
+  return Math.round(reg * (1 + intraday * 0.25));
 }
 
 function mean(nums: number[]): number {
@@ -92,7 +107,8 @@ function runScenario(
   fxPairs: Array<{ stock: HistoricalPoint; other: HistoricalPoint }> | null,
   scenario: FairValueScenario,
   weights: FairValueWeights,
-  sharesPerReceipt: number
+  sharesPerReceipt: number,
+  closeExtension: FairValueCloseExtension = FAIR_VALUE_CLOSE_EXTENSION
 ): FairValueBacktestRow[] {
   const rows: FairValueBacktestRow[] = [];
   const minIdx = 25;
@@ -115,10 +131,20 @@ function runScenario(
       prevClose = prev.close;
       actual = cur.close;
       marketClosed = false;
+    } else if (
+      scenario === "ahCloseToNextOpen" ||
+      scenario === "ahCloseToNextClose"
+    ) {
+      live = estimateAhClose(cur);
+      prevClose = prev.close;
+      actual =
+        scenario === "ahCloseToNextClose" ? next.close : next.open;
+      marketClosed = true;
     } else {
       live = cur.close;
       prevClose = prev.close;
-      actual = scenario === "nightToNextClose" ? next.close : next.open;
+      actual =
+        scenario === "nightToNextClose" ? next.close : next.open;
       marketClosed = true;
     }
 
@@ -144,7 +170,7 @@ function runScenario(
     }
 
     const driftCenter = estimateDriftCenter(histSlice, live);
-    const blended = blendFairValuePrice({
+    const openBlend = blendFairValuePrice({
       live,
       prevClose,
       driftCenter,
@@ -152,19 +178,24 @@ function runScenario(
       marketClosed,
       weights,
     });
-    if (!blended) continue;
+    if (!openBlend) continue;
 
-    const errorAbs = Math.abs(blended.price - actual);
+    const estimate =
+      scenario === "nightToNextClose" || scenario === "ahCloseToNextClose"
+        ? blendCloseFromOpen(openBlend.price, driftCenter, closeExtension).price
+        : openBlend.price;
+
+    const errorAbs = Math.abs(estimate - actual);
     const errorPct = errorAbs / actual;
-    const estDir = blended.price - prevClose;
-    const actDir = actual - prevClose;
+    const estDir = estimate - live;
+    const actDir = actual - live;
     const directionHit =
       (estDir >= 0 && actDir >= 0) || (estDir < 0 && actDir < 0);
 
     rows.push({
       date: cur.date,
       scenario,
-      estimate: blended.price,
+      estimate,
       actual,
       errorAbs,
       errorPct,
@@ -203,6 +234,7 @@ export function backtestFairValue(
   input: FairValueBacktestInput
 ): FairValueBacktestSummary[] {
   const weights = input.weights ?? FAIR_VALUE_WEIGHTS;
+  const closeExtension = input.closeExtension ?? FAIR_VALUE_CLOSE_EXTENSION;
   const shares = input.sharesPerReceipt ?? 25;
   const stockHist = [...input.stockHist].sort((a, b) => a.date - b.date);
 
@@ -219,6 +251,8 @@ export function backtestFairValue(
     "openToClose",
     "nightToNextClose",
     "nightToNextOpen",
+    "ahCloseToNextOpen",
+    "ahCloseToNextClose",
   ];
 
   return scenarios.map((scenario) =>
@@ -230,7 +264,8 @@ export function backtestFairValue(
         fxPairs,
         scenario,
         weights,
-        shares
+        shares,
+        closeExtension
       )
     )
   );
@@ -277,6 +312,41 @@ export function optimizeFairValueWeights(
 
   return {
     weights: best,
+    mape: bestMape,
+    summary: bestSummary ?? summarize(scenario, []),
+  };
+}
+
+/** 익일 종가 혼합 비율 그리드 서치 */
+export function optimizeCloseExtension(
+  input: FairValueBacktestInput,
+  scenario: FairValueScenario = "nightToNextClose"
+): {
+  extension: FairValueCloseExtension;
+  mape: number;
+  summary: FairValueBacktestSummary;
+} {
+  let best: FairValueCloseExtension = { ...FAIR_VALUE_CLOSE_EXTENSION };
+  let bestMape = Infinity;
+  let bestSummary: FairValueBacktestSummary | null = null;
+
+  for (let openPct = 20; openPct <= 50; openPct += 2) {
+    const openShare = openPct / 100;
+    const driftShare = 1 - openShare;
+    const target = backtestFairValue({
+      ...input,
+      closeExtension: { openShare, driftShare },
+    }).find((s) => s.scenario === scenario);
+    if (!target || target.samples < 10) continue;
+    if (target.mape < bestMape) {
+      bestMape = target.mape;
+      best = { openShare, driftShare };
+      bestSummary = target;
+    }
+  }
+
+  return {
+    extension: best,
     mape: bestMape,
     summary: bestSummary ?? summarize(scenario, []),
   };

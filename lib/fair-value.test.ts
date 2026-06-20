@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildFairValueEstimate,
+  blendCloseFromOpen,
   getSettlementContext,
 } from "./fair-value";
 import type { Quote, StockSnapshot } from "./types";
@@ -145,8 +146,10 @@ describe("buildFairValueEstimate", () => {
     );
     assert.equal(fv.ready, true);
     if (fv.ready) {
-      assert.ok(fv.price > 0);
+      assert.ok(fv.open.price > 0);
+      assert.ok(fv.close.price > 0);
       assert.equal(fv.settlementPrice, 2_770_000);
+      assert.equal(fv.price, fv.open.price);
     }
   });
 
@@ -183,10 +186,16 @@ describe("buildFairValueEstimate", () => {
     const fv = buildFairValueEstimate(snap);
     assert.equal(fv.ready, true);
     if (fv.ready) {
-      assert.equal(fv.baseBlendedPrice, 106_250);
-      assert.equal(fv.price, 106_250);
+      assert.equal(fv.open.baseBlendedPrice, 106_250);
+      assert.equal(fv.open.price, 106_250);
+      assert.ok(fv.close.price > 0);
       assert.ok(fv.targetDateLabel.length > 0);
     }
+  });
+
+  it("종가 추정은 시가+드리프트 혼합", () => {
+    const blended = blendCloseFromOpen(100_000, 102_000);
+    assert.equal(blended.price, 101_000);
   });
 
   it("VIX 공포 시 매크로 하향 보정", () => {
@@ -218,7 +227,7 @@ describe("buildFairValueEstimate", () => {
     assert.equal(fv.ready, true);
     if (fv.ready) {
       assert.ok(fv.macroRate < 0);
-      assert.ok(fv.price < fv.baseBlendedPrice);
+      assert.ok(fv.open.price < fv.open.baseBlendedPrice);
       assert.ok(fv.macroFactors.some((f) => f.label.includes("VIX")));
     }
   });
