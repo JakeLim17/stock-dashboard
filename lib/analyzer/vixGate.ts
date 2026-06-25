@@ -15,6 +15,7 @@ import "server-only";
 export interface VixGate {
   confidenceMult: number; // 모델 신뢰도 곱연산 인자
   stopLossMult: number; // SL 폭 곱연산 인자 (>1 이면 손절 더 멀리)
+  rangeSigmaMult: number; // 가격 범위 σ 곱연산 (>1 이면 밴드 확대)
   level: "calm" | "elevated" | "stressed" | "panic";
   vix: number | null;
   reason: string; // 사람이 읽는 사유
@@ -25,6 +26,7 @@ export function computeVixGate(vix: number | null | undefined): VixGate {
     return {
       confidenceMult: 1,
       stopLossMult: 1,
+      rangeSigmaMult: 1,
       level: "calm",
       vix: null,
       reason: "VIX 데이터 없음 — 게이팅 미적용",
@@ -35,6 +37,7 @@ export function computeVixGate(vix: number | null | undefined): VixGate {
     return {
       confidenceMult: 1,
       stopLossMult: 1,
+      rangeSigmaMult: 1,
       level: "calm",
       vix,
       reason: `VIX ${vix.toFixed(1)} — 평상`,
@@ -44,25 +47,28 @@ export function computeVixGate(vix: number | null | undefined): VixGate {
     return {
       confidenceMult: 0.9,
       stopLossMult: 1.1,
+      rangeSigmaMult: 1.08,
       level: "elevated",
       vix,
-      reason: `VIX ${vix.toFixed(1)} — 변동성 상승 · 신뢰도 ×0.9 / SL 폭 ×1.1`,
+      reason: `VIX ${vix.toFixed(1)} — 변동성 상승 · 신뢰도 ×0.9 / SL ×1.1 / 범위 ×1.08`,
     };
   }
   if (vix < 30) {
     return {
       confidenceMult: 0.8,
       stopLossMult: 1.2,
+      rangeSigmaMult: 1.15,
       level: "stressed",
       vix,
-      reason: `VIX ${vix.toFixed(1)} — 위험 회피 · 신뢰도 ×0.8 / SL 폭 ×1.2`,
+      reason: `VIX ${vix.toFixed(1)} — 위험 회피 · 신뢰도 ×0.8 / SL ×1.2 / 범위 ×1.15`,
     };
   }
   return {
     confidenceMult: 0.6,
     stopLossMult: 1.35,
+    rangeSigmaMult: 1.25,
     level: "panic",
     vix,
-    reason: `VIX ${vix.toFixed(1)} — 패닉 · 신뢰도 ×0.6 / SL 폭 ×1.35`,
+    reason: `VIX ${vix.toFixed(1)} — 패닉 · 신뢰도 ×0.6 / SL ×1.35 / 범위 ×1.25`,
   };
 }

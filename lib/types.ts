@@ -480,6 +480,14 @@ export interface Predictions {
     shortLabel: string;
     daysToEvent: number;
   } | null;
+  /** 고변동 환경 — UI "예측 불확실성 높음" 배지 */
+  highVolatility?: boolean;
+  /** KST 거래 세션 컨텍스트 (1일 horizon 라벨) */
+  sessionContext?: {
+    phase: string;
+    displayLabel: string;
+    isSameTradingDay: boolean;
+  };
 
   // ─── Round3 B: 매크로 베타 회귀 (60일 OLS) ────────────────────
   // 종목 일별 수익률을 매크로 변수(KOSPI/IXIC/SOX/DXY)에 단순 회귀해서
@@ -675,6 +683,8 @@ export interface StockSnapshot {
   dataQuality?: DataQualityInfo;
   /** 시장 매크로 컨텍스트 — 익일 추정가 매크로 보정용 (VIX·코스피·SOX·환율 등). */
   marketContext?: StockMarketContext | null;
+  /** 크론·캐시 분석 시각 (epoch ms). 1h 이내면 hourly refresh 결과. */
+  analysisCachedAt?: number | null;
 }
 
 /** 종목 익일 추정에 쓰는 시장 전반 지표 — snapshot 빌드 시 indicators/context 에서 주입. */

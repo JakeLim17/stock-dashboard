@@ -17,6 +17,10 @@ import { estimateBeta, lastReturn, type MacroBetaResult } from "./macroBeta";
 import { computeVixGate } from "./vixGate";
 import { computeSectorLeading } from "./sectorLeading";
 import { computeMacroFactors } from "./macroFactors";
+import {
+  formatRangeHorizonLabel,
+  getOneDayHorizonContext,
+} from "./tradingSession";
 
 // 변동성 모델 상수 — Predictions.volatilityModel 메타로도 함께 노출되어
 // UI hint 라벨("EWMA λ=0.94 · t(df=5) 95%")에 사용된다.
@@ -292,6 +296,12 @@ export interface PredictorInput {
   // proximity 기반 σ 부풀림 계수를 가격 범위 산정에 반영한다 (eventVolatility.ts).
   // 빈 배열·undefined 면 부풀림 없음(factor=1).
   events?: EventItem[] | null;
+  /** 당일 등락률 — intraday σ 부스트·모멘텀 drift 완화에 사용 */
+  todayChangeRate?: number | null;
+  /** 단기 모멘텀 override 활성 — drift cap 완화 */
+  momentumActive?: boolean;
+  /** KST horizon 라벨·잔여 세션 σ 스케일 (기본 Date.now()) */
+  nowMs?: number;
 }
 
 // 매크로 베타 회귀 결과를 한 번에 계산. 헬퍼는 표본 부족 시 null 반환.
@@ -340,7 +350,13 @@ export function predict(input: PredictorInput): Predictions {
     overseasNight,
     intradayDailyVol,
     events,
+    todayChangeRate,
+    momentumActive,
+    nowMs,
   } = input;
+
+  const now = nowMs ?? Date.now();
+  const oneDayCtx = getOneDayHorizonContext(meta, new Date(now));
 
   const closes = history.map((h) => h.close).filter((c) => Number.isFinite(c) && c > 0);
   const returns = dailyReturns(history);
@@ -348,18 +364,37 @@ export function predict(input: PredictorInput): Predictions {
   // ─ σ 모델 선택 ───────────────────────────────────────────
   // 30일 이상의 일간 수익률이 확보되면 EWMA(λ=0.94) σ + t(df=5) 분포 quantile 사용
   // (최근 변동성 가중 + fat-tail). 미달이면 단순 stddev + 정규분포(±1.96σ)로 폴백.
-  const sigma =
+  let sigma =
     returns.length >= 30 ? ewmaVolatility(returns, EWMA_LAMBDA) : stddev(returns);
   const volKind: "ewma-t" | "stddev-normal" =
     returns.length >= 30 ? "ewma-t" : "stddev-normal";
   const tailMultiplier =
     volKind === "ewma-t" ? T_QUANTILE_975 : NORMAL_QUANTILE_975;
 
+  // ─ 당일 realized vol > EWMA 이면 σ 상향 (고변동 장 대응) ──
+  let intradayVolBoost = false;
+  if (intradayDailyVol != null && intradayDailyVol > 0 && sigma > 0) {
+    if (intradayDailyVol > sigma * 1.05) {
+      sigma = sigma * 0.35 + intradayDailyVol * 0.65;
+      intradayVolBoost = true;
+    }
+  }
+
   // ─ 이벤트 부풀림 ─────────────────────────────────────────
   // events 에는 종목별 (실적·배당) + 매크로(FOMC·KOSPI 만기) 가 합쳐져 들어옴.
   // 가장 임팩트 큰 단일 이벤트의 factor만 적용 (eventVolatility.ts).
-  const eventInflation = computeEventInflation(events, Date.now());
-  const adjustedSigma = sigma * eventInflation.factor;
+  const eventInflation = computeEventInflation(events, now);
+  let eventFactor = eventInflation.factor;
+  // 실적·매크로 임박 시 추가 bump (Micron 등 실적 발표 변동성)
+  const hasEarningsNear = events?.some(
+    (e) =>
+      e.kind === "earnings" &&
+      Math.abs(e.date - now) <= 4 * 86_400_000
+  );
+  if (hasEarningsNear && eventFactor < 1.35) {
+    eventFactor = Math.max(eventFactor, 1.25);
+  }
+  const adjustedSigma = sigma * eventFactor;
 
   const price = quote.price || closes[closes.length - 1] || 0;
 
@@ -402,9 +437,21 @@ export function predict(input: PredictorInput): Predictions {
   const us10yLast = lastReturn(us10yHistForLag);
   const macroFactors = computeMacroFactors(meta, dxyLast, us10yLast);
 
-  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 합산 (한도 ±2%).
+  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 합산.
+  // 모멘텀 활성·당일 ±4%↑ 시 drift cap ±3%로 완화 (급등장에서 너무 보수적 방지).
   const dailyDriftRaw = (sectorLeading?.drift ?? 0) + macroFactors.drift;
-  const dailyDrift = Math.max(-0.02, Math.min(0.02, dailyDriftRaw));
+  const absToday =
+    todayChangeRate != null && Number.isFinite(todayChangeRate)
+      ? Math.abs(todayChangeRate)
+      : 0;
+  const driftCap =
+    momentumActive || absToday >= 0.04 ? 0.03 : 0.02;
+  const dailyDrift = Math.max(-driftCap, Math.min(driftCap, dailyDriftRaw));
+
+  // VIX 게이팅 — risk-off 환경에서 SL·범위 폭 조정.
+  const vixGate = computeVixGate(vix);
+  const rangeSigmaMult = vixGate.rangeSigmaMult;
+  const sigmaForRanges = adjustedSigma * rangeSigmaMult;
 
   // A. 가격 범위 — 변동성 기반 (drift=0, 추세 가정 없음)
   //    이전엔 center = price·exp(mean(returns)·Δt) 였지만, 우상향 종목은
@@ -426,13 +473,20 @@ export function predict(input: PredictorInput): Predictions {
       { label: "2주", days: 10, driftWeight: 0 },
     ];
     for (const h of horizons) {
-      const horizonSigma = adjustedSigma * Math.sqrt(h.days) * tailMultiplier;
+      const effectiveDays =
+        h.days === 1 ? oneDayCtx.effectiveDays : h.days;
+      const horizonSigma =
+        sigmaForRanges * Math.sqrt(effectiveDays) * tailMultiplier;
       const drift = dailyDrift * h.driftWeight;
       const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);
+      const horizonLabel =
+        h.days === 1
+          ? oneDayCtx.displayLabel
+          : formatRangeHorizonLabel(h.days, meta, new Date(now));
       ranges.push({
-        horizonLabel: h.label,
+        horizonLabel,
         horizonDays: h.days,
         center,
         low,
@@ -457,8 +511,7 @@ export function predict(input: PredictorInput): Predictions {
   const SL_ATR_MULT = 1.5;
   const TP1_ATR_MULT = 2.0;
   const TP2_ATR_MULT = 3.5;
-  // Round3 B: VIX 게이팅 — risk-off 환경에서 SL 폭 자동 확대.
-  const vixGate = computeVixGate(vix);
+  // VIX 게이팅 — risk-off 환경에서 SL 폭 자동 확대 (vixGate 는 위에서 산출).
   const slMultEffective = SL_ATR_MULT * vixGate.stopLossMult;
   let targets: PriceTargets | null = null;
   if (history.length >= 20 && price > 0) {
@@ -629,7 +682,8 @@ export function predict(input: PredictorInput): Predictions {
     let source: "atr" | "sigma" | "intraday-blend" = atrPct > 0 ? "atr" : "sigma";
 
     if (intradayDailyVol != null && intradayDailyVol > 0 && basePct > 0) {
-      basePct = basePct * 0.5 + intradayDailyVol * 0.5;
+      const blendWeight = intradayVolBoost ? 0.65 : 0.5;
+      basePct = basePct * (1 - blendWeight) + intradayDailyVol * blendWeight;
       source = "intraday-blend";
     } else if (
       intradayDailyVol != null &&
@@ -652,11 +706,24 @@ export function predict(input: PredictorInput): Predictions {
     }
   }
 
+  const highVolatility =
+    intradayVolBoost ||
+    vixGate.level === "stressed" ||
+    vixGate.level === "panic" ||
+    eventFactor >= 1.25 ||
+    (todayChangeRate != null && Math.abs(todayChangeRate) >= 0.04);
+
   return {
     ranges,
     targets,
     scenarios,
     valuation: valuationRisk(quote.valuation),
+    highVolatility,
+    sessionContext: {
+      phase: oneDayCtx.phase,
+      displayLabel: oneDayCtx.displayLabel,
+      isSameTradingDay: oneDayCtx.isSameTradingDay,
+    },
     strength: {
       buy: Math.round(buyStrength),
       sell: Math.round(sellStrength),
@@ -693,7 +760,12 @@ export function predict(input: PredictorInput): Predictions {
     //   ※ "베이지안 갱신" 이 아니라 단순 곱연산 휴리스틱이다 (이름 정정).
     //   score = clamp01(0.3 + 0.7 · R²_max  ×  vixConfidenceMult  ×  samplePenalty)
     //   label: 0.7+ high / 0.4~0.7 medium / <0.4 low
-    modelConfidence: buildModelConfidence(macroBetasRaw, vixGate, returns.length),
+    modelConfidence: buildModelConfidence(
+      macroBetasRaw,
+      vixGate,
+      returns.length,
+      intradayVolBoost
+    ),
   };
 }
 
@@ -759,7 +831,8 @@ function buildModelConfidence(
     dxy: MacroBetaResult | null;
   },
   vixGate: ReturnType<typeof computeVixGate>,
-  totalReturns: number
+  totalReturns: number,
+  intradayVolBoost = false
 ): NonNullable<Predictions["modelConfidence"]> {
   const r2max = maxR2(b.ixic, b.kospi, b.sox, b.dxy);
   // R² 0~1 → confidence 0.3~1.0 매핑 (기본 변동성 모델 신뢰는 살림)
@@ -772,6 +845,7 @@ function buildModelConfidence(
   // VIX gate
   base *= vixGate.confidenceMult;
   if (vixGate.confidenceMult !== 1) factors.push(vixGate.reason);
+  if (intradayVolBoost) factors.push("당일 realized vol > EWMA — σ 상향 반영");
 
   // 표본 수 패널티 — 60일 미달 시 0.95 곱 (회귀가 동작하는 조건이긴 함).
   if (totalReturns < 60) {

@@ -40,6 +40,7 @@ import {
 } from "./analyzer/dataQuality";
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
+import { getAnalysisCache } from "./analysisCache";
 import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import {
   PRIMARY_SYMBOLS,
@@ -657,97 +658,99 @@ export async function fetchWatchlistSnapshots(
         meta.name
       );
 
-      const analysisRaw = analyze({
-        quote,
-        tech,
-        flow,
-        consensus,
-        valuation: consensusValuation,
-        externalRisk,
-        externalOpportunity,
-        context: {
-          ...context!,
-          overseasNightRate: overseasNight?.changeRate ?? null,
-        },
-        history: hist,
-      });
       const dataQuality = assessDataQuality({
         code: meta.code,
         historyLength: hist.length,
         flow,
       });
-      let analysis = applyThinHistoryAnalysisGate(analysisRaw, dataQuality);
-      const volatility = assessVolatility({
-        history: hist,
-        flow,
-        todayChangeRate: quote.changeRate,
-        intraday: intradayMetrics,
-      });
-      analysis.volatility = volatility;
-      if (volatility.level === "gambling" || volatility.level === "high") {
-        const top = volatility.drivers[0]?.label;
-        const tag =
-          volatility.level === "gambling"
-            ? `도박장 ⚠ 변동성 ${volatility.score}`
-            : `고변동 변동성 ${volatility.score}`;
-        analysis.shortTerm.reasons = [
-          `· ${tag}${top ? ` · ${top}` : ""}`,
-          ...analysis.shortTerm.reasons,
-        ].slice(0, 3);
-        analysis.reasons = analysis.shortTerm.reasons;
-      }
-      // 임박 가격 이벤트(종목별 실적·배당) + 매크로(FOMC·KOSPI 만기) 를 σ 부풀림 산정에 전달.
-      // 가장 임팩트 큰 단일 이벤트만 적용 (eventVolatility.ts 단일 선택).
-      const eventsForVolatility: EventItem[] = [
-        ...upcomingEvents,
-        ...getMacroEventsCached(),
-      ];
-      let predictions: Predictions | null = predict({
-        quote,
-        history: hist,
-        nasdaqHistory,
-        fxHistory,
-        // Round3 B: 매크로 시계열 풀 + VIX/US10Y 현재값 + 종목 메타 전달
-        ixicHistory,
-        kospiHistory,
-        soxHistory,
-        dxyHistory,
-        us10yHistory,
-        vix,
-        us10y,
-        meta,
-        buyScore: analysis.buyScore,
-        heatScore: analysis.heatScore,
-        overseasNight,
-        intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
-        events: eventsForVolatility,
-      });
-      predictions = applyThinHistoryPredictionGate(predictions, dataQuality);
-      // H2: verdict ↔ target 정합성 — 비중 축소·관망 verdict 인데 1·2차 목표가가
-      //     entry 대비 +3% 이상이면 "팔라는데 목표가 한참 위" 모순. UI 노출 회색·숨김
-      //     처리할 수 있도록 데이터 측에 suppressed 플래그를 박는다 (UI 노출은 후속).
-      if (predictions?.targets) {
-        const REDUCE_ACTIONS = new Set([
-          "REDUCE",
-          "TRIM",
-          "AVOID",
-        ]);
-        if (REDUCE_ACTIONS.has(analysis.verdict.action)) {
-          const t = predictions.targets;
-          if (
-            t.entry > 0 &&
-            (t.takeProfit1 >= t.entry * 1.03 ||
-              t.takeProfit2 >= t.entry * 1.03)
-          ) {
-            predictions.targets = { ...t, suppressed: true };
+      const cachedAnalysis = getAnalysisCache(meta.code);
+
+      let analysis: AnalysisResult;
+      let predictions: Predictions | null;
+
+      if (cachedAnalysis) {
+        analysis = cachedAnalysis.analysis;
+        predictions = cachedAnalysis.predictions;
+      } else {
+        const analysisRaw = analyze({
+          quote,
+          tech,
+          flow,
+          consensus,
+          valuation: consensusValuation,
+          externalRisk,
+          externalOpportunity,
+          context: {
+            ...context!,
+            overseasNightRate: overseasNight?.changeRate ?? null,
+          },
+          history: hist,
+        });
+        analysis = applyThinHistoryAnalysisGate(analysisRaw, dataQuality);
+        const volatility = assessVolatility({
+          history: hist,
+          flow,
+          todayChangeRate: quote.changeRate,
+          intraday: intradayMetrics,
+        });
+        analysis.volatility = volatility;
+        if (volatility.level === "gambling" || volatility.level === "high") {
+          const top = volatility.drivers[0]?.label;
+          const tag =
+            volatility.level === "gambling"
+              ? `도박장 ⚠ 변동성 ${volatility.score}`
+              : `고변동 변동성 ${volatility.score}`;
+          analysis.shortTerm.reasons = [
+            `· ${tag}${top ? ` · ${top}` : ""}`,
+            ...analysis.shortTerm.reasons,
+          ].slice(0, 3);
+          analysis.reasons = analysis.shortTerm.reasons;
+        }
+        const eventsForVolatility: EventItem[] = [
+          ...upcomingEvents,
+          ...getMacroEventsCached(),
+        ];
+        predictions = predict({
+          quote,
+          history: hist,
+          nasdaqHistory,
+          fxHistory,
+          ixicHistory,
+          kospiHistory,
+          soxHistory,
+          dxyHistory,
+          us10yHistory,
+          vix,
+          us10y,
+          meta,
+          buyScore: analysis.buyScore,
+          heatScore: analysis.heatScore,
+          overseasNight,
+          intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
+          events: eventsForVolatility,
+          todayChangeRate: quote.changeRate,
+          momentumActive: !!analysis.verdict.momentumOverride,
+        });
+        predictions = applyThinHistoryPredictionGate(predictions, dataQuality);
+        if (predictions?.targets) {
+          const REDUCE_ACTIONS = new Set(["REDUCE", "TRIM", "AVOID"]);
+          if (REDUCE_ACTIONS.has(analysis.verdict.action)) {
+            const t = predictions.targets;
+            if (
+              t.entry > 0 &&
+              (t.takeProfit1 >= t.entry * 1.03 ||
+                t.takeProfit2 >= t.entry * 1.03)
+            ) {
+              predictions.targets = { ...t, suppressed: true };
+            }
           }
         }
+        saveAnalysis(meta.code, quote.fetchedAt, analysis);
       }
 
       saveQuote(quote);
       saveFlow(meta.code, quote.fetchedAt, flow);
       saveTech(meta.code, quote.fetchedAt, tech);
-      saveAnalysis(meta.code, quote.fetchedAt, analysis);
 
       const signalMarks = pickTopSignalMarks(
         evaluateSignalMarks({
@@ -789,6 +792,7 @@ export async function fetchWatchlistSnapshots(
           kospiRate: context!.kospiRate,
           soxRate: context!.soxRate,
         },
+        analysisCachedAt: cachedAnalysis?.cachedAt ?? null,
       };
     })
   );

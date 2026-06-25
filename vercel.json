@@ -1,10 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/refresh-analysis",
+      "schedule": "0 * * * *"
+    }
+  ],
   "functions": {
     "app/api/snapshot/route.ts": { "maxDuration": 30 },
     "app/api/refresh/route.ts": { "maxDuration": 30 },
     "app/api/news/route.ts": { "maxDuration": 20 },
     "app/api/history/route.ts": { "maxDuration": 20 },
-    "app/api/recommendations/route.ts": { "maxDuration": 60 }
+    "app/api/recommendations/route.ts": { "maxDuration": 60 },
+    "app/api/cron/refresh-analysis/route.ts": { "maxDuration": 60 }
   }
 }

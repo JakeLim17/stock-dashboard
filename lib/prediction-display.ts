@@ -56,8 +56,10 @@ export function buildConfidenceBreakdown(snap: StockSnapshot): Array<{
   const volScore = a.volatility?.score;
   if (volScore != null) {
     out.push({
-      label: "변동성 적합",
-      score: Math.max(0, Math.min(100, 100 - volScore)),
+      label: p?.highVolatility ? "변동성(고)" : "변동성 적합",
+      score: p?.highVolatility
+        ? Math.max(0, 100 - volScore - 15)
+        : Math.max(0, Math.min(100, 100 - volScore)),
     });
   }
 

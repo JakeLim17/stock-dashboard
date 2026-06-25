@@ -1,0 +1,38 @@
+---
+description: 커밋·푸시 명령어 구분 (주인님 명시 요청 시에만)
+alwaysApply: true
+---
+
+# 커밋·푸시 정책 (주인님 요청 시에만)
+
+## 명령어 구분 (SSOT)
+
+| 주인님 표현 | 동작 |
+|------------|------|
+| **「커밋해」** | `git commit` **후** `origin main` **push** (아래 push 절차 준수) |
+| **「커밋만해」** | `git commit` **만**. **push 절대 금지** |
+| **「커밋까지」** | **「커밋만해」와 동일** — commit만, push 안 함 |
+| **「푸시해」** | 이미 로컬 commit 있음 → push만. commit 없음 → 주인님에게 commit+push인지 push만인지 확인 |
+| **「commit」** (영문) | 맥락 불명확하면 **「커밋만해」**로 해석 (push 안 함) |
+
+## ALWAYS
+
+- **명시 요청 없으면 commit·push 둘 다 하지 않는다.** 변경분만 남기고 보고.
+- 서브에이전트(Task) 위임 시에도, 해당 차례에 커밋 요청 없으면 commit·push 지시 금지.
+- **「커밋해」push 절차**: `git pull --ff-only origin main` → `npx tsc --noEmit`, 코드 변경 시 `npm run build` → `git push origin main`. push 직전 fetch/status 1회 권장.
+- 검증·테스트는 커밋 여부와 무관하게 평소대로 수행.
+
+## NEVER
+
+- `git push --force`, `--force-with-lease`, `git commit --amend`, `--no-verify` — 주인님 별도 명시 없으면 금지.
+- **「커밋만해」「커밋까지」** 요청에 push 금지.
+- `git config` 변경 금지.
+- 이전 차례의 커밋 지시가 follow-up에 자동 승계되지 않음 — 매 차례 명시 요청 필요.
+
+## 보고 양식
+
+작업 끝마다 한 줄씩:
+
+- 변경 파일 목록 (요약)
+- 검증 결과 (typecheck/build 등)
+- **커밋·푸시 여부**: "커밋·푸시 안 함 (주인님 요청 대기)" / "커밋만 완료 hash 7자리" / "커밋·푸시 완료 hash 7자리"

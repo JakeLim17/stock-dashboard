@@ -136,6 +136,14 @@ export function PredictionBlock({
               · 범위 +{Math.round((eventVol.factor - 1) * 100)}%
             </span>
           )}
+          {p?.highVolatility && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-warn/50 bg-warn/15 text-warn px-1.5 py-0.5 text-[10px] font-medium"
+              title="당일 변동·VIX·실적 등으로 예측 불확실성이 높습니다"
+            >
+              ⚠ 예측 불확실성 높음
+            </span>
+          )}
           {modelConfidence && (
             <span
               className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${confTone}`}
@@ -183,7 +191,7 @@ export function PredictionBlock({
           <div className="space-y-2">
             {oneDay && (
               <PredictionRangeRow
-                horizonLabel="1일 후"
+                horizonLabel={oneDay.horizonLabel}
                 currentPrice={snap.quote.price}
                 low={oneDay.low}
                 high={oneDay.high}
@@ -194,7 +202,7 @@ export function PredictionBlock({
             )}
             {oneWeek && (
               <PredictionRangeRow
-                horizonLabel="1주 후"
+                horizonLabel={oneWeek.horizonLabel}
                 currentPrice={snap.quote.price}
                 low={oneWeek.low}
                 high={oneWeek.high}

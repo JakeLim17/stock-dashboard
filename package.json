@@ -6,7 +6,7 @@
     "dev": "next dev -p 9700",
     "build": "next build",
     "start": "next start -p 9700",
-    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/fair-value.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts",
+    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/analyzer/tradingSession.test.ts lib/fair-value.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts",
     "backtest:fair-value": "npx --yes tsx scripts/backtest-fair-value.ts"
   },
   "dependencies": {

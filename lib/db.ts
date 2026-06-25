@@ -114,6 +114,14 @@ function init(db: Database.Database) {
       payload       TEXT NOT NULL,
       generated_at  INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS analysis_cache (
+      symbol      TEXT    NOT NULL,
+      payload     TEXT    NOT NULL,
+      cached_at   INTEGER NOT NULL,
+      PRIMARY KEY (symbol)
+    );
+    CREATE INDEX IF NOT EXISTS idx_analysis_cache_at ON analysis_cache(cached_at DESC);
   `);
 
   // 기존 DB 호환 — flows 테이블에 individual_net / individual_net_5d 컬럼이 없으면 추가.

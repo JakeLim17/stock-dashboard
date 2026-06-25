@@ -216,7 +216,7 @@ export function PredictionPanel({
                       <div key={r.horizonDays} className="space-y-1">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">
-                            {r.horizonLabel} 후
+                            {r.horizonLabel}
                           </span>
                           <span className="tabular text-muted-foreground text-[11px]">
                             ±{fmtPercent(halfWidth, 1).replace("+", "")}
