@@ -4,7 +4,26 @@ import type { EventItem } from "./types";
 import type { ScheduleEntry } from "./monthly-schedule-types";
 import { getMacroEventsCached } from "./providers/eventCalendar";
 import { getEventsForSymbolCached } from "./providers/eventCalendar";
-import { PRIMARY_SYMBOLS } from "./symbols";
+import { PRIMARY_SYMBOLS, WATCHLIST_CANDIDATES } from "./symbols";
+
+/** 월별 일정에 실적·배당을 자동 수집할 종목 (PRIMARY + SK·LG 계열) */
+const SCHEDULE_SYMBOL_CODES = [
+  ...PRIMARY_SYMBOLS.map((m) => m.code),
+  "402340.KS", // SK스퀘어
+  "096770.KS", // SK이노베이션
+  "017670.KS", // SK텔레콤
+  "361610.KQ", // SK아이이테크놀로지
+  "066570.KS", // LG전자
+  "051910.KS", // LG화학
+  "034220.KS", // LG디스플레이
+  "373220.KS", // LG에너지솔루션
+] as const;
+
+const SCHEDULE_SYMBOLS = SCHEDULE_SYMBOL_CODES.map((code) => {
+  const meta = WATCHLIST_CANDIDATES.find((m) => m.code === code);
+  if (!meta) throw new Error(`schedule symbol missing: ${code}`);
+  return meta;
+});
 
 export type { ScheduleEntry, ScheduleKind } from "./monthly-schedule-types";
 
@@ -109,6 +128,57 @@ const CURATED_SCHEDULE: ScheduleEntry[] = [
     detail: "미국 예탁증권(ADR) 상장 일정 — 일정 변동 가능",
   },
   {
+    id: "curated-2026-07-sk-square-adr",
+    startDate: kstMidnight(2026, 7, 6),
+    endDate: kstMidnight(2026, 7, 10),
+    label: "SK스퀘어 — 하이닉스 ADR 상장 수혜",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "402340.KS",
+    importance: "medium",
+    detail: "SK 지주·하이닉스 지분가치 재평가 구간 (7/10 ADR 상장 전후)",
+  },
+  {
+    id: "curated-2026-07-lg-display",
+    startDate: kstMidnight(2026, 7, 8),
+    label: "LG디스플레이 — OLED 수요 체크",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "034220.KS",
+    importance: "low",
+    detail: "IT 패널 수요·가격 동향 모니터링",
+  },
+  {
+    id: "curated-2026-07-lg-chem",
+    startDate: kstMidnight(2026, 7, 15),
+    label: "LG화학 2분기 실적",
+    kind: "earnings",
+    country: "kr",
+    symbolCode: "051910.KS",
+    importance: "high",
+    detail: "배터리 소재·석유화학 — 실적 일정 변동 가능",
+  },
+  {
+    id: "curated-2026-07-lg-electronics",
+    startDate: kstMidnight(2026, 7, 21),
+    label: "LG전자 2분기 실적",
+    kind: "earnings",
+    country: "kr",
+    symbolCode: "066570.KS",
+    importance: "high",
+    detail: "가전·VS사업 — 삼성전자 실적 흐름과 연동 체크",
+  },
+  {
+    id: "curated-2026-07-sk-innovation",
+    startDate: kstMidnight(2026, 7, 24),
+    label: "SK이노베이션 2분기 실적",
+    kind: "earnings",
+    country: "kr",
+    symbolCode: "096770.KS",
+    importance: "medium",
+    detail: "정유·배터리 — SK 계열 실적 시즌",
+  },
+  {
     id: "curated-2026-07-constitution",
     startDate: kstMidnight(2026, 7, 17),
     label: "제헌절",
@@ -184,7 +254,7 @@ export async function getMonthlySchedule(
 
   const symbolEvents = (
     await Promise.all(
-      PRIMARY_SYMBOLS.map((meta) => getEventsForSymbolCached(meta))
+      SCHEDULE_SYMBOLS.map((meta) => getEventsForSymbolCached(meta))
     )
   ).flatMap((events, symIdx) =>
     events.map((e, i) => eventToSchedule(e, `sym-${symIdx}-${i}`))

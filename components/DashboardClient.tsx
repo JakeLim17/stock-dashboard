@@ -784,6 +784,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         )}
       </div>
 
+      {/* 월별 주요 일정 — 카드 바로 아래 (모바일에서도 스크롤 짧게 보이도록) */}
+      <MonthlySchedulePanel />
+
       {/* 모바일 sheet 모달 — 자체적으로 lg:hidden 가드 + open 상태에 따라 슬라이드 인/아웃 */}
       <MobileDetailSheet
         open={sheetOpen}
@@ -808,8 +811,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         <MarketPanel indicators={snap.indicators} />
         <EventCalendar snapshot={snap} />
       </div>
-
-      <MonthlySchedulePanel />
 
       {/* 뉴스 — full snapshot + idle/2s defer */}
       {showNews ? (
