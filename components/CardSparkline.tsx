@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 // 종목 카드 미니 분봉 스파크라인 (인라인). 가격 숫자 우측에 가로로 길게 그린다.
 //
-//   - mount 시 /api/sparkline?code=... fetch (서버 30s 캐시 + 클라 60s 폴링).
+//   - mount 시 화면에 보일 때만 /api/sparkline fetch (CDN 5분 캐시 + 클라 5분 폴링).
 //   - 부모로부터 currentPrice 가 흐를 때 마지막 정규장 점만 in-place 업데이트 — 전체 fetch 안 함.
 //   - 색상: 마지막 가격(=currentPrice 반영 후) vs 시가(openPrice) 비교.
 //     상승 → var(--color-up) (한국식 빨강), 하락 → var(--color-down) (파랑), 보합 → 회색.
@@ -14,8 +14,9 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 //   - 한국 종목은 X축 도메인 = 거래일 KST 08:00 ~ 20:00 (서버가 채워 내려줌).
 //
 // 성능 정책:
-//   - 카드 6개 × 60s 폴링 → 분당 6 fetch. 서버 캐시 30s 라 외부 호출은 절반.
-//   - 폴링은 "탭 활성"일 때만 — visibility 변화로 자동 시작/정지.
+//   - IntersectionObserver — 화면 밖 카드는 fetch 안 함 (6종목 × 폴링 절감).
+//   - CDN s-maxage 300s — 동일 종목 반복 호출은 엣지 히트.
+//   - 폴링은 "탭 활성 + 화면 내"일 때만.
 
 interface SparklinePoint {
   time: number;
@@ -35,7 +36,7 @@ interface Props {
   code: string;
   currentPrice?: number | null;
   height?: number;
-  /** 폴링 주기. 기본 60s — 분봉 어차피 1분 단위로 의미 갱신. */
+  /** 폴링 주기. 기본 5분 — 분봉은 1분 단위, CDN 캐시와 맞춤. 0이면 최초 1회만. */
   pollMs?: number;
   /** 부모 width 결정용. flex-1 등 클래스 그대로 전달. */
   className?: string;
@@ -45,11 +46,12 @@ export function CardSparkline({
   code,
   currentPrice,
   height = 32,
-  pollMs = 120_000,
+  pollMs = 300_000,
   className,
 }: Props) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inView, setInView] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(160);
   // 같은 페이지 안에 카드 여러 장이 있어도 gradient id 가 충돌하지 않게 useId 로 unique 화.
@@ -69,15 +71,29 @@ export function CardSparkline({
     return () => ro.disconnect();
   }, []);
 
-  // 데이터 fetch + 폴링.
+  // 화면에 들어올 때만 네트워크 — 스크롤 밖 카드는 sparkline API 호출 안 함.
   useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setInView(entry?.isIntersecting ?? false),
+      { rootMargin: "80px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // 데이터 fetch + 폴링 (inView 일 때만).
+  useEffect(() => {
+    if (!inView) return;
+
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
     const load = async () => {
       try {
         const r = await fetch(`/api/sparkline?code=${encodeURIComponent(code)}`, {
-          cache: "no-store",
+          cache: "default",
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = (await r.json()) as ApiResp;
@@ -93,7 +109,7 @@ export function CardSparkline({
     void load();
 
     const start = () => {
-      if (timer) return;
+      if (timer || pollMs <= 0) return;
       timer = setInterval(() => void load(), pollMs);
     };
     const stop = () => {
@@ -115,7 +131,7 @@ export function CardSparkline({
       stop();
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [code, pollMs]);
+  }, [code, pollMs, inView]);
 
   // 마지막 점 실시간 업데이트 — currentPrice 가 흐를 때 마지막 정규장 점을 덮는다.
   useEffect(() => {
