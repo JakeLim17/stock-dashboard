@@ -22,6 +22,7 @@ import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { EventCalendar } from "./EventCalendar";
+import { MonthlySchedulePanel } from "./MonthlySchedulePanel";
 import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { DisclaimerModal } from "./DisclaimerModal";
 import { fmtRelative, getKrwRate, toFriendlyErrorMessage } from "@/lib/utils";
@@ -768,6 +769,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         <MarketPanel indicators={snap.indicators} />
         <EventCalendar snapshot={snap} />
       </div>
+
+      <MonthlySchedulePanel />
 
       {/* 뉴스 — full snapshot + idle/2s defer */}
       {showNews ? (
