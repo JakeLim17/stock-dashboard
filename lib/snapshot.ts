@@ -28,6 +28,7 @@ import {
   getCuratedUpcomingForSymbol,
 } from "./monthly-schedule";
 import { dedupeEventItems } from "./schedule-dedup";
+import { enrichSkGroupSnapshots } from "./sk-group";
 import {
   analyze,
   marketMoodLabel,
@@ -817,6 +818,8 @@ export async function fetchWatchlistSnapshots(
         r.reason instanceof Error ? r.reason.message : String(r.reason);
     }
   }
+
+  enrichSkGroupSnapshots(primaries);
 
   return { primaries, errors };
 }

@@ -7,6 +7,7 @@ import {
   PRIMARY_SYMBOLS,
   WATCHLIST_CANDIDATES,
 } from "@/lib/symbols";
+import { SK_HYNIX_CODE } from "@/lib/sk-group";
 import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
 import { useRealtime } from "@/hooks/useRealtime";
@@ -442,6 +443,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const visiblePrimaries = snap.primaries.filter((p) =>
     watchCodes.includes(p.meta.code)
   );
+  const hynixLeaderSnap = useMemo(
+    () => snap.primaries.find((p) => p.meta.code === SK_HYNIX_CODE),
+    [snap.primaries]
+  );
 
   // KIS WebSocket 실시간 구독 — 카드 가격/거래량 + 선택 종목 호가 즉시 갱신.
   // - feature flag NEXT_PUBLIC_REALTIME_ENABLED=true 일 때만 SSE 연결, 그 외엔 noop.
@@ -763,6 +768,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               snap={p}
               selected={p.meta.code === selected}
               variant={isMobile ? "mobile" : "desktop"}
+              groupLeaderSnap={hynixLeaderSnap}
               onSelect={(code) => {
                 setSelected(code);
                 // 모바일: 카드 탭 시 모달 대신 카드 내 인라인 상세(수급·컨센서스) 사용

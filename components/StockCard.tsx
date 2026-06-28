@@ -73,6 +73,7 @@ export function StockCard({
   /** mobile: 기본 정보만 / desktop: 카드에 분석·예측 블록까지 전부 */
   variant = "desktop",
   onOpenDetailSheet,
+  groupLeaderSnap,
 }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -86,10 +87,12 @@ export function StockCard({
   variant?: "mobile" | "desktop";
   /** 모바일 — 뉴스·호가 전체 패널(시트) 열기 */
   onOpenDetailSheet?: () => void;
+  /** SK 계열 — 하이닉스 스냅 (가격 연동) */
+  groupLeaderSnap?: StockSnapshot;
 }) {
   const isMobile = variant === "mobile";
   const { meta, quote, tech, analysis } = snap;
-  const fairValueHorizons = buildMultiHorizonFairValue(snap);
+  const fairValueHorizons = buildMultiHorizonFairValue(snap, { groupLeaderSnap });
   const { primary } = pickPrimaryQuote(quote);
   const currency = currencyOf(meta.code, meta.currency);
   const market = marketDisplayLabel(quote);
