@@ -765,7 +765,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               variant={isMobile ? "mobile" : "desktop"}
               onSelect={(code) => {
                 setSelected(code);
-                if (isMobile) setSheetOpen(true);
+                // 모바일: 카드 탭 시 모달 대신 카드 내 인라인 상세(수급·컨센서스) 사용
               }}
               krwRate={krwRate}
               kisActive={snap.kisActive}
@@ -773,6 +773,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               marketSemiHeat={snap.marketMood.semiHeat}
               priceOverride={realtimeFresh(p.meta.code)}
               tradeOverride={realtimeTradeFresh(p.meta.code)}
+              onOpenDetailSheet={
+                isMobile ? () => setSheetOpen(true) : undefined
+              }
             />
           </div>
         ))}

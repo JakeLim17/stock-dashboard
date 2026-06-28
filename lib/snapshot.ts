@@ -599,7 +599,7 @@ export async function fetchWatchlistSnapshots(
 
       const upcomingEventsMerged = dedupeEventItems([
         ...upcomingEvents,
-        ...getCuratedUpcomingForSymbol(meta.code, 60),
+        ...getCuratedUpcomingForSymbol(meta.code, 90),
       ]);
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);

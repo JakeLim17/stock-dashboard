@@ -352,6 +352,18 @@ function driftCenterForHorizon(
   return oneDay?.center ?? fallback;
 }
 
+function applyConsensusBlend(
+  price: number,
+  snap: StockSnapshot,
+  horizonId: FairValueHorizonId
+): number {
+  const target = snap.consensus?.targetMean;
+  if (target == null || target <= price) return price;
+  const weight = horizonId === "month" ? 0.3 : horizonId === "week" ? 0.18 : 0;
+  if (weight <= 0) return price;
+  return Math.round(price * (1 - weight) + target * weight);
+}
+
 export function buildFairValueEstimateForHorizon(
   snap: StockSnapshot,
   horizonId: FairValueHorizonId,
@@ -430,6 +442,7 @@ export function buildFairValueEstimateForHorizon(
   const macro = computeMacroFairValueAdjustment(snap, {
     skipGdrPremium: usedGdrInBlend,
     gapScale: macroGapScale(gapDays),
+    horizon: horizonId,
   });
 
   const session = formatTradingSessionLabel(sym.code, meta.sessionOffset);
@@ -441,7 +454,11 @@ export function buildFairValueEstimateForHorizon(
       horizonId === "today"
         ? driftCenter
         : blendCloseFromOpen(openBlend.price, driftCenter).price;
-    const closePrice = applyMacroPrice(closeBase, macro.rate);
+    const closePrice = applyConsensusBlend(
+      applyMacroPrice(closeBase, macro.rate),
+      snap,
+      horizonId
+    );
     const closeLeg: FairValueLeg = {
       price: closePrice,
       baseBlendedPrice: closeBase,

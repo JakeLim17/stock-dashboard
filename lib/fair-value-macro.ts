@@ -12,25 +12,40 @@ export interface MacroFairValueAdjustment {
   factors: MacroAdjustmentFactor[];
 }
 
-const MAX_MACRO_RATE = 0.035;
+export type MacroFairValueHorizon = "today" | "tomorrow" | "week" | "month";
 
-function clampRate(r: number): number {
-  return Math.max(-MAX_MACRO_RATE, Math.min(MAX_MACRO_RATE, r));
+const MAX_MACRO_RATE_BY_HORIZON: Record<MacroFairValueHorizon, number> = {
+  today: 0.035,
+  tomorrow: 0.035,
+  week: 0.06,
+  month: 0.09,
+};
+
+function clampRate(r: number, horizon: MacroFairValueHorizon): number {
+  const cap = MAX_MACRO_RATE_BY_HORIZON[horizon];
+  return Math.max(-cap, Math.min(cap, r));
 }
 
-/** 다가올 종목 일정 → 익일 추정 보정 (ADR·실적·커스텀 호재) */
+/** 다가올 종목 일정 → 추정 보정 (ADR·실적·커스텀 호재) */
 function calendarCatalystBps(
   events: StockSnapshot["upcomingEvents"],
-  symbolCode: string
+  symbolCode: string,
+  horizon: MacroFairValueHorizon
 ): number {
   if (!events?.length) return 0;
   const now = Date.now();
   let bps = 0;
+  const maxDays =
+    horizon === "month" ? 45 : horizon === "week" ? 30 : 21;
+  const horizonMult =
+    horizon === "month" ? 2.4 : horizon === "week" ? 1.6 : 1;
+  const maxBps =
+    horizon === "month" ? 120 : horizon === "week" ? 80 : 45;
 
   for (const e of events) {
     if (e.symbolCode && e.symbolCode !== symbolCode) continue;
     const daysUntil = (e.date - now) / 86_400_000;
-    if (daysUntil < -2 || daysUntil > 21) continue;
+    if (daysUntil < -2 || daysUntil > maxDays) continue;
 
     const label = `${e.label} ${e.detail ?? ""}`;
     const isAdr =
@@ -46,14 +61,27 @@ function calendarCatalystBps(
     const proximity =
       daysUntil <= 0 ? 0.5 : daysUntil <= 7 ? 1 : daysUntil <= 14 ? 0.7 : 0.45;
 
-    if (isAdr) bps += Math.round(32 * imp * proximity);
-    else if (isEarnings && daysUntil >= 0 && daysUntil <= 10)
-      bps += Math.round(18 * imp * proximity);
+    if (isAdr) bps += Math.round(32 * imp * proximity * horizonMult);
+    else if (isEarnings && daysUntil >= 0 && daysUntil <= (horizon === "month" ? 35 : 10))
+      bps += Math.round(18 * imp * proximity * horizonMult);
     else if (isCustomCatalyst)
-      bps += Math.round(14 * imp * proximity);
+      bps += Math.round(14 * imp * proximity * horizonMult);
   }
 
-  return Math.min(bps, 45);
+  return Math.min(bps, maxBps);
+}
+
+/** 애널리스트 컨센서스 목표가 — 장기 시계에서 드리프트 하한 보강 */
+function consensusAnchorBps(
+  snap: StockSnapshot,
+  horizon: MacroFairValueHorizon
+): number {
+  const upside = snap.consensus?.upsidePercent;
+  if (upside == null || upside <= 0.005) return 0;
+  const share =
+    horizon === "month" ? 0.42 : horizon === "week" ? 0.22 : 0;
+  if (share <= 0) return 0;
+  return Math.round(upside * share * 10_000);
 }
 
 function pushFactor(
@@ -71,6 +99,8 @@ export interface MacroFairValueOptions {
   skipGdrPremium?: boolean;
   /** 금→월 등 멀티데이 갭일 때 매크로 과대 보정 완화 (0~1) */
   gapScale?: number;
+  /** 예측 시계 — 장기일수록 호재·컨센서스 반영 확대 */
+  horizon?: MacroFairValueHorizon;
 }
 
 /** 익일 추정가 매크로·심리·지정학 보정 — predictor 산출물 + 시장 컨텍스트 재조합 */
@@ -78,7 +108,12 @@ export function computeMacroFairValueAdjustment(
   snap: StockSnapshot,
   options: MacroFairValueOptions = {}
 ): MacroFairValueAdjustment {
-  const { skipGdrPremium = false, gapScale = 1 } = options;
+  const {
+    skipGdrPremium = false,
+    gapScale = 1,
+    horizon = "tomorrow",
+  } = options;
+  const isLongHorizon = horizon === "week" || horizon === "month";
   const factors: MacroAdjustmentFactor[] = [];
   let rate = 0;
   const p = snap.predictions;
@@ -148,11 +183,13 @@ export function computeMacroFairValueAdjustment(
     );
   }
 
-  // ── 반도체 시장 과열 ───────────────────────────────────
-  if (ctx?.semiHeat != null) {
+  // ── 반도체 시장 과열 — 단기만 강하게, 장기는 호재 구간 완화 ─
+  if (ctx?.semiHeat != null && !isLongHorizon) {
     if (ctx.semiHeat >= 75) rate += pushFactor(factors, "반도체 과열", -35);
     else if (ctx.semiHeat >= 65) rate += pushFactor(factors, "반도체 과열", -18);
     else if (ctx.semiHeat <= 35) rate += pushFactor(factors, "반도체 냉각", 12);
+  } else if (ctx?.semiHeat != null && isLongHorizon && ctx.semiHeat <= 35) {
+    rate += pushFactor(factors, "반도체 냉각", 12);
   }
 
   // ── 지정학·관세 뉴스 리스크 ─────────────────────────────
@@ -164,19 +201,33 @@ export function computeMacroFairValueAdjustment(
 
   // ── 호재 뉴스 ─────────────────────────────────────────
   const opp = a.externalOpportunity;
-  if (opp?.level === "high") rate += pushFactor(factors, "호재 뉴스", 50);
-  else if (opp?.level === "medium") rate += pushFactor(factors, "호재 뉴스", 25);
+  const newsMult = isLongHorizon ? 1.5 : 1;
+  if (opp?.level === "high")
+    rate += pushFactor(factors, "호재 뉴스", Math.round(50 * newsMult));
+  else if (opp?.level === "medium")
+    rate += pushFactor(factors, "호재 뉴스", Math.round(25 * newsMult));
 
   // ── 다가올 캘린더 호재 (ADR·실적·커스텀) ───────────────
-  const catalystBps = calendarCatalystBps(snap.upcomingEvents, snap.meta.code);
+  const catalystBps = calendarCatalystBps(
+    snap.upcomingEvents,
+    snap.meta.code,
+    horizon
+  );
   if (catalystBps !== 0) {
     rate += pushFactor(factors, "일정 호재", catalystBps);
   }
 
-  // ── 심리 — 매수우위·과열 ───────────────────────────────
+  // ── 컨센서스 목표가 (장기 시계) ────────────────────────
+  const consensusBps = consensusAnchorBps(snap, horizon);
+  if (consensusBps !== 0) {
+    rate += pushFactor(factors, "컨센 목표", consensusBps);
+  }
+
+  // ── 심리 — 매수우위·과열 (단기 과열 페널티는 내일만) ───
   const sentimentBps = Math.round(((a.buyScore - 50) / 50) * 25);
   rate += pushFactor(factors, "매수 심리", sentimentBps);
-  if (a.heatScore >= 75) rate += pushFactor(factors, "단기 과열", -30);
+  if (!isLongHorizon && a.heatScore >= 75)
+    rate += pushFactor(factors, "단기 과열", -30);
   else if (a.heatScore <= 35) rate += pushFactor(factors, "과열 완화", 15);
 
   // ── 수급 (외인 5일) ───────────────────────────────────
@@ -218,5 +269,5 @@ export function computeMacroFairValueAdjustment(
     });
   }
 
-  return { rate: clampRate(rate), factors };
+  return { rate: clampRate(rate, horizon), factors };
 }

@@ -471,9 +471,9 @@ export function invalidateEventCalendarCache(code?: string): void {
 // 한국 종목은 야후가 종종 비워두지만 실패 안전 — 빈 배열 반환.
 export async function fetchEventsForSymbol(meta: SymbolMeta): Promise<EventItem[]> {
   const events = await getEventsForSymbolCached(meta);
-  // 다음 60일 이내만 카드용으로 반환. 더 먼 미래(컨센서스용)는 캐시에 둠.
+  // 다음 90일 이내만 카드용으로 반환. 1개월 예측·호재 반영에 여유.
   return events.filter(
-    (e) => e.date >= Date.now() - 86_400_000 && e.date <= Date.now() + 60 * 86_400_000
+    (e) => e.date >= Date.now() - 86_400_000 && e.date <= Date.now() + 90 * 86_400_000
   );
 }
 

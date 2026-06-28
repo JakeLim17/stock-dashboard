@@ -16,6 +16,7 @@ import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { CardSparkline } from "./CardSparkline";
 import { PredictionBlock } from "./PredictionBlock";
+import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
@@ -71,6 +72,7 @@ export function StockCard({
   marketSemiHeat,
   /** mobile: 기본 정보만 / desktop: 카드에 분석·예측 블록까지 전부 */
   variant = "desktop",
+  onOpenDetailSheet,
 }: {
   snap: StockSnapshot;
   onSelect?: (code: string) => void;
@@ -82,6 +84,8 @@ export function StockCard({
   priceOverride?: number | null;
   tradeOverride?: { cumVolume?: number; cumTradeValue?: number } | null;
   variant?: "mobile" | "desktop";
+  /** 모바일 — 뉴스·호가 전체 패널(시트) 열기 */
+  onOpenDetailSheet?: () => void;
 }) {
   const isMobile = variant === "mobile";
   const { meta, quote, tech, analysis } = snap;
@@ -236,17 +240,31 @@ export function StockCard({
           ) : null}
         </div>
 
-        {/* 익일 추정가 */}
-        <FairValueSection horizons={fairValueHorizons} currency={currency} />
+        {/* 익일 추정가 — 탭 클릭이 카드 선택(모달)으로 전파되지 않게 격리 */}
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <FairValueSection horizons={fairValueHorizons} currency={currency} />
+        </div>
 
         {/* 펀더멘털 — 카드 기본 정보 (모바일·데스크탑 공통) */}
-        <StockFundamentalsBlock
+        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <StockFundamentalsBlock
+            snap={snap}
+            krwRate={krwRate}
+            variant="card"
+            kisActive={kisActive}
+            tradeOverride={tradeOverride}
+            analysisPending={analysisPending}
+          />
+        </div>
+
+        {/* 수급 · 컨센서스 — 모달 대신 카드 아래 인라인 펼침 */}
+        <CardFlowConsensusExpand
           snap={snap}
           krwRate={krwRate}
-          variant="card"
           kisActive={kisActive}
-          tradeOverride={tradeOverride}
+          isMobile={isMobile}
           analysisPending={analysisPending}
+          onOpenDetailSheet={onOpenDetailSheet}
         />
 
         {/* 분석 요약 — 모바일은 한 줄, 데스크탑은 전체 */}
@@ -259,12 +277,14 @@ export function StockCard({
 
         {/* 데스크탑만 — 카드에 예측 블록 전체 */}
         {!isMobile && !analysisPending && (
-          <PredictionBlock snap={snap} krwRate={krwRate} />
+          <div onClick={(e) => e.stopPropagation()}>
+            <PredictionBlock snap={snap} krwRate={krwRate} />
+          </div>
         )}
 
         {isMobile && (
           <p className="text-[10px] text-muted-foreground text-center pt-1">
-            탭하여 예측 · 컨센서스 · 수급 · 호가 · 뉴스 보기
+            가격 추정 탭 · 수급·컨센서스 상세는 카드 안에서 펼쳐 보기
           </p>
         )}
       </CardBody>
@@ -278,6 +298,75 @@ const HORIZON_TABS: { id: FairValueHorizonId; short: string }[] = [
   { id: "week", short: "다음 주" },
   { id: "month", short: "1개월" },
 ];
+
+function CardFlowConsensusExpand({
+  snap,
+  krwRate,
+  kisActive,
+  isMobile,
+  analysisPending,
+  onOpenDetailSheet,
+}: {
+  snap: StockSnapshot;
+  krwRate?: number | null;
+  kisActive?: boolean;
+  isMobile: boolean;
+  analysisPending: boolean;
+  onOpenDetailSheet?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasConsensus = !!snap.consensus || !!snap.consensusValuation;
+
+  return (
+    <div
+      className="border-t border-border pt-2"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 text-left text-[11px] text-muted-foreground hover:text-foreground transition-colors py-1"
+        aria-expanded={open}
+      >
+        <span className="font-medium">
+          수급 · 컨센서스 {open ? "닫기" : "상세보기"}
+        </span>
+        <span className="text-[10px] tabular shrink-0">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+          {isMobile && !analysisPending && (
+            <PredictionBlock snap={snap} krwRate={krwRate} />
+          )}
+          {hasConsensus ? (
+            <ConsensusPanel snap={snap} embedded />
+          ) : (
+            <p className="text-[11px] text-muted-foreground px-1">
+              컨센서스 데이터를 불러오지 못했습니다.
+            </p>
+          )}
+          <StockFundamentalsBlock
+            snap={snap}
+            krwRate={krwRate}
+            variant="detail"
+            kisActive={kisActive}
+            analysisPending={analysisPending}
+          />
+          {isMobile && onOpenDetailSheet && (
+            <button
+              type="button"
+              onClick={onOpenDetailSheet}
+              className="w-full text-center text-[11px] text-muted-foreground hover:text-foreground py-1.5 border border-dashed border-border rounded-md"
+            >
+              뉴스 · 호가 보기
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FairValueSection({
   horizons,
@@ -303,7 +392,10 @@ function FairValueSection({
             <button
               key={t.id}
               type="button"
-              onClick={() => setActive(t.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActive(t.id);
+              }}
               className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
                 active === t.id
                   ? "bg-background font-semibold shadow-sm"
