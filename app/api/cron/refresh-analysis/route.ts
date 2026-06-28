@@ -13,7 +13,7 @@ function authorizeCron(req: Request): boolean {
   return header === secret;
 }
 
-/** Vercel Cron — 1시간마다 PRIMARY+추천풀 경량 재분석 → analysis_cache 저장 */
+/** Vercel Cron — 3시간마다 PRIMARY+추천풀 경량 재분석 → analysis_cache 저장 */
 export async function GET(req: Request) {
   if (!authorizeCron(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

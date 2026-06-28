@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   formatNextTradingSessionLabel,
   getNextTradingSessionDate,
+  calendarDaysToNextSession,
 } from "./fair-value-trading-day";
 
 describe("getNextTradingSessionDate", () => {
@@ -26,5 +27,11 @@ describe("getNextTradingSessionDate", () => {
     const wed = new Date("2026-06-18T15:00:00+09:00");
     const label = formatNextTradingSessionLabel("005930.KS", wed);
     assert.equal(label.shortLabel, "6/19(금)");
+  });
+
+  it("금→월 달력 갭은 3일 근처", () => {
+    const fri = new Date("2026-06-19T18:00:00+09:00");
+    const days = calendarDaysToNextSession("005930.KS", fri);
+    assert.ok(days >= 2.5 && days <= 3.5);
   });
 });

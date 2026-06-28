@@ -52,8 +52,8 @@ interface SparklineBody {
   marketType: "kr" | "us" | "other";
 }
 
-const CACHE_TTL_REGULAR_MS = 60_000;
-const CACHE_TTL_AFTER_CLOSE_MS = 300_000;
+const CACHE_TTL_REGULAR_MS = 120_000;
+const CACHE_TTL_AFTER_CLOSE_MS = 600_000;
 const cache = new Map<string, CacheEntry>();
 
 // KST 현재 시각의 HH*60+MM 분 단위 값. UTC+9 오프셋만 적용 (서버 timezone 무관).

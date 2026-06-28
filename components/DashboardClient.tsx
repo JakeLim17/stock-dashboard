@@ -45,10 +45,9 @@ async function logout() {
   window.location.replace("/login");
 }
 
-// ─── 폴링 주기 (2026-06 복원) ──────────────────────────────────
-// 정규장은 5s (사용자 체감 우선). 시간외/오프아워는 길게 유지.
-// sparkline 캐시 TTL 상향 + Yahoo timeout 8s 로 한도 부담 상쇄.
-// 사용자가 절감하고 싶으면 Vercel env 에서 NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS 등으로 override.
+// ─── 폴링 주기 (2026-06 Vercel 절감) ─────────────────────────────
+// 정규장 기본 12s — 5s 대비 함수 호출 ~60% 절감. 체감은 WS 실시간가 보완.
+// env 로 override 가능 (NEXT_PUBLIC_POLL_INTERVAL_*).
 function envInt(key: string, fallback: number): number {
   if (typeof process === "undefined") return fallback;
   const raw = process.env[key];
@@ -57,27 +56,32 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 5_000);
-const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 30_000);
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 12_000);
+const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 45_000);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
-  60_000
+  90_000
 );
 const OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OFF_HOURS_MS",
-  180_000
+  300_000
 );
 const KIS_REGULAR_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_REGULAR_MS",
-  5_000
+  10_000
 );
 const KIS_EXTENDED_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_EXTENDED_MS",
-  30_000
+  45_000
 );
 const KIS_OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_OFF_HOURS_MS",
-  120_000
+  180_000
+);
+/** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
+const FULL_SNAPSHOT_MIN_MS = envInt(
+  "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
+  180_000
 );
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
@@ -125,6 +129,27 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   return OFF_HOURS_REFRESH_MS;
 }
 
+/** lite 응답은 시세·지표만 갱신 — 분석·예측·뉴스는 full 스냅샷 유지 */
+function mergeLiteIntoSnapshot(
+  prev: DashboardSnapshot,
+  lite: DashboardSnapshot
+): DashboardSnapshot {
+  const quoteByCode = new Map(lite.primaries.map((p) => [p.meta.code, p.quote]));
+  return {
+    ...prev,
+    generatedAt: lite.generatedAt,
+    indicators: lite.indicators,
+    marketMood: lite.marketMood,
+    macroEvents: lite.macroEvents,
+    kisActive: lite.kisActive,
+    errors: { ...prev.errors, ...lite.errors },
+    primaries: prev.primaries.map((p) => {
+      const q = quoteByCode.get(p.meta.code);
+      return q ? { ...p, quote: q } : p;
+    }),
+  };
+}
+
 export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [snap, setSnap] = useState(initial);
   const [watchCodes, setWatchCodes] = useState<string[]>(
@@ -160,6 +185,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const lastSelectedSnapRef = useRef<DashboardSnapshot["primaries"][number] | null>(
     initial.primaries[0] ?? null
   );
+  const lastFullFetchAtRef = useRef<number>(
+    initial.phase === "full" ? Date.now() : 0
+  );
   // 모바일 sheet "예측" 탭 점프 등 외부 제어용 ref. 데스크탑/모바일 양쪽 동일 사용.
   const detailRef = useRef<StockDetailPanelHandle>(null);
   useEffect(() => {
@@ -186,8 +214,14 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       const target = codes ?? watchCodesRef.current;
       const query = encodeURIComponent(target.join(","));
       const includeNight = nightMode ?? overseasNightRef.current;
+      const now = Date.now();
+      const needsFull =
+        force ||
+        lastFullFetchAtRef.current === 0 ||
+        now - lastFullFetchAtRef.current >= FULL_SNAPSHOT_MIN_MS;
+      const useLite = !force && !needsFull;
       const requestKey = `${query}:${includeNight ? "night" : "regular"}:${
-        force ? "force" : "soft"
+        force ? "force" : useLite ? "lite" : "full"
       }`;
       lastQueryRef.current = requestKey;
 
@@ -200,8 +234,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       try {
         const r = await fetch(
           `/api/snapshot?symbols=${query}${includeNight ? "&night=1" : ""}${
-            force ? "&refresh=1" : ""
-          }`,
+            useLite ? "&lite=1" : ""
+          }${force ? "&refresh=1" : ""}`,
           {
             cache: "no-store",
             signal: ctrl.signal,
@@ -210,7 +244,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
         const j = (await r.json()) as DashboardSnapshot;
         if (lastQueryRef.current === requestKey) {
-          setSnap(j);
+          if (useLite) {
+            setSnap((prev) => mergeLiteIntoSnapshot(prev, j));
+          } else {
+            lastFullFetchAtRef.current = Date.now();
+            setSnap(j);
+          }
         }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;

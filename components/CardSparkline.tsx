@@ -45,7 +45,7 @@ export function CardSparkline({
   code,
   currentPrice,
   height = 32,
-  pollMs = 60_000,
+  pollMs = 120_000,
   className,
 }: Props) {
   const [data, setData] = useState<ApiResp | null>(null);

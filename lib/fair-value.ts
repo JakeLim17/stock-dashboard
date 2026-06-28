@@ -2,7 +2,10 @@ import {
   computeMacroFairValueAdjustment,
   type MacroAdjustmentFactor,
 } from "./fair-value-macro";
-import { formatNextTradingSessionLabel } from "./fair-value-trading-day";
+import {
+  calendarDaysToNextSession,
+  formatNextTradingSessionLabel,
+} from "./fair-value-trading-day";
 import type { OverseasNightIndicator, Quote, StockSnapshot } from "./types";
 
 export type { MacroAdjustmentFactor, MacroFairValueAdjustment } from "./fair-value-macro";
@@ -203,6 +206,20 @@ export function isKrMarketClosed(quote: Quote): boolean {
   );
 }
 
+/** GDR 시세가 18h+ 지나면 주말·월요일 새벽에 금요일 값으로 편향될 수 있음 */
+const GDR_STALE_MS = 18 * 3_600_000;
+
+function isGdrQuoteStale(fetchedAt?: number | null): boolean {
+  if (fetchedAt == null) return false;
+  return Date.now() - fetchedAt > GDR_STALE_MS;
+}
+
+/** 금→월 등 달력 갭이 클 때 매크로 보정 축소 */
+export function macroGapScale(calendarDays: number): number {
+  if (calendarDays <= 1.25) return 1;
+  return Math.min(1, 1 / Math.sqrt(calendarDays));
+}
+
 export function blendFairValuePrice(input: FairValueInput): {
   price: number;
   methodLabel: string;
@@ -287,11 +304,18 @@ export function buildFairValueEstimate(
   const oneDay = predictions?.ranges.find((r) => r.horizonDays === 1);
   const driftCenter = oneDay?.center ?? settlement.settlementPrice;
 
+  const gdrStale = isGdrQuoteStale(overseasNight?.fetchedAt);
+  const gdrImplied =
+    gdrStale || overseasNight?.impliedKrwPrice == null
+      ? null
+      : overseasNight.impliedKrwPrice;
+  const usedGdrInBlend = gdrImplied != null && gdrImplied > 0;
+
   const openBlend = blendFairValuePrice({
     live: settlement.settlementPrice,
     prevClose: settlement.prevSettlement,
     driftCenter,
-    gdrImpliedKrw: overseasNight?.impliedKrwPrice,
+    gdrImpliedKrw: gdrImplied,
     marketClosed: isKrMarketClosed(quote),
     weights,
   });
@@ -304,7 +328,11 @@ export function buildFairValueEstimate(
     };
   }
 
-  const macro = computeMacroFairValueAdjustment(snap);
+  const gapDays = calendarDaysToNextSession(meta.code);
+  const macro = computeMacroFairValueAdjustment(snap, {
+    skipGdrPremium: usedGdrInBlend,
+    gapScale: macroGapScale(gapDays),
+  });
   const openBase = openBlend.price;
   const openPrice = applyMacroPrice(openBase, macro.rate);
   const closeBlend = blendCloseFromOpen(openBase, driftCenter);

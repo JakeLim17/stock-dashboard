@@ -6,7 +6,9 @@ import {
   type FairValueCloseExtension,
   FAIR_VALUE_WEIGHTS,
   FAIR_VALUE_CLOSE_EXTENSION,
+  macroGapScale,
 } from "./fair-value";
+import { weekdayLabelInTz } from "./fair-value-trading-day";
 
 export type FairValueScenario =
   | "openToClose"
@@ -23,6 +25,8 @@ export interface FairValueBacktestRow {
   errorAbs: number;
   errorPct: number;
   directionHit: boolean;
+  /** 기준가(live) 대비 하락 예측 여부 */
+  predictedDown: boolean;
 }
 
 export interface FairValueBacktestSummary {
@@ -200,6 +204,7 @@ function runScenario(
       errorAbs,
       errorPct,
       directionHit,
+      predictedDown: estDir < 0,
     });
   }
 
@@ -229,6 +234,101 @@ function summarize(
     rows,
   };
 }
+
+export interface WeekdayBacktestBucket {
+  weekday: string;
+  samples: number;
+  directionAccuracy: number;
+  bearishPredictions: number;
+  bearishRate: number;
+  mape: number;
+}
+
+/** 익일(다음 봉) 요일별 방향 적중률 — 월요일 하락 편향 검증용 */
+export function backtestFairValueByTargetWeekday(
+  input: FairValueBacktestInput,
+  scenario: FairValueScenario = "nightToNextOpen"
+): WeekdayBacktestBucket[] {
+  const summaries = backtestFairValue(input);
+  const target = summaries.find((s) => s.scenario === scenario);
+  if (!target || target.rows.length === 0) return [];
+
+  const buckets = new Map<
+    string,
+    { hits: number; n: number; bearish: number; mapeSum: number }
+  >();
+
+  for (const row of target.rows) {
+    const nextIdx = input.stockHist.findIndex((p) => p.date === row.date);
+    if (nextIdx < 0 || nextIdx >= input.stockHist.length - 1) continue;
+    const nextBar = input.stockHist[nextIdx + 1];
+    if (!nextBar) continue;
+
+    const wd = weekdayLabelInTz(new Date(nextBar.date), "Asia/Seoul");
+    const b = buckets.get(wd) ?? { hits: 0, n: 0, bearish: 0, mapeSum: 0 };
+    b.n += 1;
+    if (row.directionHit) b.hits += 1;
+    if (row.predictedDown) b.bearish += 1;
+    b.mapeSum += row.errorPct;
+    buckets.set(wd, b);
+  }
+
+  const order = ["월", "화", "수", "목", "금"];
+  return order
+    .filter((wd) => buckets.has(wd))
+    .map((wd) => {
+      const b = buckets.get(wd)!;
+      return {
+        weekday: wd,
+        samples: b.n,
+        directionAccuracy: b.n > 0 ? b.hits / b.n : 0,
+        bearishPredictions: b.bearish,
+        bearishRate: b.n > 0 ? b.bearish / b.n : 0,
+        mape: b.n > 0 ? b.mapeSum / b.n : 0,
+      };
+    });
+}
+
+/** 금→월(3일 갭) vs 평일(1일) 시나리오 비교 */
+export function summarizeGapBias(
+  input: FairValueBacktestInput,
+  scenario: FairValueScenario = "nightToNextOpen"
+): { weekdayGap: number; weekendGap: number; weekdayDir: number; weekendDir: number } {
+  const summaries = backtestFairValue(input);
+  const target = summaries.find((s) => s.scenario === scenario);
+  if (!target) {
+    return { weekdayGap: 1, weekendGap: 3, weekdayDir: 0, weekendDir: 0 };
+  }
+
+  let wdHits = 0;
+  let wdN = 0;
+  let weHits = 0;
+  let weN = 0;
+
+  for (const row of target.rows) {
+    const curIdx = input.stockHist.findIndex((p) => p.date === row.date);
+    if (curIdx < 0) continue;
+    const curBar = input.stockHist[curIdx];
+    const curWd = new Date(curBar.date).getUTCDay();
+    const isFriday = curWd === 5;
+    if (isFriday) {
+      weN += 1;
+      if (row.directionHit) weHits += 1;
+    } else if (curWd >= 1 && curWd <= 4) {
+      wdN += 1;
+      if (row.directionHit) wdHits += 1;
+    }
+  }
+
+  return {
+    weekdayGap: 1,
+    weekendGap: 3,
+    weekdayDir: wdN > 0 ? wdHits / wdN : 0,
+    weekendDir: weN > 0 ? weHits / weN : 0,
+  };
+}
+
+export { macroGapScale };
 
 export function backtestFairValue(
   input: FairValueBacktestInput

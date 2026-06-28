@@ -28,10 +28,19 @@ function pushFactor(
   return bps / 10_000;
 }
 
+export interface MacroFairValueOptions {
+  /** GDR 혼합(blendFairValuePrice)에 이미 반영됐으면 괴리 중복 보정 생략 */
+  skipGdrPremium?: boolean;
+  /** 금→월 등 멀티데이 갭일 때 매크로 과대 보정 완화 (0~1) */
+  gapScale?: number;
+}
+
 /** 익일 추정가 매크로·심리·지정학 보정 — predictor 산출물 + 시장 컨텍스트 재조합 */
 export function computeMacroFairValueAdjustment(
-  snap: StockSnapshot
+  snap: StockSnapshot,
+  options: MacroFairValueOptions = {}
 ): MacroFairValueAdjustment {
+  const { skipGdrPremium = false, gapScale = 1 } = options;
   const factors: MacroAdjustmentFactor[] = [];
   let rate = 0;
   const p = snap.predictions;
@@ -134,14 +143,16 @@ export function computeMacroFairValueAdjustment(
     else if (eok <= -300) rate += pushFactor(factors, "외인 5일 순매도", -22);
   }
 
-  // ── GDR 괴리 (야간 심리) ──────────────────────────────
-  const prem = snap.overseasNight?.premiumRate;
-  if (prem != null && Math.abs(prem) > 0.005) {
-    rate += pushFactor(
-      factors,
-      "GDR 괴리",
-      Math.round(prem * 0.25 * 10_000)
-    );
+  // GDR 괴리는 blendFairValuePrice(야간 60% 가중)에 이미 반영 — 중복 시 월요일 하락 편향.
+  if (!skipGdrPremium) {
+    const prem = snap.overseasNight?.premiumRate;
+    if (prem != null && Math.abs(prem) > 0.005) {
+      rate += pushFactor(
+        factors,
+        "GDR 괴리",
+        Math.round(prem * 0.25 * 10_000)
+      );
+    }
   }
 
   // ── 모델 신뢰도로 전체 축소 ───────────────────────────
@@ -151,6 +162,14 @@ export function computeMacroFairValueAdjustment(
     rate *= scale;
     factors.push({
       label: `신뢰도 ${Math.round(confScore * 100)}%`,
+      bps: 0,
+    });
+  }
+
+  if (gapScale < 0.999) {
+    rate *= gapScale;
+    factors.push({
+      label: `갭 ${gapScale < 1 ? "완화" : ""}×${gapScale.toFixed(2)}`,
       bps: 0,
     });
   }

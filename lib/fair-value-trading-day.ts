@@ -50,6 +50,26 @@ export function getNextTradingSessionDate(
   return cursor;
 }
 
+/** now → 다음 거래일까지 달력 일수 (금→월 ≈ 3). 매크로 보정 스케일용. */
+export function calendarDaysToNextSession(
+  code: string,
+  now = new Date()
+): number {
+  const target = getNextTradingSessionDate(code, now);
+  const diffMs = target.getTime() - now.getTime();
+  return Math.max(1, diffMs / 86_400_000);
+}
+
+/** 다음 거래일 요일 라벨 (월·화·…) — 백테스트·검증용 */
+export function weekdayLabelInTz(date: Date, tz: string): string {
+  return (
+    new Intl.DateTimeFormat("ko-KR", {
+      timeZone: tz,
+      weekday: "short",
+    }).format(date) || "?"
+  );
+}
+
 /** 카드 표시용 — "6/23(월) 예상" */
 export function formatNextTradingSessionLabel(
   code: string,

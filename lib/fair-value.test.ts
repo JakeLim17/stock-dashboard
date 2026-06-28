@@ -4,8 +4,19 @@ import {
   buildFairValueEstimate,
   blendCloseFromOpen,
   getSettlementContext,
+  macroGapScale,
 } from "./fair-value";
 import type { Quote, StockSnapshot } from "./types";
+
+describe("macroGapScale", () => {
+  it("1일 갭은 1", () => {
+    assert.equal(macroGapScale(1), 1);
+  });
+  it("3일 갭은 완화", () => {
+    assert.ok(macroGapScale(3) < 0.7);
+    assert.ok(macroGapScale(3) > 0.5);
+  });
+});
 
 function quote(overrides: Partial<Quote> = {}): Quote {
   return {

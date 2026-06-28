@@ -161,17 +161,14 @@ export interface WatchlistDeps {
 // snapshot/indicator 둘 다 같은 패턴(`consensusCache.ts`)의 in-flight + soft TTL.
 // ──────────────────────────────────────────────────────────────
 
-// 시장 지표 — 15s TTL (2026-06 응급 절감, 기존 5s).
-// Vercel Hobby CPU 한도 보호 — 카드 단위로 부담이 큰 history fetch 가 동반된다.
-// 체감 영향 거의 없음 (지수는 분 단위로 움직임).
-const MARKET_INDICATOR_TTL_MS = 15_000;
+// 시장 지표 — 30s TTL (Vercel 절감).
+const MARKET_INDICATOR_TTL_MS = 30_000;
 type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
 let marketIndicatorCache: MarketIndicatorCache | null = null;
 let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
 
-// 풀 스냅샷 — 5s TTL (2026-06 응급 절감, 기존 2s).
-// 동일 symbols+옵션이면 직전 응답 재사용. 사용자 폴링 주기(기본 5~15s)와 정렬.
-const SNAPSHOT_TTL_MS = 5_000;
+// 풀 스냅샷 — 20s TTL. 클라이언트 폴링(12s)+lite 분리와 맞춤.
+const SNAPSHOT_TTL_MS = 20_000;
 type SnapshotCache = { data: DashboardSnapshot; at: number };
 const snapshotCache = new Map<string, SnapshotCache>();
 const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
@@ -868,7 +865,7 @@ async function buildSnapshotLiteCore(
   };
 }
 
-const LITE_SNAPSHOT_TTL_MS = 3_000;
+const LITE_SNAPSHOT_TTL_MS = 12_000;
 type LiteSnapshotCache = { data: DashboardSnapshot; at: number };
 const liteSnapshotCache = new Map<string, LiteSnapshotCache>();
 const liteSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();

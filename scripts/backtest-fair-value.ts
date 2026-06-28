@@ -6,8 +6,10 @@ import YahooFinance from "yahoo-finance2";
 import type { HistoricalPoint } from "../lib/providers/yahoo";
 import {
   backtestFairValue,
+  backtestFairValueByTargetWeekday,
   optimizeFairValueWeights,
   optimizeCloseExtension,
+  summarizeGapBias,
 } from "../lib/fair-value-backtest";
 import { FAIR_VALUE_WEIGHTS } from "../lib/fair-value";
 
@@ -63,6 +65,23 @@ async function main() {
       `${s.scenario}: n=${s.samples} MAPE=${(s.mape * 100).toFixed(2)}% MAE=${Math.round(s.mae).toLocaleString()} 방향=${(s.directionAccuracy * 100).toFixed(1)}%`
     );
   }
+
+  console.log("\n=== 익일 요일별 방향 적중 (nightToNextOpen) ===");
+  console.log(
+    "요일 | n | 방향적중 | 하락예측비율 | MAPE"
+  );
+  for (const b of backtestFairValueByTargetWeekday(input, "nightToNextOpen")) {
+    console.log(
+      `${b.weekday} | ${b.samples} | ${(b.directionAccuracy * 100).toFixed(1)}% | ${(b.bearishRate * 100).toFixed(1)}% | ${(b.mape * 100).toFixed(2)}%`
+    );
+  }
+
+  const gap = summarizeGapBias(input, "nightToNextOpen");
+  console.log(
+    `\n=== 금→월 vs 평일 (nightToNextOpen) ===\n` +
+      `평일(월~목) 방향적중: ${(gap.weekdayDir * 100).toFixed(1)}%\n` +
+      `금요일→월요일 방향적중: ${(gap.weekendDir * 100).toFixed(1)}%`
+  );
 
   const opt = optimizeFairValueWeights(input, "nightToNextClose");
   console.log("\n=== nightToNextClose 최적 가중치 ===");
