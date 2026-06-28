@@ -29,6 +29,10 @@ import {
 } from "./monthly-schedule";
 import { dedupeEventItems } from "./schedule-dedup";
 import {
+  getGroupCatalystPeer,
+  spilloverLeaderEvents,
+} from "./symbol-groups";
+import {
   analyze,
   marketMoodLabel,
   predict,
@@ -50,6 +54,7 @@ import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
 import {
   PRIMARY_SYMBOLS,
   MARKET_INDICATORS,
+  WATCHLIST_CANDIDATES,
   getOverseasNightProxy,
   resolveWatchSymbols,
 } from "./symbols";
@@ -166,14 +171,14 @@ export interface WatchlistDeps {
 // snapshot/indicator 둘 다 같은 패턴(`consensusCache.ts`)의 in-flight + soft TTL.
 // ──────────────────────────────────────────────────────────────
 
-// 시장 지표 — 30s TTL (Vercel 절감).
-const MARKET_INDICATOR_TTL_MS = 30_000;
+// 시장 지표 — 60s TTL (Vercel 절감, CDN s-maxage와 맞춤).
+const MARKET_INDICATOR_TTL_MS = 60_000;
 type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
 let marketIndicatorCache: MarketIndicatorCache | null = null;
 let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
 
-// 풀 스냅샷 — 20s TTL. 클라이언트 폴링(12s)+lite 분리와 맞춤.
-const SNAPSHOT_TTL_MS = 20_000;
+// 풀 스냅샷 — 60s TTL. CDN s-maxage(600s)보다 짧게 — 동일 인스턴스 내 중복만 막음.
+const SNAPSHOT_TTL_MS = 60_000;
 type SnapshotCache = { data: DashboardSnapshot; at: number };
 const snapshotCache = new Map<string, SnapshotCache>();
 const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
@@ -597,10 +602,27 @@ export async function fetchWatchlistSnapshots(
         fetchEventsForSymbol(meta).catch(() => []),
       ]);
 
-      const upcomingEventsMerged = dedupeEventItems([
+      let upcomingEventsMerged = dedupeEventItems([
         ...upcomingEvents,
         ...getCuratedUpcomingForSymbol(meta.code, 90),
       ]);
+
+      const peer = getGroupCatalystPeer(meta.code);
+      if (peer && peer.leaderCode !== meta.code) {
+        const leaderInWatch = watchSymbols.find((m) => m.code === peer.leaderCode);
+        const leaderMeta =
+          leaderInWatch ??
+          WATCHLIST_CANDIDATES.find((m) => m.code === peer.leaderCode);
+        if (leaderMeta) {
+          const leaderApiEvents = await fetchEventsForSymbol(leaderMeta).catch(
+            () => []
+          );
+          upcomingEventsMerged = dedupeEventItems([
+            ...upcomingEventsMerged,
+            ...spilloverLeaderEvents(meta.code, leaderApiEvents),
+          ]);
+        }
+      }
 
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote: typeof quoteRes.quote = {
@@ -879,7 +901,7 @@ async function buildSnapshotLiteCore(
   };
 }
 
-const LITE_SNAPSHOT_TTL_MS = 12_000;
+const LITE_SNAPSHOT_TTL_MS = 40_000;
 type LiteSnapshotCache = { data: DashboardSnapshot; at: number };
 const liteSnapshotCache = new Map<string, LiteSnapshotCache>();
 const liteSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();

@@ -1,4 +1,5 @@
 import type { StockSnapshot } from "./types";
+import { getGroupCatalystPeer } from "./symbol-groups";
 
 export interface MacroAdjustmentFactor {
   label: string;
@@ -61,11 +62,15 @@ function calendarCatalystBps(
     const proximity =
       daysUntil <= 0 ? 0.5 : daysUntil <= 7 ? 1 : daysUntil <= 14 ? 0.7 : 0.45;
 
-    if (isAdr) bps += Math.round(32 * imp * proximity * horizonMult);
+    const peer = getGroupCatalystPeer(symbolCode);
+    const spillMult =
+      peer && /연동|수혜/i.test(label) ? peer.catalystShare : 1;
+
+    if (isAdr) bps += Math.round(32 * imp * proximity * horizonMult * spillMult);
     else if (isEarnings && daysUntil >= 0 && daysUntil <= (horizon === "month" ? 35 : 10))
-      bps += Math.round(18 * imp * proximity * horizonMult);
+      bps += Math.round(18 * imp * proximity * horizonMult * spillMult);
     else if (isCustomCatalyst)
-      bps += Math.round(14 * imp * proximity * horizonMult);
+      bps += Math.round(14 * imp * proximity * horizonMult * spillMult);
   }
 
   return Math.min(bps, maxBps);

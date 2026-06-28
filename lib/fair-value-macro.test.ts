@@ -112,4 +112,24 @@ describe("computeMacroFairValueAdjustment horizon", () => {
     assert.ok(!month.factors.some((f) => f.label === "단기 과열"));
     assert.ok(!month.factors.some((f) => f.label === "반도체 과열"));
   });
+
+  it("SK스퀘어는 하이닉스 ADR 일정 호재를 장기에 반영", () => {
+    const snap = baseSnap();
+    snap.meta = { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock" };
+    snap.quote.code = "402340.KS";
+    snap.quote.name = "SK스퀘어";
+    snap.upcomingEvents = [
+      {
+        kind: "earnings",
+        date: Date.now() + 10 * 86_400_000,
+        label: "SK하이닉스 미국 ADR 상장",
+        importance: "medium",
+        symbolCode: "402340.KS",
+        detail: "하이닉스 ADR·실적 연동",
+      },
+    ];
+    const month = computeMacroFairValueAdjustment(snap, { horizon: "month" });
+    assert.ok(month.rate > 0);
+    assert.ok(month.factors.some((f) => f.label === "일정 호재"));
+  });
 });

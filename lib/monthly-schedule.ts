@@ -8,10 +8,15 @@ import {
 } from "./providers/eventCalendar";
 import { dedupeEventItems, dedupeScheduleEntries } from "./schedule-dedup";
 import { PRIMARY_SYMBOLS, WATCHLIST_CANDIDATES } from "./symbols";
+import {
+  GROUP_CATALYST_PEERS,
+  spilloverLeaderEvents,
+} from "./symbol-groups";
 
 /** 월별 일정에 실적·배당을 자동 수집할 종목 (PRIMARY + SK·LG 계열) */
 const SCHEDULE_SYMBOL_CODES = [
   ...PRIMARY_SYMBOLS.map((m) => m.code),
+  "034730.KS", // SK (지주)
   "402340.KS", // SK스퀘어
   "096770.KS", // SK이노베이션
   "017670.KS", // SK텔레콤
@@ -124,6 +129,17 @@ const CURATED_SCHEDULE: ScheduleEntry[] = [
     detail: "지주사 지분가치 재평가 — 하이닉스 본주 부담 시 대안",
   },
   {
+    id: "curated-2026-06-sk-holdings-benefit",
+    startDate: kstMidnight(2026, 6, 22),
+    endDate: kstMidnight(2026, 7, 10),
+    label: "SK — 하이닉스 ADR·계열 호재",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "034730.KS",
+    importance: "medium",
+    detail: "SK 지주 — 하이닉스 지분가치·ADR 상장 기대 연동",
+  },
+  {
     id: "curated-2026-06-samsung-buyback",
     startDate: kstMidnight(2026, 6, 10),
     endDate: kstMidnight(2026, 6, 25),
@@ -205,6 +221,17 @@ const CURATED_SCHEDULE: ScheduleEntry[] = [
     symbolCode: "402340.KS",
     importance: "medium",
     detail: "SK 지주·하이닉스 지분가치 재평가 구간 (7/10 ADR 상장 전후)",
+  },
+  {
+    id: "curated-2026-07-sk-holdings-adr",
+    startDate: kstMidnight(2026, 7, 6),
+    endDate: kstMidnight(2026, 7, 10),
+    label: "SK — 하이닉스 ADR 상장 수혜",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "034730.KS",
+    importance: "medium",
+    detail: "SK 지주 — 하이닉스 지분가치·ADR 랠리 연동",
   },
   {
     id: "curated-2026-07-lg-display",
@@ -306,14 +333,17 @@ function scheduleToEventItem(e: ScheduleEntry): EventItem {
   };
 }
 
-/** 종목 전용 커스텀 — 글로벌 일정은 macro 경로로만 */
+/** 종목 전용 커스텀 — 글로벌 일정은 macro 경로로만. SK 계열은 하이닉스 리더 일정 전이 */
 export function getCuratedUpcomingForSymbol(
   symbolCode: string,
   daysAhead = 60
 ): EventItem[] {
-  return getCuratedEventsMerged(daysAhead).filter(
-    (e) => e.symbolCode === symbolCode
-  );
+  const merged = getCuratedEventsMerged(daysAhead);
+  const own = merged.filter((e) => e.symbolCode === symbolCode);
+  const leaderCode = GROUP_CATALYST_PEERS[symbolCode]?.leaderCode;
+  if (!leaderCode || leaderCode === symbolCode) return own;
+  const leaderEvents = merged.filter((e) => e.symbolCode === leaderCode);
+  return [...own, ...spilloverLeaderEvents(symbolCode, leaderEvents)];
 }
 
 /** 매크로+커스텀 전체 (종목 무관) — EventCalendar·macroEvents 보강용 */

@@ -61,7 +61,7 @@ export function DashboardShell() {
     (async () => {
       try {
         const r = await fetch(buildSnapshotUrl(true), {
-          cache: "no-store",
+          cache: "default",
           signal: ctrl.signal,
         });
         if (!r.ok) throw new Error(`서버 오류 ${r.status}`);

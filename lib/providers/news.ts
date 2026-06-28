@@ -118,6 +118,9 @@ const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
   { q: "Samsung Electronics", symbol: "005930.KS", lang: "en" },
   { q: "SK하이닉스", symbol: "000660.KS", lang: "ko" },
   { q: "SK Hynix HBM", symbol: "000660.KS", lang: "en" },
+  { q: "SK스퀘어", symbol: "402340.KS", lang: "ko" },
+  { q: "SK Square", symbol: "402340.KS", lang: "en" },
+  { q: "SK지주", symbol: "034730.KS", lang: "ko" },
   { q: "삼성전기", symbol: "009150.KS", lang: "ko" },
 
   // ── IT가전·자동차 ────────────────────────────────────────
@@ -392,6 +395,8 @@ const US_TICKER_TO_KO: Record<string, string> = {
 const KR_SYMBOL_TO_NAME: Record<string, string> = {
   "005930.KS": "삼성전자",
   "000660.KS": "SK하이닉스",
+  "402340.KS": "SK스퀘어",
+  "034730.KS": "SK",
   "009150.KS": "삼성전기",
   "066570.KS": "LG전자",
   "005380.KS": "현대차",
