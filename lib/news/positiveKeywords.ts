@@ -211,6 +211,30 @@ export const POSITIVE_KEYWORDS: OpportunityKeyword[] = [
   // 단독으로 호재 분류가 가능하도록 weight 2~3 범위. 너무 일반적인 단어("성공",
   // "확대")는 weight 1 로 차등. classifySentiment 임계값(1.5)과 맞물려 약 신호도 잡힘.
   { pattern: /(신고가\s*경신|신고가)/i, weight: 4, category: "실적호조", label: "신고가" },
+  {
+    pattern: /(ADR|예탁증권).*?(상장|listing|debut)/i,
+    weight: 5,
+    category: "신제품/기술",
+    label: "ADR 상장",
+  },
+  {
+    pattern: /(나스닥|NASDAQ).*?(상장|listing|debut)/i,
+    weight: 5,
+    category: "신제품/기술",
+    label: "나스닥 상장",
+  },
+  {
+    pattern: /(상장\s*기대|상장\s*임박|상장\s*추진|상장\s*준비)/i,
+    weight: 4,
+    category: "신제품/기술",
+    label: "상장 기대",
+  },
+  {
+    pattern: /(HBM|고대역폭\s*메모리|high.?bandwidth\s*memory)/i,
+    weight: 3,
+    category: "신제품/기술",
+    label: "HBM",
+  },
   { pattern: /(흑자|흑자\s*기록)/i, weight: 3, category: "실적호조", label: "흑자" },
   { pattern: /(컨센서스\s*상회|컨센\s*상회)/i, weight: 4, category: "실적호조", label: "컨센 상회" },
   { pattern: /(가이던스\s*상향|가이던스\s*올림)/i, weight: 4, category: "실적호조", label: "가이던스 상향" },

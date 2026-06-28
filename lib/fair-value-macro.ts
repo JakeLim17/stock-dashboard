@@ -18,6 +18,44 @@ function clampRate(r: number): number {
   return Math.max(-MAX_MACRO_RATE, Math.min(MAX_MACRO_RATE, r));
 }
 
+/** 다가올 종목 일정 → 익일 추정 보정 (ADR·실적·커스텀 호재) */
+function calendarCatalystBps(
+  events: StockSnapshot["upcomingEvents"],
+  symbolCode: string
+): number {
+  if (!events?.length) return 0;
+  const now = Date.now();
+  let bps = 0;
+
+  for (const e of events) {
+    if (e.symbolCode && e.symbolCode !== symbolCode) continue;
+    const daysUntil = (e.date - now) / 86_400_000;
+    if (daysUntil < -2 || daysUntil > 21) continue;
+
+    const label = `${e.label} ${e.detail ?? ""}`;
+    const isAdr =
+      /ADR|예탁증권|나스닥|NASDAQ|상장/i.test(label) || e.detail?.includes("ipo");
+    const isEarnings = e.kind === "earnings" && /실적|어닝|earnings/i.test(label);
+    const isCustomCatalyst =
+      /기대|수혜|서프라이즈|리밸런싱|매입/i.test(label) && e.importance !== "low";
+
+    const imp =
+      e.importance === "high" ? 1 : e.importance === "medium" ? 0.65 : 0.35;
+
+    // D-day 가까울수록 기대감 반영 (7일 이내 피크)
+    const proximity =
+      daysUntil <= 0 ? 0.5 : daysUntil <= 7 ? 1 : daysUntil <= 14 ? 0.7 : 0.45;
+
+    if (isAdr) bps += Math.round(32 * imp * proximity);
+    else if (isEarnings && daysUntil >= 0 && daysUntil <= 10)
+      bps += Math.round(18 * imp * proximity);
+    else if (isCustomCatalyst)
+      bps += Math.round(14 * imp * proximity);
+  }
+
+  return Math.min(bps, 45);
+}
+
 function pushFactor(
   factors: MacroAdjustmentFactor[],
   label: string,
@@ -126,8 +164,14 @@ export function computeMacroFairValueAdjustment(
 
   // ── 호재 뉴스 ─────────────────────────────────────────
   const opp = a.externalOpportunity;
-  if (opp?.level === "high") rate += pushFactor(factors, "호재 뉴스", 40);
-  else if (opp?.level === "medium") rate += pushFactor(factors, "호재 뉴스", 18);
+  if (opp?.level === "high") rate += pushFactor(factors, "호재 뉴스", 50);
+  else if (opp?.level === "medium") rate += pushFactor(factors, "호재 뉴스", 25);
+
+  // ── 다가올 캘린더 호재 (ADR·실적·커스텀) ───────────────
+  const catalystBps = calendarCatalystBps(snap.upcomingEvents, snap.meta.code);
+  if (catalystBps !== 0) {
+    rate += pushFactor(factors, "일정 호재", catalystBps);
+  }
 
   // ── 심리 — 매수우위·과열 ───────────────────────────────
   const sentimentBps = Math.round(((a.buyScore - 50) / 50) * 25);

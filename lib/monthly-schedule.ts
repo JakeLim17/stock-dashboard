@@ -2,8 +2,10 @@ import "server-only";
 
 import type { EventItem } from "./types";
 import type { ScheduleEntry } from "./monthly-schedule-types";
-import { getMacroEventsCached } from "./providers/eventCalendar";
-import { getEventsForSymbolCached } from "./providers/eventCalendar";
+import {
+  getMacroEventsInRange,
+  getEventsForSymbolInRange,
+} from "./providers/eventCalendar";
 import { PRIMARY_SYMBOLS, WATCHLIST_CANDIDATES } from "./symbols";
 
 /** 월별 일정에 실적·배당을 자동 수집할 종목 (PRIMARY + SK·LG 계열) */
@@ -76,6 +78,79 @@ function eventToSchedule(e: EventItem, idSuffix: string): ScheduleEntry {
 
 // 야후·매크로 캘린더에 없는 해석·커스텀 일정 (매월 수동 보강)
 const CURATED_SCHEDULE: ScheduleEntry[] = [
+  // ── 2026년 6월 ─────────────────────────────────────────
+  {
+    id: "curated-2026-06-semiconductor-export",
+    startDate: kstMidnight(2026, 6, 1),
+    label: "6월 수출입·반도체 수출 통계",
+    kind: "custom",
+    country: "kr",
+    importance: "medium",
+    detail: "관세청 09:00 — 반도체·자동차 수출이 KOSPI·하이닉스 체크포인트",
+  },
+  {
+    id: "curated-2026-06-q2-earnings-preview",
+    startDate: kstMidnight(2026, 6, 15),
+    endDate: kstMidnight(2026, 6, 30),
+    label: "2분기 실적 시즌 본격화",
+    kind: "custom",
+    country: "kr",
+    importance: "high",
+    detail: "삼성·SK·LG 잠정 실적 전망·컨센서스 상향 구간",
+  },
+  {
+    id: "curated-2026-06-samsung-electro-mlcc",
+    startDate: kstMidnight(2026, 6, 18),
+    label: "삼성전기 MLCC·AI 서버 부품 수요",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "009150.KS",
+    importance: "medium",
+    detail: "고부가 MLCC 공급 부족 — 대형주 변동성 속 저평가 구간",
+  },
+  {
+    id: "curated-2026-06-sk-adr-buildup",
+    startDate: kstMidnight(2026, 6, 20),
+    endDate: kstMidnight(2026, 7, 9),
+    label: "SK하이닉스 ADR 상장 기대감",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "000660.KS",
+    importance: "high",
+    detail: "7/10 ADR 상장 전 기대 피크·단기 차익 구간 (7/6~9 주의)",
+  },
+  {
+    id: "curated-2026-06-sk-square-benefit",
+    startDate: kstMidnight(2026, 6, 22),
+    endDate: kstMidnight(2026, 7, 10),
+    label: "SK스퀘어 — 하이닉스 ADR 수혜",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "402340.KS",
+    importance: "medium",
+    detail: "지주사 지분가치 재평가 — 하이닉스 본주 부담 시 대안",
+  },
+  {
+    id: "curated-2026-06-samsung-buyback",
+    startDate: kstMidnight(2026, 6, 10),
+    endDate: kstMidnight(2026, 6, 25),
+    label: "삼성전자 자사주 매입·2Q 기대",
+    kind: "custom",
+    country: "kr",
+    symbolCode: "005930.KS",
+    importance: "high",
+    detail: "대규모 자사주 + 2분기 서프라이즈 기대 — 실적 전 매수 구간",
+  },
+  {
+    id: "curated-2026-06-pension-rebal",
+    startDate: kstMidnight(2026, 6, 25),
+    endDate: kstMidnight(2026, 6, 30),
+    label: "2분기 말 연기금 리밸런싱",
+    kind: "custom",
+    country: "kr",
+    importance: "medium",
+    detail: "분기 말 전후 대형주·지수 수급 변동 참고",
+  },
   // ── 2026년 7월 (스크린샷 기준) ─────────────────────────────────────────
   {
     id: "curated-2026-07-kosdaq30",
@@ -241,20 +316,88 @@ function dedupeByLabelDate(entries: ScheduleEntry[]): ScheduleEntry[] {
   return out;
 }
 
+function scheduleToEventItem(e: ScheduleEntry): EventItem {
+  const kind: EventItem["kind"] =
+    e.kind === "custom" || e.kind === "conference" || e.kind === "ipo"
+      ? "earnings"
+      : e.kind;
+  return {
+    kind,
+    symbolCode: e.symbolCode,
+    label: e.label,
+    date: e.startDate,
+    importance: e.importance,
+    detail:
+      e.kind === "ipo"
+        ? [e.detail, "ipo"].filter(Boolean).join(" · ")
+        : e.detail,
+  };
+}
+
+/** 다가올 이벤트·익일 추정용 — 커스텀 일정을 EventItem 으로 변환 */
+export function getCuratedUpcomingForSymbol(
+  symbolCode: string,
+  daysAhead = 60
+): EventItem[] {
+  const now = Date.now();
+  const upper = now + daysAhead * 86_400_000;
+  return CURATED_SCHEDULE.filter((e) => {
+    if (e.symbolCode && e.symbolCode !== symbolCode) return false;
+    const end = e.endDate ?? e.startDate;
+    return end >= now - 86_400_000 && e.startDate <= upper;
+  }).map(scheduleToEventItem);
+}
+
+/** 매크로+커스텀 전체 커스텀 (종목 무관) — EventCalendar 보강용 */
+export function getCuratedMacroUpcoming(daysAhead = 60): EventItem[] {
+  const now = Date.now();
+  const upper = now + daysAhead * 86_400_000;
+  return CURATED_SCHEDULE.filter((e) => {
+    if (e.symbolCode) return false;
+    const end = e.endDate ?? e.startDate;
+    return end >= now - 86_400_000 && e.startDate <= upper;
+  }).map(scheduleToEventItem);
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __monthlyScheduleCache:
+    | Map<string, { data: ScheduleEntry[]; expiresAt: number }>
+    | undefined;
+}
+
+const MONTHLY_SCHEDULE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — Vercel 함수 재호출 절감
+
+function monthlyCache(): Map<
+  string,
+  { data: ScheduleEntry[]; expiresAt: number }
+> {
+  if (!global.__monthlyScheduleCache) {
+    global.__monthlyScheduleCache = new Map();
+  }
+  return global.__monthlyScheduleCache;
+}
+
 /** year + month(1~12) 기준 월별 일정 — 매크로·종목·커스텀 병합 */
 export async function getMonthlySchedule(
   year: number,
   month1: number
 ): Promise<ScheduleEntry[]> {
+  const cacheKey = `${year}-${month1}`;
+  const hit = monthlyCache().get(cacheKey);
+  if (hit && hit.expiresAt > Date.now()) return hit.data;
+
   const { start, end } = monthRange(year, month1);
 
-  const macro = getMacroEventsCached().map((e, i) =>
+  const macro = getMacroEventsInRange(start, end).map((e, i) =>
     eventToSchedule(e, `macro-${i}`)
   );
 
   const symbolEvents = (
     await Promise.all(
-      SCHEDULE_SYMBOLS.map((meta) => getEventsForSymbolCached(meta))
+      SCHEDULE_SYMBOLS.map((meta) =>
+        getEventsForSymbolInRange(meta, start, end)
+      )
     )
   ).flatMap((events, symIdx) =>
     events.map((e, i) => eventToSchedule(e, `sym-${symIdx}-${i}`))
@@ -270,10 +413,16 @@ export async function getMonthlySchedule(
     return overlapsMonth(e.startDate, entryEnd, start, end);
   });
 
-  return dedupeByLabelDate(merged).sort((a, b) => {
+  const result = dedupeByLabelDate(merged).sort((a, b) => {
     if (a.startDate !== b.startDate) return a.startDate - b.startDate;
     return importanceRank(a.importance) - importanceRank(b.importance);
   });
+
+  monthlyCache().set(cacheKey, {
+    data: result,
+    expiresAt: Date.now() + MONTHLY_SCHEDULE_TTL_MS,
+  });
+  return result;
 }
 
 function importanceRank(level: "high" | "medium" | "low"): number {

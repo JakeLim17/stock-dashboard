@@ -56,8 +56,8 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 12_000);
-const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 45_000);
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
+const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 60_000);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
   90_000
@@ -81,7 +81,7 @@ const KIS_OFF_HOURS_REFRESH_MS = envInt(
 /** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
 const FULL_SNAPSHOT_MIN_MS = envInt(
   "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
-  180_000
+  300_000
 );
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";

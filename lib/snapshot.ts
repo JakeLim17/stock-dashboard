@@ -24,6 +24,10 @@ import {
   getMacroEventsCached,
 } from "./providers/eventCalendar";
 import {
+  getCuratedMacroUpcoming,
+  getCuratedUpcomingForSymbol,
+} from "./monthly-schedule";
+import {
   analyze,
   marketMoodLabel,
   predict,
@@ -461,11 +465,27 @@ export const cachedNewsItems = cache(() => fetchNewsItems(60));
 // ──────────────────────────────────────────────────────────────
 // 3) 매크로 이벤트 — 즉시 (24h 메모리 캐시). FOMC·KOSPI 만기·KRX 휴장.
 // ──────────────────────────────────────────────────────────────
+function mergeEventItems(items: EventItem[]): EventItem[] {
+  const seen = new Set<string>();
+  const out: EventItem[] = [];
+  for (const e of items) {
+    const key = `${e.date}-${e.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out.sort((a, b) => a.date - b.date);
+}
+
 export function fetchMacroEvents(): EventItem[] {
   const now = Date.now();
-  return getMacroEventsCached().filter(
-    (e) => e.date >= now - 86_400_000 && e.date <= now + 60 * 86_400_000
+  const lower = now - 86_400_000;
+  const upper = now + 60 * 86_400_000;
+  const macro = getMacroEventsCached().filter(
+    (e) => e.date >= lower && e.date <= upper
   );
+  const curated = getCuratedMacroUpcoming(60);
+  return mergeEventItems([...macro, ...curated]);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -588,6 +608,11 @@ export async function fetchWatchlistSnapshots(
         fetchEventsForSymbol(meta).catch(() => []),
       ]);
 
+      const upcomingEventsMerged = mergeEventItems([
+        ...upcomingEvents,
+        ...getCuratedUpcomingForSymbol(meta.code, 60),
+      ]);
+
       if (!quoteRes.ok) throw new Error(quoteRes.error);
       const quote: typeof quoteRes.quote = {
         ...quoteRes.quote,
@@ -704,7 +729,7 @@ export async function fetchWatchlistSnapshots(
           analysis.reasons = analysis.shortTerm.reasons;
         }
         const eventsForVolatility: EventItem[] = [
-          ...upcomingEvents,
+          ...upcomingEventsMerged,
           ...getMacroEventsCached(),
         ];
         predictions = predict({
@@ -755,7 +780,7 @@ export async function fetchWatchlistSnapshots(
           history: hist,
           flow,
           valuation: consensusValuation,
-          upcomingEvents,
+          upcomingEvents: upcomingEventsMerged,
         }),
         4
       );
@@ -776,7 +801,7 @@ export async function fetchWatchlistSnapshots(
         consensusValuation,
         researches,
         signalMarks,
-        upcomingEvents,
+        upcomingEvents: upcomingEventsMerged,
         programTrade: null,
         shortBalance: null,
         closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,

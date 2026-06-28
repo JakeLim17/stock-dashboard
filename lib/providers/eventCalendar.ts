@@ -134,19 +134,35 @@ function toEpoch(v: unknown): number | null {
 }
 
 // ── 종목별 캐시 entrypoint ────────────────────────────────────────────────
-export async function getEventsForSymbolCached(
-  meta: SymbolMeta
-): Promise<EventItem[]> {
+/** 야후 원본 — 날짜 필터 없이 24h 캐시 (월별 일정·다가올 이벤트가 각자 필터) */
+async function fetchAndCacheSymbolEvents(meta: SymbolMeta): Promise<EventItem[]> {
   const now = Date.now();
   const c = cache();
   const hit = c.get(meta.code);
   if (hit && hit.expiresAt > now) return hit.data;
 
   const events = await fetchYahooEvents(meta).catch(() => [] as EventItem[]);
-  // 미래 + 어제까지 7일 이내(배당락 직전 안내 등)만 유지. 너무 먼 미래(>180일)도 잘라낸다.
-  const filtered = filterUpcoming(events, 180);
-  c.set(meta.code, { data: filtered, expiresAt: now + EVENT_TTL_MS });
-  return filtered;
+  const sorted = events.sort((a, b) => a.date - b.date);
+  c.set(meta.code, { data: sorted, expiresAt: now + EVENT_TTL_MS });
+  return sorted;
+}
+
+export async function getEventsForSymbolCached(
+  meta: SymbolMeta
+): Promise<EventItem[]> {
+  const raw = await fetchAndCacheSymbolEvents(meta);
+  // 미래 + 어제까지 유지. 너무 먼 미래(>180일)도 잘라낸다.
+  return filterUpcoming(raw, 180);
+}
+
+/** 월별 일정용 — 요청 월 범위만 필터 (과거 일정 포함) */
+export async function getEventsForSymbolInRange(
+  meta: SymbolMeta,
+  startMs: number,
+  endMs: number
+): Promise<EventItem[]> {
+  const raw = await fetchAndCacheSymbolEvents(meta);
+  return raw.filter((e) => e.date >= startMs && e.date <= endMs);
 }
 
 // 어제 ~ N일 후 범위만 남기고, 날짜 오름차순 정렬.
@@ -415,6 +431,16 @@ function buildMacroEvents(): EventItem[] {
 declare global {
   // eslint-disable-next-line no-var
   var __macroEventsCache: { data: EventItem[]; expiresAt: number } | undefined;
+}
+
+/** 월별 일정용 — 매크로 전체에서 기간만 필터 (과거 일정 포함) */
+export function getMacroEventsInRange(
+  startMs: number,
+  endMs: number
+): EventItem[] {
+  return buildMacroEvents()
+    .filter((e) => e.date >= startMs && e.date <= endMs)
+    .sort((a, b) => a.date - b.date);
 }
 
 export function getMacroEventsCached(): EventItem[] {

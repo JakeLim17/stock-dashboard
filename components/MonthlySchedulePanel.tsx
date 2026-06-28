@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ScheduleEntry, ScheduleKind } from "@/lib/monthly-schedule-types";
 import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
@@ -72,25 +72,38 @@ function matchesFilter(entry: ScheduleEntry, tab: FilterTab): boolean {
   return style.tab === tab;
 }
 
+const CLIENT_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — 달 이동 시 재호출 최소화
+
 export function MonthlySchedulePanel() {
   const initial = nowKstParts();
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
   const [items, setItems] = useState<ScheduleEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterTab>("all");
   const [open, setOpen] = useState(true);
+  const clientCache = useRef(
+    new Map<string, { items: ScheduleEntry[]; at: number }>()
+  );
 
   const load = useCallback(async (y: number, m: number) => {
+    const cacheKey = `${y}-${m}`;
+    const hit = clientCache.current.get(cacheKey);
+    if (hit && Date.now() - hit.at < CLIENT_CACHE_TTL_MS) {
+      setItems(hit.items);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/schedule?year=${y}&month=${m}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(`/api/schedule?year=${y}&month=${m}`);
       if (!res.ok) throw new Error("일정을 불러오지 못했습니다");
       const data = (await res.json()) as ApiResponse;
+      clientCache.current.set(cacheKey, { items: data.items, at: Date.now() });
       setItems(data.items);
     } catch (e) {
       setError(e instanceof Error ? e.message : "오류");
@@ -101,8 +114,9 @@ export function MonthlySchedulePanel() {
   }, []);
 
   useEffect(() => {
+    if (!open) return;
     void load(year, month);
-  }, [year, month, load]);
+  }, [year, month, load, open]);
 
   const filtered = useMemo(
     () => items.filter((e) => matchesFilter(e, filter)),
@@ -134,7 +148,7 @@ export function MonthlySchedulePanel() {
             <h2 className="text-sm font-semibold">{title}</h2>
           </div>
           <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-            거시·실적·휴장·커스텀 일정 — 매크로는 자동, 해석 일정은 수동 보강
+            거시·실적·휴장·커스텀 — 「다가올 이벤트」와 별도로 월 전체 일정을 봅니다
           </p>
         </div>
         <button

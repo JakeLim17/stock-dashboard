@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMonthlySchedule } from "@/lib/monthly-schedule";
 
-export const dynamic = "force-dynamic";
+/** 월별 일정 — 6h CDN/브라우저 캐시 (Vercel 함수 호출 절감) */
+export const revalidate = 21_600;
 
 /** GET /api/schedule?year=2026&month=7 — 월별 주요 일정 */
 export async function GET(req: NextRequest) {
@@ -18,5 +19,13 @@ export async function GET(req: NextRequest) {
   }
 
   const items = await getMonthlySchedule(year, month);
-  return NextResponse.json({ year, month, items });
+  return NextResponse.json(
+    { year, month, items },
+    {
+      headers: {
+        "Cache-Control":
+          "public, s-maxage=21600, stale-while-revalidate=86400",
+      },
+    }
+  );
 }

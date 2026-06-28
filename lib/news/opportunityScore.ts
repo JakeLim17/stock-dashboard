@@ -18,6 +18,7 @@
 import { matchOpportunityKeywords } from "./positiveKeywords";
 import { dominantHeadlineSide } from "./headlineSide";
 import { timeDecay } from "./riskScore";
+import { NEWS_SYMBOL_KEYWORDS } from "./symbolKeywords";
 import type {
   OpportunityAssessment,
   NewsOpportunityDriver,
@@ -62,10 +63,18 @@ export function assessOpportunity(
   const normalize = (s: string): string =>
     s.replace(/[\s.,!?·…\-—()[\]"'""'']/g, "").slice(0, 20);
 
-  // 종목 관련성 엄격 판정 — symbol 일치 또는 헤드라인에 종목명 포함.
+  const aliases = NEWS_SYMBOL_KEYWORDS.filter((k) => k.code === code).map(
+    (k) => k.kw
+  );
+
+  // 종목 관련성 — symbol 일치, 종목명·영문 별칭 포함.
   const isRelated = (n: NewsLike): boolean => {
     if (n.symbol === code) return true;
-    if (name && n.title && n.title.includes(name)) return true;
+    const title = n.title ?? "";
+    if (name && title.includes(name)) return true;
+    for (const alias of aliases) {
+      if (alias.length >= 3 && title.includes(alias)) return true;
+    }
     return false;
   };
 
