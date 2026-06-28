@@ -3,6 +3,11 @@ import {
   type MacroAdjustmentFactor,
 } from "./fair-value-macro";
 import {
+  skGroupSpilloverRate,
+  getSkGroupLink,
+  SK_HYNIX_CODE,
+} from "./sk-group";
+import {
   calendarDaysToSessionOffset,
   formatTradingSessionLabel,
 } from "./fair-value-trading-day";
@@ -288,6 +293,22 @@ export function blendCloseFromOpen(
 
 export type FairValueHorizonId = "today" | "tomorrow" | "week" | "month";
 
+export interface FairValueBuildContext {
+  weights?: FairValueWeights;
+  /** SK 계열 — 하이닉스 스냅샷 (가격 연동 스필오버) */
+  groupLeaderSnap?: StockSnapshot;
+}
+
+function resolveFairValueContext(
+  ctx?: FairValueBuildContext | FairValueWeights
+): FairValueBuildContext {
+  if (!ctx) return {};
+  if ("nightClosed" in ctx || "noGdr" in ctx) {
+    return { weights: ctx as FairValueWeights };
+  }
+  return ctx as FairValueBuildContext;
+}
+
 export interface FairValueHorizonItem {
   id: FairValueHorizonId;
   label: string;
@@ -367,8 +388,9 @@ function applyConsensusBlend(
 export function buildFairValueEstimateForHorizon(
   snap: StockSnapshot,
   horizonId: FairValueHorizonId,
-  weights?: FairValueWeights
+  ctx?: FairValueBuildContext | FairValueWeights
 ): FairValueResult {
+  const { weights, groupLeaderSnap } = resolveFairValueContext(ctx);
   const meta = HORIZON_META[horizonId];
   const { quote, overseasNight, meta: sym } = snap;
   let settlement = getSettlementForHorizon(quote, sym.code, horizonId);
@@ -439,11 +461,44 @@ export function buildFairValueEstimateForHorizon(
   }
 
   const gapDays = calendarDaysToSessionOffset(sym.code, meta.sessionOffset);
-  const macro = computeMacroFairValueAdjustment(snap, {
+  let macro = computeMacroFairValueAdjustment(snap, {
     skipGdrPremium: usedGdrInBlend,
     gapScale: macroGapScale(gapDays),
     horizon: horizonId,
   });
+
+  // SK 계열 — 하이닉스 예상 방향을 β로 전달 (가격 스필오버)
+  const skLink = getSkGroupLink(sym.code);
+  if (
+    skLink &&
+    groupLeaderSnap?.meta.code === SK_HYNIX_CODE &&
+    groupLeaderSnap.quote.price > 0
+  ) {
+    const leaderHorizon = buildFairValueEstimateForHorizon(
+      groupLeaderSnap,
+      horizonId,
+      { weights }
+    );
+    if (leaderHorizon.ready) {
+      const spill = skGroupSpilloverRate(
+        sym.code,
+        leaderHorizon.close.vsSettlementRate,
+        horizonId
+      );
+      if (Math.abs(spill) >= 0.0003) {
+        macro = {
+          rate: macro.rate + spill,
+          factors: [
+            ...macro.factors,
+            {
+              label: "하이닉스 연동",
+              bps: Math.round(spill * 10_000),
+            },
+          ],
+        };
+      }
+    }
+  }
 
   const session = formatTradingSessionLabel(sym.code, meta.sessionOffset);
   const macroSuffix = macroDetailSuffix(macro.rate);
@@ -532,19 +587,19 @@ export function buildFairValueEstimateForHorizon(
 /** 오늘·내일·다음 주·1개월 — 다중 시계 추정 */
 export function buildMultiHorizonFairValue(
   snap: StockSnapshot,
-  weights?: FairValueWeights
+  ctx?: FairValueBuildContext | FairValueWeights
 ): FairValueHorizonItem[] {
   const ids: FairValueHorizonId[] = ["today", "tomorrow", "week", "month"];
   return ids.map((id) => ({
     id,
     label: HORIZON_META[id].label,
-    estimate: buildFairValueEstimateForHorizon(snap, id, weights),
+    estimate: buildFairValueEstimateForHorizon(snap, id, ctx),
   }));
 }
 
 export function buildFairValueEstimate(
   snap: StockSnapshot,
-  weights?: FairValueWeights
+  ctx?: FairValueBuildContext | FairValueWeights
 ): FairValueResult {
-  return buildFairValueEstimateForHorizon(snap, "tomorrow", weights);
+  return buildFairValueEstimateForHorizon(snap, "tomorrow", ctx);
 }

@@ -134,6 +134,7 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "000120.KS", name: "CJ대한통운", kind: "kr-stock", sector: "물류", isSectorLeader: true, sectorLeaderLabel: "물류 대장" },
 
   // ─── 2026-06-18 대장주·계열 지주 (8종) ───────────────────────────────────
+  { code: "034730.KS", name: "SK", kind: "kr-stock", sector: "통신", isSectorLeader: true, sectorLeaderLabel: "SK(주)" },
   { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock", sector: "통신", isSectorLeader: true, sectorLeaderLabel: "SK 지주" },
   { code: "361610.KQ", name: "SK아이이테크놀로지", kind: "kr-stock", sector: "배터리", isSectorLeader: true, sectorLeaderLabel: "분리막 대장" },
   { code: "079550.KS", name: "LIG넥스원", kind: "kr-stock", sector: "방산", isSectorLeader: true, sectorLeaderLabel: "유도무기 대장" },
@@ -326,7 +327,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "AI 반도체",
     emoji: "🧠",
     description: "AI 학습·추론용 메모리·로직 반도체",
-    codes: ["005930.KS", "000660.KS", "042700.KS", "402340.KS", "NVDA"],
+    codes: ["005930.KS", "000660.KS", "042700.KS", "034730.KS", "402340.KS", "NVDA"],
   },
   {
     id: "battery",
