@@ -6,6 +6,7 @@ import {
   getMacroEventsInRange,
   getEventsForSymbolInRange,
 } from "./providers/eventCalendar";
+import { dedupeEventItems, dedupeScheduleEntries } from "./schedule-dedup";
 import { PRIMARY_SYMBOLS, WATCHLIST_CANDIDATES } from "./symbols";
 
 /** 월별 일정에 실적·배당을 자동 수집할 종목 (PRIMARY + SK·LG 계열) */
@@ -79,15 +80,7 @@ function eventToSchedule(e: EventItem, idSuffix: string): ScheduleEntry {
 // 야후·매크로 캘린더에 없는 해석·커스텀 일정 (매월 수동 보강)
 const CURATED_SCHEDULE: ScheduleEntry[] = [
   // ── 2026년 6월 ─────────────────────────────────────────
-  {
-    id: "curated-2026-06-semiconductor-export",
-    startDate: kstMidnight(2026, 6, 1),
-    label: "6월 수출입·반도체 수출 통계",
-    kind: "custom",
-    country: "kr",
-    importance: "medium",
-    detail: "관세청 09:00 — 반도체·자동차 수출이 KOSPI·하이닉스 체크포인트",
-  },
+  // 6/1 수출입 — eventCalendar KR_TRADE_DATES 와 중복이라 생략
   {
     id: "curated-2026-06-q2-earnings-preview",
     startDate: kstMidnight(2026, 6, 15),
@@ -292,29 +285,8 @@ const CURATED_SCHEDULE: ScheduleEntry[] = [
     importance: "medium",
     detail: "분기 말 전후 대형주·지수 수급 변동 참고 (공식 일정 없음)",
   },
-  // ── 2026년 8월 (다음 달 미리보기용 샘플) ───────────────────────────────
-  {
-    id: "curated-2026-08-bok",
-    startDate: kstMidnight(2026, 8, 27),
-    label: "한국은행 금통위 (기준금리)",
-    kind: "bok_rate",
-    country: "kr",
-    importance: "high",
-    detail: "8월 통화정책방향 결정",
-  },
+  // 8월 금통위 — eventCalendar BOK_DATES_2026 와 중복이라 생략
 ];
-
-function dedupeByLabelDate(entries: ScheduleEntry[]): ScheduleEntry[] {
-  const seen = new Set<string>();
-  const out: ScheduleEntry[] = [];
-  for (const e of entries) {
-    const key = `${e.startDate}-${e.label}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(e);
-  }
-  return out;
-}
 
 function scheduleToEventItem(e: ScheduleEntry): EventItem {
   const kind: EventItem["kind"] =
@@ -334,29 +306,19 @@ function scheduleToEventItem(e: ScheduleEntry): EventItem {
   };
 }
 
-/** 다가올 이벤트·익일 추정용 — 커스텀 일정을 EventItem 으로 변환 */
+/** 종목 전용 커스텀 — 글로벌 일정은 macro 경로로만 */
 export function getCuratedUpcomingForSymbol(
   symbolCode: string,
   daysAhead = 60
 ): EventItem[] {
-  const now = Date.now();
-  const upper = now + daysAhead * 86_400_000;
-  return CURATED_SCHEDULE.filter((e) => {
-    if (e.symbolCode && e.symbolCode !== symbolCode) return false;
-    const end = e.endDate ?? e.startDate;
-    return end >= now - 86_400_000 && e.startDate <= upper;
-  }).map(scheduleToEventItem);
+  return getCuratedEventsMerged(daysAhead).filter(
+    (e) => e.symbolCode === symbolCode
+  );
 }
 
-/** 매크로+커스텀 전체 커스텀 (종목 무관) — EventCalendar 보강용 */
+/** 매크로+커스텀 전체 (종목 무관) — EventCalendar·macroEvents 보강용 */
 export function getCuratedMacroUpcoming(daysAhead = 60): EventItem[] {
-  const now = Date.now();
-  const upper = now + daysAhead * 86_400_000;
-  return CURATED_SCHEDULE.filter((e) => {
-    if (e.symbolCode) return false;
-    const end = e.endDate ?? e.startDate;
-    return end >= now - 86_400_000 && e.startDate <= upper;
-  }).map(scheduleToEventItem);
+  return getCuratedEventsMerged(daysAhead).filter((e) => !e.symbolCode);
 }
 
 declare global {
@@ -413,10 +375,7 @@ export async function getMonthlySchedule(
     return overlapsMonth(e.startDate, entryEnd, start, end);
   });
 
-  const result = dedupeByLabelDate(merged).sort((a, b) => {
-    if (a.startDate !== b.startDate) return a.startDate - b.startDate;
-    return importanceRank(a.importance) - importanceRank(b.importance);
-  });
+  const result = dedupeScheduleEntries(merged);
 
   monthlyCache().set(cacheKey, {
     data: result,
@@ -425,8 +384,44 @@ export async function getMonthlySchedule(
   return result;
 }
 
-function importanceRank(level: "high" | "medium" | "low"): number {
-  if (level === "high") return 0;
-  if (level === "medium") return 1;
-  return 2;
+/** 다가올 N일 — 월별 일정과 동일 소스·중복 제거 (API mode=upcoming) */
+export async function getUpcomingSchedule(
+  daysAhead = 60
+): Promise<ScheduleEntry[]> {
+  const now = Date.now();
+  const start = now - 86_400_000;
+  const end = now + daysAhead * 86_400_000;
+
+  const kst = new Date(now + 9 * 3600 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = kst.getUTCMonth() + 1;
+  const months: Array<{ year: number; month: number }> = [{ year: y, month: m }];
+  const nextM = m === 12 ? 1 : m + 1;
+  const nextY = m === 12 ? y + 1 : y;
+  months.push({ year: nextY, month: nextM });
+
+  const chunks = await Promise.all(
+    months.map(({ year, month }) => getMonthlySchedule(year, month))
+  );
+
+  return dedupeScheduleEntries(
+    chunks
+      .flat()
+      .filter((e) => {
+        const entryEnd = e.endDate ?? e.startDate;
+        return entryEnd >= start && e.startDate <= end;
+      })
+  );
+}
+
+/** EventItem[] — snapshot·EventCalendar용 (커스텀+매크로 통합) */
+export function getCuratedEventsMerged(daysAhead = 60): EventItem[] {
+  const now = Date.now();
+  const upper = now + daysAhead * 86_400_000;
+  return dedupeEventItems(
+    CURATED_SCHEDULE.filter((e) => {
+      const end = e.endDate ?? e.startDate;
+      return end >= now - 86_400_000 && e.startDate <= upper;
+    }).map(scheduleToEventItem)
+  );
 }

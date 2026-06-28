@@ -35,48 +35,47 @@ function isWeekendInTz(date: Date, tz: string): boolean {
   return wd === 0 || wd === 6;
 }
 
-/** 다음 거래일 (주말 스킵 — 공휴일은 후속 보강) */
-export function getNextTradingSessionDate(
+/** N번째 거래일 (0=오늘·현재 세션, 1=익일, 5≈1주, 22≈1개월) */
+export function getTradingSessionDateByOffset(
   code: string,
+  offsetDays: number,
   now = new Date()
 ): Date {
   const tz = timezoneFor(code);
-  let cursor = addCalendarDays(now, 1);
+  let cursor = new Date(now.getTime());
+  if (offsetDays <= 0) {
+    while (isWeekendInTz(cursor, tz)) {
+      cursor = addCalendarDays(cursor, 1);
+    }
+    return cursor;
+  }
+  let counted = 0;
   let guard = 0;
-  while (isWeekendInTz(cursor, tz) && guard < 14) {
+  while (counted < offsetDays && guard < 40) {
     cursor = addCalendarDays(cursor, 1);
     guard++;
+    if (!isWeekendInTz(cursor, tz)) counted++;
   }
   return cursor;
 }
 
-/** now → 다음 거래일까지 달력 일수 (금→월 ≈ 3). 매크로 보정 스케일용. */
-export function calendarDaysToNextSession(
+export function calendarDaysToSessionOffset(
   code: string,
+  offsetDays: number,
   now = new Date()
 ): number {
-  const target = getNextTradingSessionDate(code, now);
-  const diffMs = target.getTime() - now.getTime();
-  return Math.max(1, diffMs / 86_400_000);
+  const target = getTradingSessionDateByOffset(code, offsetDays, now);
+  return Math.max(1, (target.getTime() - now.getTime()) / 86_400_000);
 }
 
-/** 다음 거래일 요일 라벨 (월·화·…) — 백테스트·검증용 */
-export function weekdayLabelInTz(date: Date, tz: string): string {
-  return (
-    new Intl.DateTimeFormat("ko-KR", {
-      timeZone: tz,
-      weekday: "short",
-    }).format(date) || "?"
-  );
-}
-
-/** 카드 표시용 — "6/23(월) 예상" */
-export function formatNextTradingSessionLabel(
+/** 카드 표시용 — offset 0=오늘, 1=익일 … */
+export function formatTradingSessionLabel(
   code: string,
+  offsetDays: number,
   now = new Date()
 ): { target: Date; shortLabel: string; isoDate: string } {
   const tz = timezoneFor(code);
-  const target = getNextTradingSessionDate(code, now);
+  const target = getTradingSessionDateByOffset(code, offsetDays, now);
   const parts = new Intl.DateTimeFormat("ko-KR", {
     timeZone: tz,
     month: "numeric",
@@ -100,4 +99,38 @@ export function formatNextTradingSessionLabel(
     shortLabel: `${month}/${day}(${wd})`,
     isoDate: iso,
   };
+}
+
+/** @deprecated getNextTradingSessionDate 래퍼 — offset 1 */
+export function getNextTradingSessionDate(
+  code: string,
+  now = new Date()
+): Date {
+  return getTradingSessionDateByOffset(code, 1, now);
+}
+
+/** now → 다음 거래일까지 달력 일수 (금→월 ≈ 3). 매크로 보정 스케일용. */
+export function calendarDaysToNextSession(
+  code: string,
+  now = new Date()
+): number {
+  return calendarDaysToSessionOffset(code, 1, now);
+}
+
+/** 다음 거래일 요일 라벨 (월·화·…) — 백테스트·검증용 */
+export function weekdayLabelInTz(date: Date, tz: string): string {
+  return (
+    new Intl.DateTimeFormat("ko-KR", {
+      timeZone: tz,
+      weekday: "short",
+    }).format(date) || "?"
+  );
+}
+
+/** 카드 표시용 — "6/23(월) 예상" */
+export function formatNextTradingSessionLabel(
+  code: string,
+  now = new Date()
+): { target: Date; shortLabel: string; isoDate: string } {
+  return formatTradingSessionLabel(code, 1, now);
 }

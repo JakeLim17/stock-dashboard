@@ -471,6 +471,7 @@ export function predict(input: PredictorInput): Predictions {
       { label: "3일", days: 3, driftWeight: 0.6 },
       { label: "1주", days: 5, driftWeight: 0 },
       { label: "2주", days: 10, driftWeight: 0 },
+      { label: "1개월", days: 22, driftWeight: 0 },
     ];
     for (const h of horizons) {
       const effectiveDays =

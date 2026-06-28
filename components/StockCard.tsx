@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { EventItem, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader } from "./ui/Card";
 import { Badge } from "./ui/Badge";
@@ -20,8 +21,10 @@ import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import {
-  buildFairValueEstimate,
+  buildMultiHorizonFairValue,
   buildPredictionCompactLine,
+  type FairValueHorizonId,
+  type FairValueResult,
 } from "@/lib/prediction-display";
 import { FAIR_VALUE_BACKTEST_META } from "@/lib/fair-value";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
@@ -82,7 +85,7 @@ export function StockCard({
 }) {
   const isMobile = variant === "mobile";
   const { meta, quote, tech, analysis } = snap;
-  const fairValue = buildFairValueEstimate(snap);
+  const fairValueHorizons = buildMultiHorizonFairValue(snap);
   const { primary } = pickPrimaryQuote(quote);
   const currency = currencyOf(meta.code, meta.currency);
   const market = marketDisplayLabel(quote);
@@ -234,7 +237,7 @@ export function StockCard({
         </div>
 
         {/* 익일 추정가 */}
-        <FairValueSection fairValue={fairValue} currency={currency} />
+        <FairValueSection horizons={fairValueHorizons} currency={currency} />
 
         {/* 펀더멘털 — 카드 기본 정보 (모바일·데스크탑 공통) */}
         <StockFundamentalsBlock
@@ -269,39 +272,104 @@ export function StockCard({
   );
 }
 
+const HORIZON_TABS: { id: FairValueHorizonId; short: string }[] = [
+  { id: "today", short: "오늘" },
+  { id: "tomorrow", short: "내일" },
+  { id: "week", short: "다음 주" },
+  { id: "month", short: "1개월" },
+];
+
 function FairValueSection({
-  fairValue,
+  horizons,
   currency,
 }: {
-  fairValue: ReturnType<typeof buildFairValueEstimate>;
+  horizons: ReturnType<typeof buildMultiHorizonFairValue>;
   currency: string;
+}) {
+  const [active, setActive] = useState<FairValueHorizonId>("tomorrow");
+  const current = horizons.find((h) => h.id === active) ?? horizons[1];
+  const fairValue = current?.estimate;
+
+  if (!fairValue) return null;
+
+  return (
+    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+          가격 추정 · {current.label}
+        </div>
+        <div className="flex gap-0.5 p-0.5 rounded-md bg-muted/60 border border-border/50">
+          {HORIZON_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActive(t.id)}
+              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                active === t.id
+                  ? "bg-background font-semibold shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.short}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <FairValueBody fairValue={fairValue} currency={currency} active={active} />
+    </div>
+  );
+}
+
+function FairValueBody({
+  fairValue,
+  currency,
+  active,
+}: {
+  fairValue: FairValueResult;
+  currency: string;
+  active: FairValueHorizonId;
 }) {
   if (fairValue.ready) {
     const topMacro = fairValue.macroFactors
       .filter((f) => Math.abs(f.bps) >= 1)
       .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
       .slice(0, 3);
+    const dualLeg = active === "tomorrow";
     return (
-      <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2.5">
-        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-          익일 추정 · {fairValue.targetDateLabel} · {fairValue.settlementLabel}
+      <>
+        <div className="text-[10px] text-muted-foreground">
+          {fairValue.targetDateLabel} · {fairValue.settlementLabel}
         </div>
 
-        <FairValueLegRow
-          label="시가"
-          leg={fairValue.open}
-          settlementPrice={fairValue.settlementPrice}
-          currency={currency}
-          mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextOpen.mape}
-          emphasized
-        />
-        <FairValueLegRow
-          label="종가"
-          leg={fairValue.close}
-          settlementPrice={fairValue.settlementPrice}
-          currency={currency}
-          mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
-        />
+        {dualLeg ? (
+          <>
+            <FairValueLegRow
+              label="시가"
+              leg={fairValue.open}
+              settlementPrice={fairValue.settlementPrice}
+              currency={currency}
+              mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextOpen.mape}
+              emphasized
+            />
+            <FairValueLegRow
+              label="종가"
+              leg={fairValue.close}
+              settlementPrice={fairValue.settlementPrice}
+              currency={currency}
+              mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
+            />
+          </>
+        ) : (
+          <FairValueLegRow
+            label={active === "today" ? "종가" : "목표가"}
+            leg={fairValue.close}
+            settlementPrice={fairValue.settlementPrice}
+            currency={currency}
+            mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
+            emphasized
+          />
+        )}
 
         {topMacro.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-0.5">
@@ -320,17 +388,19 @@ function FairValueSection({
             ))}
           </div>
         )}
-        <div className="text-[10px] text-muted-foreground/60">
-          앱장 기준 백테스트 오차 시가{" "}
-          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
-          · 종가{" "}
-          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
-        </div>
-      </div>
+        {active === "tomorrow" && (
+          <div className="text-[10px] text-muted-foreground/60">
+            앱장 기준 백테스트 오차 시가{" "}
+            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
+            · 종가{" "}
+            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
+          </div>
+        )}
+      </>
     );
   }
   return (
-    <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground text-center">
+    <div className="text-[11px] text-muted-foreground text-center py-1">
       {fairValue.pendingReason}
     </div>
   );

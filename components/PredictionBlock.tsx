@@ -45,6 +45,7 @@ export function PredictionBlock({
 
   const oneDay = p?.ranges.find((r) => r.horizonDays === 1) ?? null;
   const oneWeek = p?.ranges.find((r) => r.horizonDays === 5) ?? null;
+  const oneMonth = p?.ranges.find((r) => r.horizonDays === 22) ?? null;
   const buyStrength = p?.strength.buy ?? a.buyScore;
   const sellStrength = p?.strength.sell ?? a.heatScore;
   const rr = p?.targets?.riskReward ?? null;
@@ -79,6 +80,7 @@ export function PredictionBlock({
   const hasAny =
     !!oneDay ||
     !!oneWeek ||
+    !!oneMonth ||
     (intradayRange?.expectedRangePct ?? 0) > 0 ||
     !!p?.targets ||
     typeof buyStrength === "number";
@@ -187,7 +189,7 @@ export function PredictionBlock({
           데이터 부족 ({dq?.historyDays ?? 0}일) — 변동 참고 구간을 표시하지 않습니다.
         </p>
       ) : (
-        (oneDay || oneWeek) && (
+        (oneDay || oneWeek || oneMonth) && (
           <div className="space-y-2">
             {oneDay && (
               <PredictionRangeRow
@@ -207,6 +209,16 @@ export function PredictionBlock({
                 low={oneWeek.low}
                 high={oneWeek.high}
                 center={oneWeek.center}
+                decimals={decimals}
+              />
+            )}
+            {oneMonth && (
+              <PredictionRangeRow
+                horizonLabel={oneMonth.horizonLabel}
+                currentPrice={snap.quote.price}
+                low={oneMonth.low}
+                high={oneMonth.high}
+                center={oneMonth.center}
                 decimals={decimals}
               />
             )}

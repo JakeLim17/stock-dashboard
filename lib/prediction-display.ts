@@ -2,6 +2,8 @@ import type { StockSnapshot } from "./types";
 
 export {
   buildFairValueEstimate,
+  buildFairValueEstimateForHorizon,
+  buildMultiHorizonFairValue,
   blendFairValuePrice,
   blendCloseFromOpen,
   getSettlementContext,
@@ -10,6 +12,8 @@ export {
   FAIR_VALUE_CLOSE_EXTENSION,
   FAIR_VALUE_BACKTEST_META,
   type FairValueEstimate,
+  type FairValueHorizonId,
+  type FairValueHorizonItem,
   type FairValueLeg,
   type FairValueCloseExtension,
   type FairValuePending,

@@ -21,8 +21,7 @@ import { MobileDetailSheet } from "./MobileDetailSheet";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
-import { EventCalendar } from "./EventCalendar";
-import { MonthlySchedulePanel } from "./MonthlySchedulePanel";
+import { UnifiedSchedulePanel } from "./UnifiedSchedulePanel";
 import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { DisclaimerModal } from "./DisclaimerModal";
 import { fmtRelative, getKrwRate, toFriendlyErrorMessage } from "@/lib/utils";
@@ -784,8 +783,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         )}
       </div>
 
-      {/* 월별 주요 일정 — 카드 바로 아래 (모바일에서도 스크롤 짧게 보이도록) */}
-      <MonthlySchedulePanel />
+      {/* 통합 일정 — 임박(D-N) + 월별 캘린더 */}
+      <UnifiedSchedulePanel snapshot={snap} />
 
       {/* 모바일 sheet 모달 — 자체적으로 lg:hidden 가드 + open 상태에 따라 슬라이드 인/아웃 */}
       <MobileDetailSheet
@@ -809,7 +808,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           (selected 종목의 풀 차트는 StockDetailPanel "예측" 탭에서 별도 노출 가능.) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <MarketPanel indicators={snap.indicators} />
-        <EventCalendar snapshot={snap} />
       </div>
 
       {/* 뉴스 — full snapshot + idle/2s defer */}

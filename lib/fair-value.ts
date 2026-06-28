@@ -3,8 +3,8 @@ import {
   type MacroAdjustmentFactor,
 } from "./fair-value-macro";
 import {
-  calendarDaysToNextSession,
-  formatNextTradingSessionLabel,
+  calendarDaysToSessionOffset,
+  formatTradingSessionLabel,
 } from "./fair-value-trading-day";
 import type { OverseasNightIndicator, Quote, StockSnapshot } from "./types";
 
@@ -286,14 +286,82 @@ export function blendCloseFromOpen(
   };
 }
 
-export function buildFairValueEstimate(
+export type FairValueHorizonId = "today" | "tomorrow" | "week" | "month";
+
+export interface FairValueHorizonItem {
+  id: FairValueHorizonId;
+  label: string;
+  estimate: FairValueResult;
+}
+
+const HORIZON_META: Record<
+  FairValueHorizonId,
+  { sessionOffset: number; rangeDays: number; label: string; dualLeg: boolean }
+> = {
+  today: { sessionOffset: 0, rangeDays: 1, label: "오늘", dualLeg: false },
+  tomorrow: { sessionOffset: 1, rangeDays: 1, label: "내일", dualLeg: true },
+  week: { sessionOffset: 5, rangeDays: 5, label: "다음 주", dualLeg: false },
+  month: { sessionOffset: 22, rangeDays: 22, label: "1개월", dualLeg: false },
+};
+
+function getSettlementForHorizon(
+  quote: Quote,
+  code: string,
+  horizonId: FairValueHorizonId
+): SettlementContext {
+  const base = getSettlementContext(quote, code);
+  if (horizonId !== "today") return base;
+
+  const state = (quote.marketState ?? "").toUpperCase();
+  if (state === "REGULAR") {
+    return {
+      settlementPrice: quote.price,
+      prevSettlement: quote.prevClose,
+      ready: true,
+      settlementLabel: "현재가",
+    };
+  }
+  if (quote.extendedHours?.active) {
+    return {
+      settlementPrice: quote.extendedHours.price,
+      prevSettlement: quote.prevClose,
+      ready: true,
+      settlementLabel:
+        quote.extendedHours.session === "kr-after" ? "앱장" : "시간외",
+    };
+  }
+  return base;
+}
+
+function driftCenterForHorizon(
   snap: StockSnapshot,
+  rangeDays: number,
+  fallback: number
+): number {
+  const ranges = snap.predictions?.ranges ?? [];
+  const exact = ranges.find((r) => r.horizonDays === rangeDays);
+  if (exact) return exact.center;
+  const oneDay = ranges.find((r) => r.horizonDays === 1);
+  if (oneDay && rangeDays > 1) {
+    const daily =
+      oneDay.center > 0 && snap.quote.price > 0
+        ? Math.log(oneDay.center / snap.quote.price) / (oneDay.horizonDays || 1)
+        : 0;
+    return snap.quote.price * Math.exp(daily * rangeDays);
+  }
+  return oneDay?.center ?? fallback;
+}
+
+export function buildFairValueEstimateForHorizon(
+  snap: StockSnapshot,
+  horizonId: FairValueHorizonId,
   weights?: FairValueWeights
 ): FairValueResult {
-  const { quote, overseasNight, predictions, meta } = snap;
-  const settlement = getSettlementContext(quote, meta.code);
+  const meta = HORIZON_META[horizonId];
+  const { quote, overseasNight, meta: sym } = snap;
+  let settlement = getSettlementForHorizon(quote, sym.code, horizonId);
 
-  if (!settlement.ready) {
+  if (!settlement.ready && horizonId === "tomorrow") {
     return {
       ready: false,
       pendingReason: settlement.pendingReason ?? "종가 확정 대기",
@@ -301,14 +369,44 @@ export function buildFairValueEstimate(
     };
   }
 
-  const oneDay = predictions?.ranges.find((r) => r.horizonDays === 1);
-  const driftCenter = oneDay?.center ?? settlement.settlementPrice;
+  if (!settlement.ready && (horizonId === "week" || horizonId === "month")) {
+    if (quote.price > 0) {
+      settlement = {
+        settlementPrice: quote.price,
+        prevSettlement: quote.prevClose,
+        ready: true,
+        settlementLabel: "현재가(근사)",
+      };
+    }
+  }
+
+  if (!settlement.ready && horizonId === "today") {
+    return {
+      ready: false,
+      pendingReason: "장 마감 후 오늘 종가 추정 공개",
+      settlementLabel: settlement.settlementLabel,
+    };
+  }
+
+  if (!settlement.ready) {
+    return {
+      ready: false,
+      pendingReason: settlement.pendingReason ?? "데이터 부족",
+      settlementLabel: settlement.settlementLabel,
+    };
+  }
+
+  const driftCenter = driftCenterForHorizon(
+    snap,
+    meta.rangeDays,
+    settlement.settlementPrice
+  );
 
   const gdrStale = isGdrQuoteStale(overseasNight?.fetchedAt);
   const gdrImplied =
-    gdrStale || overseasNight?.impliedKrwPrice == null
-      ? null
-      : overseasNight.impliedKrwPrice;
+    horizonId === "tomorrow" && !gdrStale && overseasNight?.impliedKrwPrice != null
+      ? overseasNight.impliedKrwPrice
+      : null;
   const usedGdrInBlend = gdrImplied != null && gdrImplied > 0;
 
   const openBlend = blendFairValuePrice({
@@ -316,7 +414,7 @@ export function buildFairValueEstimate(
     prevClose: settlement.prevSettlement,
     driftCenter,
     gdrImpliedKrw: gdrImplied,
-    marketClosed: isKrMarketClosed(quote),
+    marketClosed: horizonId === "tomorrow" && isKrMarketClosed(quote),
     weights,
   });
 
@@ -328,18 +426,57 @@ export function buildFairValueEstimate(
     };
   }
 
-  const gapDays = calendarDaysToNextSession(meta.code);
+  const gapDays = calendarDaysToSessionOffset(sym.code, meta.sessionOffset);
   const macro = computeMacroFairValueAdjustment(snap, {
     skipGdrPremium: usedGdrInBlend,
     gapScale: macroGapScale(gapDays),
   });
+
+  const session = formatTradingSessionLabel(sym.code, meta.sessionOffset);
+  const macroSuffix = macroDetailSuffix(macro.rate);
+  const settlementPrice = settlement.settlementPrice;
+
+  if (!meta.dualLeg) {
+    const closeBase =
+      horizonId === "today"
+        ? driftCenter
+        : blendCloseFromOpen(openBlend.price, driftCenter).price;
+    const closePrice = applyMacroPrice(closeBase, macro.rate);
+    const closeLeg: FairValueLeg = {
+      price: closePrice,
+      baseBlendedPrice: closeBase,
+      vsSettlementRate: closePrice / settlementPrice - 1,
+      methodLabel: withMacroLabel(
+        horizonId === "today" ? "σ드리프트" : "장기드리프트",
+        macro.rate
+      ),
+      detail:
+        (horizonId === "today"
+          ? `오늘 종가 σ·${meta.rangeDays}일`
+          : `${meta.rangeDays}거래일 드리프트`) + macroSuffix,
+    };
+    return {
+      ready: true,
+      open: closeLeg,
+      close: closeLeg,
+      price: closeLeg.price,
+      baseBlendedPrice: closeLeg.baseBlendedPrice,
+      vsSettlementRate: closeLeg.vsSettlementRate,
+      settlementPrice,
+      settlementLabel: settlement.settlementLabel,
+      methodLabel: closeLeg.methodLabel,
+      detail: closeLeg.detail,
+      targetDateLabel: session.shortLabel,
+      targetIsoDate: session.isoDate,
+      macroRate: macro.rate,
+      macroFactors: macro.factors,
+    };
+  }
+
   const openBase = openBlend.price;
   const openPrice = applyMacroPrice(openBase, macro.rate);
   const closeBlend = blendCloseFromOpen(openBase, driftCenter);
   const closePrice = applyMacroPrice(closeBlend.price, macro.rate);
-  const session = formatNextTradingSessionLabel(meta.code);
-  const macroSuffix = macroDetailSuffix(macro.rate);
-  const settlementPrice = settlement.settlementPrice;
 
   const openLeg: FairValueLeg = {
     price: openPrice,
@@ -373,4 +510,24 @@ export function buildFairValueEstimate(
     macroRate: macro.rate,
     macroFactors: macro.factors,
   };
+}
+
+/** 오늘·내일·다음 주·1개월 — 다중 시계 추정 */
+export function buildMultiHorizonFairValue(
+  snap: StockSnapshot,
+  weights?: FairValueWeights
+): FairValueHorizonItem[] {
+  const ids: FairValueHorizonId[] = ["today", "tomorrow", "week", "month"];
+  return ids.map((id) => ({
+    id,
+    label: HORIZON_META[id].label,
+    estimate: buildFairValueEstimateForHorizon(snap, id, weights),
+  }));
+}
+
+export function buildFairValueEstimate(
+  snap: StockSnapshot,
+  weights?: FairValueWeights
+): FairValueResult {
+  return buildFairValueEstimateForHorizon(snap, "tomorrow", weights);
 }
