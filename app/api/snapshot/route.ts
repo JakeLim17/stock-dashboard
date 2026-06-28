@@ -8,6 +8,11 @@ import {
 import { invalidateConsensusCache } from "@/lib/providers/consensusCache";
 import { invalidateMarketAlertCache } from "@/lib/providers/marketAlertCache";
 import { invalidateEventCalendarCache } from "@/lib/providers/eventCalendar";
+import {
+  NO_STORE,
+  SNAPSHOT_FULL_CACHE,
+  SNAPSHOT_LITE_CACHE,
+} from "@/lib/http-cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -52,17 +57,21 @@ export async function GET(req: Request) {
     if (liteMode) {
       const snap = await buildSnapshotLite(symbols, { includeOverseasNight });
       return NextResponse.json(snap, {
-        headers: { "Cache-Control": "no-store" },
+        headers: {
+          "Cache-Control": forceRefresh ? NO_STORE : SNAPSHOT_LITE_CACHE,
+        },
       });
     }
 
-    // 평상시는 in-flight dedup + 2s soft TTL 로 동시 호출 압축.
+    // 평상시는 in-flight dedup + soft TTL 로 동시 호출 압축.
     // refresh=1 은 분석/컨센서스 캐시도 비웠으니 신선한 호출이 가도록 직접 buildSnapshot.
     const snap = forceRefresh
       ? await buildSnapshot(symbols, { includeOverseasNight })
       : await buildSnapshotShared(symbols, { includeOverseasNight });
     return NextResponse.json(snap, {
-      headers: { "Cache-Control": "no-store" },
+      headers: {
+        "Cache-Control": forceRefresh ? NO_STORE : SNAPSHOT_FULL_CACHE,
+      },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

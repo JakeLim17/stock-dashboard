@@ -44,8 +44,8 @@ async function logout() {
   window.location.replace("/login");
 }
 
-// ─── 폴링 주기 (2026-06 Vercel 절감) ─────────────────────────────
-// 정규장 기본 12s — 5s 대비 함수 호출 ~60% 절감. 체감은 WS 실시간가 보완.
+// ─── 폴링 주기 (2026-06 Vercel 절감 2차) ─────────────────────────
+// 정규장 30s + CDN 캐시 45s → 대부분 엣지 히트. WS 실시간가로 체감 보완.
 // env 로 override 가능 (NEXT_PUBLIC_POLL_INTERVAL_*).
 function envInt(key: string, fallback: number): number {
   if (typeof process === "undefined") return fallback;
@@ -55,32 +55,32 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
-const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 60_000);
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 30_000);
+const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 90_000);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
-  90_000
+  120_000
 );
 const OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OFF_HOURS_MS",
-  300_000
+  600_000
 );
 const KIS_REGULAR_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_REGULAR_MS",
-  10_000
+  25_000
 );
 const KIS_EXTENDED_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_EXTENDED_MS",
-  45_000
+  60_000
 );
 const KIS_OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_KIS_OFF_HOURS_MS",
-  180_000
+  300_000
 );
 /** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
 const FULL_SNAPSHOT_MIN_MS = envInt(
   "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
-  300_000
+  600_000
 );
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
@@ -236,7 +236,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             useLite ? "&lite=1" : ""
           }${force ? "&refresh=1" : ""}`,
           {
-            cache: "no-store",
+            cache: force ? "no-store" : "default",
             signal: ctrl.signal,
           }
         );
@@ -399,8 +399,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        // 다시 활성화되면 즉시 1회 갱신 후 인터벌 재가동
-        if (!abortRef.current) void refresh();
+        // 다시 활성화되면 60s 이상 지났을 때만 즉시 갱신 (CDN·함수 호출 절약)
+        const stale =
+          Date.now() - lastFullFetchAtRef.current >= Math.min(refreshMs, 60_000);
+        if (!abortRef.current && stale) void refresh(undefined, undefined, false, true);
         start();
       } else {
         stop();

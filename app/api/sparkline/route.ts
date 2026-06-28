@@ -7,6 +7,7 @@ import { fetchIntradayBars } from "@/lib/providers/naverIntraday";
 import { fetchNaverExtendedCandles } from "@/lib/providers/naverExtended";
 import { fetchNaverSiseTimeBars } from "@/lib/providers/naverSiseTime";
 import type { HistoricalPoint } from "@/lib/providers/yahoo";
+import { NO_STORE, SPARKLINE_CACHE } from "@/lib/http-cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -257,7 +258,7 @@ export async function GET(req: Request) {
     const hit = cache.get(code);
     if (hit && hit.expiresAt > now) {
       return NextResponse.json(hit.body, {
-        headers: { "Cache-Control": "no-store" },
+        headers: { "Cache-Control": SPARKLINE_CACHE },
       });
     }
 
@@ -277,7 +278,7 @@ export async function GET(req: Request) {
 
     cache.set(code, { expiresAt: now + getCacheTtlMs(now), body });
     return NextResponse.json(body, {
-      headers: { "Cache-Control": "no-store" },
+      headers: { "Cache-Control": SPARKLINE_CACHE },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
