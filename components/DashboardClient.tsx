@@ -79,7 +79,7 @@ const KIS_OFF_HOURS_REFRESH_MS = envInt(
 /** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
 const FULL_SNAPSHOT_MIN_MS = envInt(
   "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
-  600_000
+  900_000
 );
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";

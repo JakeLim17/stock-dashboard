@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRecommendations } from "@/hooks/useRecommendations";
 import {
   Check,
   ChevronDown,
@@ -16,14 +17,13 @@ import {
 import type {
   MarketIndicator,
   Recommendation,
-  RecommendationsResponse,
   SignalMark,
   SymbolMeta,
 } from "@/lib/types";
 import { Badge } from "./ui/Badge";
 import { Card, CardBody } from "./ui/Card";
 import { SignalMarkBadges } from "./SignalMarkBadges";
-import { changeColor, fmtPercent, toFriendlyErrorMessage } from "@/lib/utils";
+import { changeColor, fmtPercent } from "@/lib/utils";
 
 interface Props {
   // 시장 지표 — NVDA 등 MARKET_INDICATORS 종목의 등락률 데이터 (스냅샷에서 직접 전달)
@@ -57,52 +57,8 @@ export function ThemeGroupView({
   maxWatch,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState<RecommendationsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refresh } = useRecommendations(open);
   const [activeTheme, setActiveTheme] = useState<ThemeTag | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const fetchedOnce = useRef(false);
-
-  const fetchData = useCallback(async (refresh = false) => {
-    if (abortRef.current) abortRef.current.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await fetch(
-        `/api/recommendations${refresh ? "?refresh=1" : ""}`,
-        { cache: "no-store", signal: ctrl.signal }
-      );
-      if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
-      const j = (await r.json()) as RecommendationsResponse;
-      setData(j);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      setError(toFriendlyErrorMessage(e));
-    } finally {
-      if (abortRef.current === ctrl) {
-        abortRef.current = null;
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  // 펼침 시 lazy fetch — 처음 열 때 한 번만
-  useEffect(() => {
-    if (!open) return;
-    if (fetchedOnce.current) return;
-    fetchedOnce.current = true;
-    void fetchData(false);
-  }, [open, fetchData]);
-
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
 
   // 코드 → 라이브 데이터 매핑
   const codeMap = useMemo(() => {
@@ -212,7 +168,7 @@ export function ThemeGroupView({
             </p>
             <button
               type="button"
-              onClick={() => void fetchData(true)}
+              onClick={() => void refresh()}
               disabled={loading}
               className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
               title="테마 분석 다시 불러오기 (캐시 무시)"

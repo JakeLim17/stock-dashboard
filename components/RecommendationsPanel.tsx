@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   Recommendation,
   RecommendationCategory,
-  RecommendationsResponse,
   SectorTag,
 } from "@/lib/types";
+import { useRecommendations } from "@/hooks/useRecommendations";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { Badge } from "./ui/Badge";
 import { Card, CardBody } from "./ui/Card";
@@ -27,7 +27,6 @@ import {
   currencyOf,
   fmtPercent,
   fmtRelative,
-  toFriendlyErrorMessage,
 } from "@/lib/utils";
 import { PriceWithKrw } from "./PriceWithKrw";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
@@ -90,57 +89,9 @@ export function RecommendationsPanel({
   krwRate,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [data, setData] = useState<RecommendationsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refresh } = useRecommendations(open);
   const [activeSector, setActiveSector] = useState<SectorTag | "ALL">("ALL");
   const [, setTick] = useState(0); // "n분 전" 표시 강제 갱신
-  const abortRef = useRef<AbortController | null>(null);
-  const fetchedOnce = useRef(false);
-
-  const fetchData = useCallback(async (refresh = false) => {
-    if (abortRef.current) abortRef.current.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await fetch(
-        `/api/recommendations${refresh ? "?refresh=1" : ""}`,
-        {
-          cache: "no-store",
-          signal: ctrl.signal,
-        }
-      );
-      if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
-      const j = (await r.json()) as RecommendationsResponse;
-      setData(j);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      setError(toFriendlyErrorMessage(e));
-    } finally {
-      if (abortRef.current === ctrl) {
-        abortRef.current = null;
-        setLoading(false);
-      }
-    }
-  }, []);
-
-  // 펼침 시 lazy fetch — 처음 열 때 한 번만 자동 호출.
-  useEffect(() => {
-    if (!open) return;
-    if (fetchedOnce.current) return;
-    fetchedOnce.current = true;
-    void fetchData(false);
-  }, [open, fetchData]);
-
-  // 언마운트 시 진행 중 fetch 정리
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
 
   // 상대 시각 라벨 갱신
   useEffect(() => {
@@ -237,7 +188,7 @@ export function RecommendationsPanel({
             </div>
             <button
               type="button"
-              onClick={() => void fetchData(true)}
+              onClick={() => void refresh()}
               disabled={loading}
               className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border border-border bg-card hover:bg-muted disabled:opacity-50 transition-colors"
               title="추천 다시 분석 (캐시 무시)"
