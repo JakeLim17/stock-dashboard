@@ -75,6 +75,8 @@ export interface SymbolMeta {
   // 배지에 표시되는 한국어 짧은 라벨. 예: "반도체 대장", "MLCC 대장", "AI 반도체 대장".
   // isSectorLeader가 true일 때만 의미가 있다.
   sectorLeaderLabel?: string;
+  /** 지주·투자지주 — PER/PBR 해석·밸류 룰 분기 */
+  isHoldingCompany?: boolean;
   // 표시·환산용 통화. 한국 종목·환율은 "KRW", 미국 종목은 "USD".
   // 비워두면 currencyOf(code) 헬퍼가 코드 형태로 추정한다(.KS/.KQ → KRW, 그 외 → USD).
   // 수치 계산 자체엔 영향 없음. 원화 병기·포맷 분기에만 사용.
@@ -685,6 +687,19 @@ export interface StockSnapshot {
   marketContext?: StockMarketContext | null;
   /** 크론·캐시 분석 시각 (epoch ms). 1h 이내면 hourly refresh 결과. */
   analysisCachedAt?: number | null;
+  /** 계열 리더(대장) 종목 연동 컨텍스트 — fair-value·UI 노출용 */
+  groupLeaderContext?: GroupLeaderContext | null;
+}
+
+/** symbol-groups 리더→계열사 호재·모멘텀 전이 컨텍스트 */
+export interface GroupLeaderContext {
+  leaderCode: string;
+  leaderName: string;
+  catalystShare: number;
+  label: string;
+  leaderBuyScore: number;
+  leaderMomentum: boolean;
+  opportunityLevel: NewsOpportunityLevel;
 }
 
 /** 종목 익일 추정에 쓰는 시장 전반 지표 — snapshot 빌드 시 indicators/context 에서 주입. */

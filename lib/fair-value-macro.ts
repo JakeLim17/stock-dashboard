@@ -1,5 +1,6 @@
 import type { StockSnapshot } from "./types";
 import { getGroupCatalystPeer } from "./symbol-groups";
+import { computeGroupLeaderSpilloverBps } from "./group-catalyst-spillover";
 
 export interface MacroAdjustmentFactor {
   label: string;
@@ -53,18 +54,32 @@ function calendarCatalystBps(
       /ADR|예탁증권|나스닥|NASDAQ|상장/i.test(label) || e.detail?.includes("ipo");
     const isEarnings = e.kind === "earnings" && /실적|어닝|earnings/i.test(label);
     const isCustomCatalyst =
-      /기대|수혜|서프라이즈|리밸런싱|매입/i.test(label) && e.importance !== "low";
+      /기대|수혜|서프라이즈|리밸런싱|매입|재평가|지분|분할|분영|지배구조/i.test(
+        label
+      ) && e.importance !== "low";
 
     const imp =
       e.importance === "high" ? 1 : e.importance === "medium" ? 0.65 : 0.35;
 
-    // D-day 가까울수록 기대감 반영 (7일 이내 피크)
+    // D-day 가까울수록 기대감 반영 (7일 이내 피크, D+3까지 잔여)
     const proximity =
-      daysUntil <= 0 ? 0.5 : daysUntil <= 7 ? 1 : daysUntil <= 14 ? 0.7 : 0.45;
+      daysUntil <= 0
+        ? daysUntil >= -3
+          ? 0.85
+          : 0.5
+        : daysUntil <= 7
+          ? 1
+          : daysUntil <= 14
+            ? 0.7
+            : 0.45;
 
     const peer = getGroupCatalystPeer(symbolCode);
-    const spillMult =
-      peer && /연동|수혜/i.test(label) ? peer.catalystShare : 1;
+    const isSpilloverEvent =
+      peer != null &&
+      (/연동|수혜/i.test(label) ||
+        e.detail?.includes(peer.label) ||
+        (e.symbolCode === symbolCode && peer.leaderCode !== symbolCode));
+    const spillMult = peer && isSpilloverEvent ? peer.catalystShare : 1;
 
     if (isAdr) bps += Math.round(32 * imp * proximity * horizonMult * spillMult);
     else if (isEarnings && daysUntil >= 0 && daysUntil <= (horizon === "month" ? 35 : 10))
@@ -222,6 +237,12 @@ export function computeMacroFairValueAdjustment(
     rate += pushFactor(factors, "일정 호재", catalystBps);
   }
 
+  const groupBps = computeGroupLeaderSpilloverBps(snap.groupLeaderContext);
+  if (groupBps !== 0) {
+    const label = snap.groupLeaderContext?.label ?? "계열 호재";
+    rate += pushFactor(factors, `SK 계열 연동`, groupBps);
+  }
+
   // ── 컨센서스 목표가 (장기 시계) ────────────────────────
   const consensusBps = consensusAnchorBps(snap, horizon);
   if (consensusBps !== 0) {
@@ -234,6 +255,17 @@ export function computeMacroFairValueAdjustment(
   if (!isLongHorizon && a.heatScore >= 75)
     rate += pushFactor(factors, "단기 과열", -30);
   else if (a.heatScore <= 35) rate += pushFactor(factors, "과열 완화", 15);
+  else if (
+    isLongHorizon &&
+    a.heatScore >= 75 &&
+    snap.groupLeaderContext?.leaderMomentum
+  ) {
+    rate += pushFactor(
+      factors,
+      "계열 모멘텀",
+      Math.round(12 * snap.groupLeaderContext.catalystShare)
+    );
+  }
 
   // ── 수급 (외인 5일) ───────────────────────────────────
   const f5 = flow.foreignNet5d;

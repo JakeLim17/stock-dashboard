@@ -32,6 +32,7 @@ import {
   getGroupCatalystPeer,
   spilloverLeaderEvents,
 } from "./symbol-groups";
+import { applyGroupCatalystSpillover } from "./group-catalyst-spillover";
 import {
   analyze,
   marketMoodLabel,
@@ -614,12 +615,19 @@ export async function fetchWatchlistSnapshots(
           leaderInWatch ??
           WATCHLIST_CANDIDATES.find((m) => m.code === peer.leaderCode);
         if (leaderMeta) {
+          const leaderCurated = getCuratedUpcomingForSymbol(
+            peer.leaderCode,
+            90
+          ).filter((e) => e.symbolCode === peer.leaderCode);
           const leaderApiEvents = await fetchEventsForSymbol(leaderMeta).catch(
             () => []
           );
           upcomingEventsMerged = dedupeEventItems([
             ...upcomingEventsMerged,
-            ...spilloverLeaderEvents(meta.code, leaderApiEvents),
+            ...spilloverLeaderEvents(meta.code, [
+              ...leaderApiEvents,
+              ...leaderCurated,
+            ]),
           ]);
         }
       }
@@ -839,6 +847,8 @@ export async function fetchWatchlistSnapshots(
         r.reason instanceof Error ? r.reason.message : String(r.reason);
     }
   }
+
+  applyGroupCatalystSpillover(primaries);
 
   return { primaries, errors };
 }

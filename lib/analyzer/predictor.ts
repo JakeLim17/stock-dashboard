@@ -1,5 +1,6 @@
 import "server-only";
 import type { HistoricalPoint } from "../providers/yahoo";
+import { isHoldingCompanyCode } from "../symbols";
 import type {
   EventItem,
   PriceRange,
@@ -184,11 +185,17 @@ function clamp(n: number, lo = 0, hi = 100): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
+function valuationRisk(
+  v?: ValuationMetrics | null,
+  code?: string
+): Predictions["valuation"] {
   if (!v) return null;
 
   const reasons: string[] = [];
   let riskScore = 0;
+  const isHolding = code ? isHoldingCompanyCode(code) : false;
+  const perHighThreshold = isHolding ? 100 : 80;
+  const perMidThreshold = isHolding ? 60 : 40;
 
   // 음수 PER/PBR 가드 — 적자기업·자본잠식 회사가 "낮은 값 = 저평가"로 잘못 분류되는
   // 결함을 방어한다. 음수일 때는 별도 reason으로 노출하고 감산 분기에 들어가지 않게 한다.
@@ -196,12 +203,12 @@ function valuationRisk(v?: ValuationMetrics | null): Predictions["valuation"] {
     if (v.per >= 150) {
       riskScore += 55;
       reasons.push(`PER ${v.per.toFixed(0)}배: 실적 기대가 크게 선반영`);
-    } else if (v.per >= 80) {
-      riskScore += 35;
-      reasons.push(`PER ${v.per.toFixed(0)}배: 고평가 부담`);
-    } else if (v.per >= 40) {
-      riskScore += 20;
-      reasons.push(`PER ${v.per.toFixed(0)}배: 다소 부담`);
+    } else if (v.per >= perHighThreshold) {
+      riskScore += isHolding ? 22 : 35;
+      reasons.push(`PER ${v.per.toFixed(0)}배: 고평가 부담${isHolding ? "(지주 완화)" : ""}`);
+    } else if (v.per >= perMidThreshold) {
+      riskScore += isHolding ? 10 : 20;
+      reasons.push(`PER ${v.per.toFixed(0)}배: 다소 부담${isHolding ? "(지주)" : ""}`);
     } else if (v.per <= 12) {
       riskScore -= 8;
       reasons.push(`PER ${v.per.toFixed(1)}배: 밸류 부담 낮음`);
@@ -718,7 +725,7 @@ export function predict(input: PredictorInput): Predictions {
     ranges,
     targets,
     scenarios,
-    valuation: valuationRisk(quote.valuation),
+    valuation: valuationRisk(quote.valuation, meta?.code),
     highVolatility,
     sessionContext: {
       phase: oneDayCtx.phase,

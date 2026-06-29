@@ -14,7 +14,7 @@ describe("symbol-groups", () => {
     assert.ok(peer!.catalystShare > 0.8);
   });
 
-  it("SK 지주는 하이닉스 일정을 전이", () => {
+  it("SK스퀘어는 하이닉스 일정을 전이", () => {
     const leaderEvent: EventItem = {
       kind: "earnings",
       date: Date.now() + 10 * 86_400_000,
@@ -23,6 +23,11 @@ describe("symbol-groups", () => {
       symbolCode: "000660.KS",
       detail: "ipo",
     };
+    const spilledSk = spilloverLeaderEvents("402340.KS", [leaderEvent]);
+    assert.equal(spilledSk.length, 1);
+    assert.equal(spilledSk[0]!.symbolCode, "402340.KS");
+    assert.match(spilledSk[0]!.detail ?? "", /연동/);
+
     const spilled = spilloverLeaderEvents("034730.KS", [leaderEvent]);
     assert.equal(spilled.length, 1);
     assert.equal(spilled[0]!.symbolCode, "034730.KS");

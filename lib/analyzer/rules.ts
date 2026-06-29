@@ -17,6 +17,7 @@ import type {
   Valuation,
 } from "../types";
 import { emptyRiskAssessment } from "../news/riskScore";
+import { isHoldingCompanyCode } from "../symbols";
 import {
   applyMomentumScoreAdjust,
   applyMomentumVerdict,
@@ -315,6 +316,7 @@ function evaluateLongTermRules(input: {
 }): LongTermHit[] {
   const { quote, consensus, valuation } = input;
   const hits: LongTermHit[] = [];
+  const isHolding = isHoldingCompanyCode(quote.code);
 
   const per = valuation?.per ?? quote.valuation?.per ?? null;
   const forwardPer =
@@ -447,15 +449,19 @@ function evaluateLongTermRules(input: {
       });
     else if (forwardPer > 40)
       hits.push({
-        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 대비도 부담${fpNote}`,
-        score: Math.round(-15 * fpFactor),
+        label: isHolding
+          ? `추정PER ${forwardPer.toFixed(0)}배 — 지주 프리미엄(완화)${fpNote}`
+          : `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 대비도 부담${fpNote}`,
+        score: Math.round((isHolding ? -6 : -15) * fpFactor),
         good: false,
       });
     else if (forwardPer > 25)
       hits.push({
-        label: `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 부담${fpNote}`,
-        score: Math.round(-5 * fpFactor),
-        good: false,
+        label: isHolding
+          ? `추정PER ${forwardPer.toFixed(0)}배 — 지주 밸류${fpNote}`
+          : `추정PER ${forwardPer.toFixed(0)}배 — 다음 실적 부담${fpNote}`,
+        score: Math.round((isHolding ? 0 : -5) * fpFactor),
+        good: isHolding,
       });
   } else if (forwardPer != null && forwardPer <= 0) {
     hits.push({
@@ -465,14 +471,20 @@ function evaluateLongTermRules(input: {
     });
   }
 
-  // 4) PBR — 음수(자본잠식) 가드
+  // 4) PBR — 음수(자본잠식) 가드. 지주는 NAV 프리미엄 허용 범위 확대.
   if (pbr != null && pbr > 0) {
     if (pbr < 1)
       hits.push({ label: `PBR ${pbr.toFixed(2)}배 — 청산가치 이하`, score: 5, good: true });
-    else if (pbr >= 8)
+    else if (pbr >= 8 && !isHolding)
       hits.push({ label: `PBR ${pbr.toFixed(1)}배 — 자산가치 대비 매우 부담`, score: -15, good: false });
-    else if (pbr >= 5)
+    else if (pbr >= 5 && !isHolding)
       hits.push({ label: `PBR ${pbr.toFixed(1)}배 자산가치 부담`, score: -8, good: false });
+    else if (isHolding && pbr >= 3 && pbr < 6)
+      hits.push({
+        label: `PBR ${pbr.toFixed(1)}배 — 지주 NAV 대비 적정`,
+        score: 3,
+        good: true,
+      });
   } else if (pbr != null && pbr <= 0) {
     hits.push({
       label: "자본잠식(PBR 음수) — 큰 위험",
@@ -950,6 +962,13 @@ export function analyze(input: AnalyzeInput): AnalysisResult {
     .slice(0, 3)
     .map((h) => `${h.good ? "+ " : "− "}${h.label}`);
   if (longReasons.length === 0) longReasons.push("컨센·밸류 데이터 부족");
+  if (
+    isHoldingCompanyCode(input.quote.code) &&
+    !input.consensus &&
+    longReasons[0] === "컨센·밸류 데이터 부족"
+  ) {
+    longReasons[0] = "지주 — 컨센 부족·계열 지분가치 참고";
+  }
 
   // 외부 호재(opportunity) — 의미 있는 medium/high일 때 단기 reasons에 한 줄 prepend.
   // verdict shift는 하지 않고 표시만. high면 대표 driver 라벨, medium은 매칭 수 정도.

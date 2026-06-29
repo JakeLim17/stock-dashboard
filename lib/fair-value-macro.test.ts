@@ -113,6 +113,27 @@ describe("computeMacroFairValueAdjustment horizon", () => {
     assert.ok(!month.factors.some((f) => f.label === "반도체 과열"));
   });
 
+  it("7월 초 분할·지배구조 호재가 custom catalyst로 잡힌다", () => {
+    const snap = baseSnap();
+    snap.meta = { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock" };
+    snap.quote.code = "402340.KS";
+    snap.upcomingEvents = [
+      {
+        kind: "earnings",
+        date: Date.now() + 4 * 86_400_000,
+        label: "SK스퀘어 지배구조·분할 전환 기대",
+        importance: "medium",
+        symbolCode: "402340.KS",
+        detail: "지주 구조 개선·분할 이슈",
+      },
+    ];
+    const tomorrow = computeMacroFairValueAdjustment(snap, {
+      horizon: "tomorrow",
+    });
+    assert.ok(tomorrow.rate > 0);
+    assert.ok(tomorrow.factors.some((f) => f.label === "일정 호재"));
+  });
+
   it("SK스퀘어는 하이닉스 ADR 일정 호재를 장기에 반영", () => {
     const snap = baseSnap();
     snap.meta = { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock" };

@@ -40,7 +40,7 @@ export function getGroupCatalystPeer(symbolCode: string): GroupCatalystPeer | nu
 export function isGroupSpilloverEvent(e: EventItem): boolean {
   const text = `${e.label} ${e.detail ?? ""}`;
   return (
-    /ADR|예탁증권|나스닥|NASDAQ|상장|실적|어닝|earnings|HBM|메모리|반도체/i.test(
+    /ADR|예탁증권|나스닥|NASDAQ|상장|실적|어닝|earnings|HBM|메모리|반도체|분할|분영|지분|재평가/i.test(
       text
     ) || e.importance === "high"
   );

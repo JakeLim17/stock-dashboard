@@ -134,8 +134,8 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "000120.KS", name: "CJ대한통운", kind: "kr-stock", sector: "물류", isSectorLeader: true, sectorLeaderLabel: "물류 대장" },
 
   // ─── 2026-06-18 대장주·계열 지주 (9종) ───────────────────────────────────
-  { code: "034730.KS", name: "SK", kind: "kr-stock", sector: "화학", isSectorLeader: true, sectorLeaderLabel: "SK 지주" },
-  { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock", sector: "화학", isSectorLeader: true, sectorLeaderLabel: "SK 투자지주" },
+  { code: "034730.KS", name: "SK", kind: "kr-stock", sector: "화학", isSectorLeader: true, sectorLeaderLabel: "SK 지주", isHoldingCompany: true },
+  { code: "402340.KS", name: "SK스퀘어", kind: "kr-stock", sector: "화학", isSectorLeader: true, sectorLeaderLabel: "SK 투자지주", isHoldingCompany: true },
   { code: "361610.KQ", name: "SK아이이테크놀로지", kind: "kr-stock", sector: "배터리", isSectorLeader: true, sectorLeaderLabel: "분리막 대장" },
   { code: "079550.KS", name: "LIG넥스원", kind: "kr-stock", sector: "방산", isSectorLeader: true, sectorLeaderLabel: "유도무기 대장" },
   { code: "267250.KS", name: "HD현대", kind: "kr-stock", sector: "조선", isSectorLeader: true, sectorLeaderLabel: "HD 지주" },
@@ -702,6 +702,15 @@ export function toKisCode(code: string): string | null {
 // 화면용 키 (URL safe)
 export function toSlug(code: string): string {
   return code.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+export function isHoldingCompanyMeta(meta: SymbolMeta): boolean {
+  return meta.isHoldingCompany === true;
+}
+
+export function isHoldingCompanyCode(code: string): boolean {
+  const meta = WATCHLIST_CANDIDATES.find((m) => m.code === code);
+  return meta?.isHoldingCompany === true;
 }
 
 export function resolveWatchSymbols(codes: string[]): SymbolMeta[] {
