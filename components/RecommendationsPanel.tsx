@@ -205,7 +205,7 @@ export function RecommendationsPanel({
               </span>
             ) : (
               <span className="text-[11px] text-muted-foreground">
-                {open ? "분석 중…" : "펼쳐서 추천 받기 (첫 분석 수초~수분 소요)"}
+                {open ? "분석 중…" : `펼쳐서 추천 받기 (${RECOMMENDATION_SCREEN_COUNT}종 · 첫 분석 수초~1분)`}
               </span>
             )}
             {buildAgeLabel && (

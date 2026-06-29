@@ -30,7 +30,7 @@ import {
 } from "./symbols";
 import type { EventItem, SymbolMeta, StockSnapshot } from "./types";
 
-/** 크론 대상 — PRIMARY 3 + 추천 스크리닝 풀 (~66종) 중복 제거. */
+/** 크론 대상 — PRIMARY 3 + 추천 스크리닝 풀 (~22종) 중복 제거. */
 export function getCronAnalysisSymbols(): SymbolMeta[] {
   const byCode = new Map<string, SymbolMeta>();
   for (const m of PRIMARY_SYMBOLS) byCode.set(m.code, m);

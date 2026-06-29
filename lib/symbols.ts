@@ -204,38 +204,6 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "SPCX", name: "스페이스X", kind: "us-stock", sector: "글로벌우주", isSectorLeader: true, sectorLeaderLabel: "우주·발사체 대장", currency: "USD" },
 ];
 
-// 추천 스크리닝 풀 — WATCHLIST_CANDIDATES 전수(120) 대신 경량 후보만 분석.
-//   1) 섹터 대장주(isSectorLeader) 전부
-//   2) 대장주 없는 섹터는 후보 목록 첫 종목 1개
-// 전체 KRX(~2,500) 전수 스크리닝은 하지 않음 — Yahoo/KIS fanout·Vercel CPU 한도 초과.
-// 비용 추정(동시성 6): 풀 62종 cold ~30–60s / 전체 120종 ~60–120s / KRX 전체 수십 분+.
-export function getRecommendationScreenPool(): SymbolMeta[] {
-  const withSector = WATCHLIST_CANDIDATES.filter(
-    (c): c is SymbolMeta & { sector: SectorTag } => !!c.sector
-  );
-  const byCode = new Map<string, SymbolMeta>();
-  // 메인 관심 3종(삼전·하닉·삼성전기)은 항상 스크리닝 — 급등·모멘텀 추적 누락 방지
-  for (const m of PRIMARY_SYMBOLS) {
-    if (m.sector) byCode.set(m.code, m as SymbolMeta & { sector: SectorTag });
-  }
-  for (const m of withSector) {
-    if (m.isSectorLeader) byCode.set(m.code, m);
-  }
-  const covered = new Set(
-    [...byCode.values()].map((m) => m.sector as SectorTag)
-  );
-  for (const m of withSector) {
-    if (!covered.has(m.sector as SectorTag)) {
-      byCode.set(m.code, m);
-      covered.add(m.sector as SectorTag);
-    }
-  }
-  return [...byCode.values()];
-}
-
-export const RECOMMENDATION_SCREEN_POOL = getRecommendationScreenPool();
-export const RECOMMENDATION_SCREEN_COUNT = RECOMMENDATION_SCREEN_POOL.length;
-
 // 시장 지표 패널
 // KOSPI/KOSDAQ는 KIS가 활성이면 우선 조회되고 Yahoo 폴백. 라우팅은 providers/index.ts.
 //
@@ -640,6 +608,70 @@ export const THEMES: ThemeDefinition[] = [
     codes: ["SPCX"],
   },
 ];
+
+// 추천 스크리닝 풀 — WATCHLIST 전수·섹터 대장 전부(~67종) 대신 테마 narrative 대장 위주 ~22종.
+//   1) PRIMARY 3종(삼전·하닉·삼성전기) 항상 포함
+//   2) RECOMMENDATION_THEME_PRIORITY 순으로 테마당 isSectorLeader 1종
+// 전체 KRX 전수 스크리닝은 하지 않음 — Yahoo/KIS fanout·Vercel CPU 한도 초과.
+// 비용 추정(동시성 6): 풀 ~22종 cold ~10–25s / 구 67종 ~30–60s.
+const MAX_RECOMMENDATION_POOL = 22;
+
+/** 추천 스크리닝 테마 우선순위 — KR·US 핵심 narrative 균형 */
+const RECOMMENDATION_THEME_PRIORITY: ThemeTag[] = [
+  "ai_semi",
+  "hbm_memory",
+  "ai_infra",
+  "us_bigtech",
+  "us_semiconductor",
+  "battery",
+  "defense",
+  "auto",
+  "shipbuilding",
+  "nuclear_power",
+  "internet_game",
+  "semi_equipment",
+  "robot",
+  "us_software",
+  "us_healthcare",
+  "us_crypto",
+  "us_space",
+  "euv_equipment",
+  "ai_power_dc",
+  "renewable",
+];
+
+export function getRecommendationScreenPool(): SymbolMeta[] {
+  const catalog = new Map<string, SymbolMeta>();
+  for (const m of WATCHLIST_CANDIDATES) catalog.set(m.code, m);
+  for (const m of MARKET_INDICATORS) {
+    if (!catalog.has(m.code)) catalog.set(m.code, m);
+  }
+  const themeById = new Map(THEMES.map((t) => [t.id, t]));
+  const byCode = new Map<string, SymbolMeta>();
+
+  for (const m of PRIMARY_SYMBOLS) {
+    byCode.set(m.code, m);
+  }
+
+  for (const themeId of RECOMMENDATION_THEME_PRIORITY) {
+    if (byCode.size >= MAX_RECOMMENDATION_POOL) break;
+    const theme = themeById.get(themeId);
+    if (!theme) continue;
+    for (const code of theme.codes) {
+      const m = catalog.get(code);
+      if (!m || byCode.has(m.code)) continue;
+      if (m.isSectorLeader) {
+        byCode.set(m.code, m);
+        break;
+      }
+    }
+  }
+
+  return [...byCode.values()];
+}
+
+export const RECOMMENDATION_SCREEN_POOL = getRecommendationScreenPool();
+export const RECOMMENDATION_SCREEN_COUNT = RECOMMENDATION_SCREEN_POOL.length;
 
 // 테마 정의 + 코드 카탈로그(WATCHLIST + MARKET_INDICATORS)를 매칭해
 // 실제 존재하는 종목만 남긴 형태로 반환. 매칭 안 된 테마(전체 codes 0개)는 제외.

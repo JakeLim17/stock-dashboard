@@ -22,7 +22,6 @@ import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
 import { UnifiedSchedulePanel } from "./UnifiedSchedulePanel";
-import { MarketLeadersPanel } from "./MarketLeadersPanel";
 import { DisclaimerModal } from "./DisclaimerModal";
 import { fmtRelative, getKrwRate, toFriendlyErrorMessage } from "@/lib/utils";
 import {
@@ -722,18 +721,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         krwRate={krwRate}
       />
 
-      {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시.
-          Round2 Fix8: 시장순위 위로 이동 (사용자가 테마 → 순위 흐름으로 보고 싶어함). */}
+      {/* 테마별 보기 — 기본 접힘. AI 반도체·배터리·방산 등 묶음 + 동조율 표시. */}
       <ThemeGroupView
         indicators={snap.indicators}
         watchlist={watchCodes}
         onAddToWatchlist={handleAddFromRecommendation}
         maxWatch={MAX_WATCH}
       />
-
-      {/* 시장 순위 — KIS 활성 시 거래량/상승/하락 TOP. 기본 접힘.
-          Round2 Fix8: 테마별 보기 아래로 이동. */}
-      <MarketLeadersPanel />
 
       {/* 종목 디테일 패널 (데스크탑 전용 고정) — 탭 구조 [예측 | 컨센서스 | 수급 | 호가 | 뉴스].
           Round2 Fix7: 카드 그리드 위로 이동 — 사용자가 카드 클릭하면 위에서 바로 상세분석이 보이도록.
