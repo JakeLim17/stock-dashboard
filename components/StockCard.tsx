@@ -359,7 +359,7 @@ function CardFlowConsensusExpand({
               onClick={onOpenDetailSheet}
               className="w-full text-center text-[11px] text-muted-foreground hover:text-foreground py-1.5 border border-dashed border-border rounded-md"
             >
-              뉴스 · 호가 보기
+              뉴스 · 상세 보기
             </button>
           )}
         </div>

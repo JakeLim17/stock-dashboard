@@ -444,15 +444,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     watchCodes.includes(p.meta.code)
   );
 
-  // KIS WebSocket 실시간 구독 — 카드 가격/거래량 + 선택 종목 호가 즉시 갱신.
+  // KIS WebSocket 실시간 구독 — 카드 가격/거래량 즉시 갱신.
   // - feature flag NEXT_PUBLIC_REALTIME_ENABLED=true 일 때만 SSE 연결, 그 외엔 noop.
   // - 한국 6자리 종목만 구독 (훅 내부에서도 필터). 미국 종목은 기존 polling 유지.
   // - 60초 신선도 가드: stale tick(예: 장 마감 후 잔존) 으로 데이터가 굳지 않게.
   //
   // 구독 구조:
-  //   1) 가시 카드 (visibleCodes) × [price, trade]   → H0STCNT0 한 번에 가격 + 누적거래량 추출
-  //   2) 선택 종목 1개 (selectedSnap.meta.code) × [asp] → H0STASP0 호가 10단계
-  //   동시 구독 ≈ 6×1 + 1 = 7건 (KIS 한도 41 안전).
+  //   가시 카드 (visibleCodes) × [price, trade] → H0STCNT0 한 번에 가격 + 누적거래량 추출
   const visibleCodes = useMemo(
     () => visiblePrimaries.map((p) => p.meta.code),
     [visiblePrimaries]
@@ -465,15 +463,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     visibleCodes,
     cardTopics
   );
-
-  // 선택 종목 호가 — 한국 종목일 때만 (H0STASP0 는 국내주식 한정).
-  const aspCodes = useMemo(() => {
-    const c = selectedSnap?.meta.code;
-    if (!c) return [];
-    return /^\d{6}\.K[SQ]$/.test(c) ? [c] : [];
-  }, [selectedSnap?.meta.code]);
-  const aspTopics = useMemo<("asp")[]>(() => ["asp"], []);
-  const { asps: realtimeAsps } = useRealtime(aspCodes, aspTopics);
 
   const realtimeNow = Date.now();
   const FRESH_MS = 60_000;
@@ -498,16 +487,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       cumTradeValue: entry.cumTradeValue > 0 ? entry.cumTradeValue : undefined,
     };
   };
-  const selectedAspOverride = (() => {
-    const c = selectedSnap?.meta.code;
-    if (!c) return null;
-    const six = c.match(/^(\d{6})/)?.[1];
-    if (!six) return null;
-    const entry = realtimeAsps[six];
-    if (!entry) return null;
-    if (realtimeNow - entry.ts > FRESH_MS) return null;
-    return entry;
-  })();
 
   // USDKRW 환율 — USD 종목 원화 병기에 사용. indicators(KRW=X) 기준.
   // 환율이 없거나 fetch 실패면 null → 자식들이 보조 표시를 자동 생략(graceful).
@@ -729,7 +708,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         maxWatch={MAX_WATCH}
       />
 
-      {/* 종목 디테일 패널 (데스크탑 전용 고정) — 탭 구조 [예측 | 컨센서스 | 수급 | 호가 | 뉴스].
+      {/* 종목 디테일 패널 (데스크탑 전용 고정) — 탭 구조 [예측 | 컨센서스 | 수급 | 뉴스].
           Round2 Fix7: 카드 그리드 위로 이동 — 사용자가 카드 클릭하면 위에서 바로 상세분석이 보이도록.
           첫 진입에는 selectedSnap 이 첫 카드로 폴백되어 빈 패널 깜빡임 없음.
           모바일(lg 미만)에서는 별도 MobileDetailSheet 모달이 카드 탭 시 슬라이드 업한다. */}
@@ -740,7 +719,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
           allNews={snap.news}
           krwRate={krwRate}
           kisActive={snap.kisActive}
-          aspOverride={selectedAspOverride}
           marketSemiHeat={snap.marketMood.semiHeat}
         />
       </div>
@@ -793,7 +771,6 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         allNews={snap.news}
         krwRate={krwRate}
         kisActive={snap.kisActive}
-        aspOverride={selectedAspOverride}
         marketSemiHeat={snap.marketMood.semiHeat}
       />
 

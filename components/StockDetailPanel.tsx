@@ -7,8 +7,6 @@ import { Badge } from "./ui/Badge";
 import { PredictionPanel } from "./PredictionPanel";
 import { ConsensusPanel } from "./ConsensusPanel";
 import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
-import { AskingPricePanel } from "./AskingPricePanel";
-import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
@@ -20,25 +18,18 @@ import { VolatilityBadge } from "./VolatilityBadge";
 import { fmtRelative } from "@/lib/utils";
 import { isNewsRelated } from "@/lib/news/symbolKeywords";
 
-// 한국 종목 여부 — 클라이언트에서도 쓰는 단순 정규식 판정.
-// (lib/providers/naver.ts 의 isKrStock 은 server-only 라 client component에서 사용 불가.)
-function isKrStockCode(code: string): boolean {
-  return /^\d{6}\.K[SQ]$/.test(code);
-}
 import {
   ExternalLink,
-  LayoutList,
   LineChart,
   ScrollText,
   Users,
   Newspaper,
 } from "lucide-react";
 
-// 선택된 종목 1개의 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급 | 호가 | 뉴스].
+// 선택된 종목 1개의 디테일 패널 — 탭 구조 [예측 | 컨센서스 | 수급 | 뉴스].
 //   - PredictionPanel + ConsensusPanel을 한 카드 안에 통합
 //   - "수급" 탭은 카드의 펀더멘털 블록(시간외/거래량/RSI/외인·기관·개인 당일·5일)을 흡수해
 //     모바일에서 선택 종목 카드가 숨겨져도 정보 손실이 없도록 한다.
-//   - "호가" 탭은 KIS 활성 + 한국 종목 한정 — 10단계 호가 + 체결강도 + 최근 체결.
 //   - "뉴스" 탭은 종목 한정 24시간 뉴스.
 //
 // 부모(DashboardClient)에서 활성 탭을 제어할 수 있도록 ref + jumpToPrediction 노출.
@@ -48,7 +39,6 @@ export type DetailTabKey =
   | "prediction"
   | "consensus"
   | "flow"
-  | "asking"
   | "news";
 
 export interface StockDetailPanelHandle {
@@ -66,8 +56,6 @@ interface Props {
   // 모바일 모달(MobileDetailSheet) 안에서 렌더되는지 여부.
   // true 면 PredictionPanel 의 "상세 예측 보기" details 를 기본 펼침 등 모바일 친화 동작.
   mobileSheet?: boolean;
-  // Phase 3 — KIS WS H0STASP0 호가 실시간. 있으면 AskingPricePanel 에 우선 표시.
-  aspOverride?: RealtimeAspEntry | null;
   /** 시장 전체 반도체 과열 — verdict 근거 bullet용 (데스크탑 헤더) */
   marketSemiHeat?: number | null;
 }
@@ -79,13 +67,12 @@ const TAB_META: Record<
   prediction: { label: "예측", icon: <LineChart className="h-3.5 w-3.5" /> },
   consensus: { label: "컨센서스", icon: <Users className="h-3.5 w-3.5" /> },
   flow: { label: "수급", icon: <ScrollText className="h-3.5 w-3.5" /> },
-  asking: { label: "호가", icon: <LayoutList className="h-3.5 w-3.5" /> },
   news: { label: "뉴스", icon: <Newspaper className="h-3.5 w-3.5" /> },
 };
 
 export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
   function StockDetailPanel(
-    { snap, allNews, krwRate, kisActive, mobileSheet = false, aspOverride, marketSemiHeat },
+    { snap, allNews, krwRate, kisActive, mobileSheet = false, marketSemiHeat },
     ref
   ) {
     const [tab, setTab] = useState<DetailTabKey>("prediction");
@@ -167,9 +154,7 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
               <CardTitle className="text-base">{snap.meta.name}</CardTitle>
             )}
             <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-muted/30 p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {(Object.keys(TAB_META) as DetailTabKey[])
-                .filter((k) => k !== "asking" || isKrStockCode(snap.meta.code))
-                .map((k) => {
+              {(Object.keys(TAB_META) as DetailTabKey[]).map((k) => {
                   const m = TAB_META[k];
                   const active = tab === k;
                   return (
@@ -204,13 +189,6 @@ export const StockDetailPanel = forwardRef<StockDetailPanelHandle, Props>(
           {tab === "consensus" && <ConsensusPanel snap={snap} embedded />}
           {tab === "flow" && (
             <FlowTab snap={snap} krwRate={krwRate} kisActive={kisActive} />
-          )}
-          {tab === "asking" && (
-            <AskingPricePanel
-              code={snap.meta.code}
-              active={tab === "asking"}
-              aspOverride={aspOverride}
-            />
           )}
           {tab === "news" && <NewsTab snap={snap} allNews={allNews} />}
         </CardBody>

@@ -10,17 +10,19 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ────────────────────────────────────────────────────────────────────
-// 임시 복원 — KIS WS relay 호스팅 전까지 REST 호가/체결 폴링 부활.
-// 클라이언트(AskingPricePanel) 폴링 주기는 3초 이상으로 늘렸고,
-// 여기서도 동일 종목 burst 호출을 막기 위해 짧은 TTL 의 서버 사이드
-// 캐시를 둔다 — 한도/카톡 알림 폭주 방지.
+// KIS REST 호가/체결 — topics 파라미터로 필요한 데이터만 fetch.
+// 호가 UI 제거 후 기본 호출은 KIS 미접속 (topics 미지정 시 skip).
 //
-// 응답 schema (이전 호출자 기대 형식 유지):
+// topics (쉼표 구분, 복수 가능):
+//   asking | asp        → fetchKrAskingPrice
+//   executions | ccld   → fetchKrExecutions
+//
+// 응답 schema:
 //   {
 //     asking:    AskingPriceData | null,
 //     executions: ExecutionTick[] | null,
-//     disabled?:  boolean,   // 라우트 자체가 비활성 응답인 경우
-//     reason?:    string,    // 디버그용 — null 응답 사유
+//     disabled?:  boolean,
+//     reason?:    string,
 //   }
 // ────────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,20 @@ function setCache(code: string, payload: IntradayPayload): void {
   cache.set(code, { ts: Date.now(), payload });
 }
 
+function parseTopics(raw: string): { wantAsking: boolean; wantExecutions: boolean } {
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return { wantAsking: false, wantExecutions: false };
+  }
+  return {
+    wantAsking: parts.some((p) => p === "asking" || p === "asp"),
+    wantExecutions: parts.some((p) => p === "executions" || p === "ccld"),
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -72,6 +88,7 @@ export async function GET(req: Request) {
     // 캐시 key — code 만 쓰면 미래에 topics(호가/체결/지수 등) 가 추가될 때 응답 mix 위험.
     // 현재는 topics 파라미터를 받지 않지만 미래 보험으로 키에 포함.
     const topicsRaw = url.searchParams.get("topics") ?? "";
+    const { wantAsking, wantExecutions } = parseTopics(topicsRaw);
     const topicsKey = topicsRaw
       .split(",")
       .map((s) => s.trim())
@@ -79,6 +96,14 @@ export async function GET(req: Request) {
       .sort()
       .join(",");
     const cacheKey = topicsKey ? `${code}|${topicsKey}` : code;
+
+    // topics 미지정 — KIS 호출 없이 빈 응답 (호가 UI 제거 후 기본).
+    if (!wantAsking && !wantExecutions) {
+      return NextResponse.json(
+        { asking: null, executions: null, reason: "no-topics" },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     // KIS 미활성 → 빈 응답 (한 번 disabled 응답 후 클라가 reset).
     if (!kisEnabled()) {
@@ -109,10 +134,12 @@ export async function GET(req: Request) {
       });
     }
 
-    // 호가 + 체결 병렬. 각각 graceful null (kisGet 내부에 retry/backoff 있음).
+    // 요청된 topics 만 병렬 fetch. 각각 graceful null.
     const [asking, executions] = await Promise.all([
-      fetchKrAskingPrice(code).catch(() => null),
-      fetchKrExecutions(code, 30).catch(() => null),
+      wantAsking ? fetchKrAskingPrice(code).catch(() => null) : Promise.resolve(null),
+      wantExecutions
+        ? fetchKrExecutions(code, 30).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     const payload: IntradayPayload = {
