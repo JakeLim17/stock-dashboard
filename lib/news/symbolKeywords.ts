@@ -169,6 +169,14 @@ export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   { kw: "인텔", code: "INTC" },
   { kw: "Intel", code: "INTC" },
   { kw: "INTC", code: "INTC" },
+
+  // ── 2026-07-10 SK하이닉스 나스닥 ADR ──────────────────────
+  // "SK하이닉스"/"SK Hynix" 일반 키워드는 원주(000660.KS) 라우팅을 유지하고,
+  // ADR 카드에는 ADR·나스닥 상장 관련 헤드라인만 직접 매칭한다.
+  { kw: "SKHY", code: "SKHY" },
+  { kw: "하이닉스 ADR", code: "SKHY" },
+  { kw: "Hynix ADR", code: "SKHY" },
+  { kw: "하이닉스 나스닥", code: "SKHY" },
 ];
 
 // reverse lookup: 종목 코드 → 매칭 키워드 배열.

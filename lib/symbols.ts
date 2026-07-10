@@ -194,13 +194,17 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "ASML", name: "ASML", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "EUV 장비 대장", currency: "USD" },
 
   // ─── 2026-07 반도체·AI 관련 확장 (하이닉스 공급망·메모리 피어) ────────────
-  // 주의: SK하이닉스 미국 ADR(구 HXSCL·OTC)은 Yahoo Finance 에서 조회 불가
-  // (2026-07 검증 — chart/search 모두 Not Found). 야간 지표는 기존
-  // HY9H.F (프랑크푸르트 GDR) 프록시가 이미 담당하므로 별도 카드 미추가.
   { code: "AMAT", name: "어플라이드머티어리얼즈", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "증착장비 대장", currency: "USD" },
   { code: "LRCX", name: "램리서치", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "KLAC", name: "KLA", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "INTC", name: "인텔", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+
+  // ─── 2026-07-10 SK하이닉스 ADR — 나스닥 직상장 (NASDAQ: SKHY) ─────────────
+  // 史상 최대 외국기업 미국 상장 ($26.5B, 공모가 $149). ADR 10주 = 원주(000660.KS) 1주.
+  // 구 무보증 OTC ADR HXSCL 은 Yahoo 티커 소멸 — SKHY 가 공식 상장 심볼.
+  // 상장 직후라 Yahoo 일별 히스토리 누적 전 (validRanges 1d/5d) — 예측 모델은
+  // 표본 축적까지 dataQuality thin-history 게이트가 자동으로 완화 처리.
+  { code: "SKHY", name: "SK하이닉스 ADR", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "HBM 대장 (ADR)", currency: "USD" },
   // AI 데이터센터 인프라 (전력·냉각·서버)
   { code: "VRT", name: "버티브", kind: "us-stock", sector: "글로벌AI인프라", isSectorLeader: true, sectorLeaderLabel: "데이터센터 전력·냉각 대장", currency: "USD" },
   { code: "DELL", name: "델", kind: "us-stock", sector: "글로벌AI인프라", currency: "USD" },
@@ -523,6 +527,7 @@ export const THEMES: ThemeDefinition[] = [
       "LRCX",
       "KLAC",
       "INTC",
+      "SKHY",
     ],
   },
   {
@@ -601,7 +606,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "HBM·AI 메모리",
     emoji: "💾",
     description: "AI 가속기용 HBM 메모리·후공정",
-    codes: ["MU", "042700.KS", "000660.KS", "005930.KS", "402340.KS", "034730.KS"],
+    codes: ["MU", "042700.KS", "000660.KS", "SKHY", "005930.KS", "402340.KS", "034730.KS"],
   },
   {
     id: "ai_power_dc",
