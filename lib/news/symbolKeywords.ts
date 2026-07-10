@@ -155,6 +155,20 @@ export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   { kw: "MSTR", code: "MSTR" },
   { kw: "코인베이스", code: "COIN" },
   { kw: "Coinbase", code: "COIN" },
+
+  // ── 2026-07 반도체 장비·메모리 피어 확장 ─────────────────
+  { kw: "어플라이드머티어리얼즈", code: "AMAT" },
+  { kw: "어플라이드 머티어리얼즈", code: "AMAT" },
+  { kw: "Applied Materials", code: "AMAT" },
+  { kw: "AMAT", code: "AMAT" },
+  { kw: "램리서치", code: "LRCX" },
+  { kw: "Lam Research", code: "LRCX" },
+  { kw: "LRCX", code: "LRCX" },
+  { kw: "KLA ", code: "KLAC" },
+  { kw: "KLAC", code: "KLAC" },
+  { kw: "인텔", code: "INTC" },
+  { kw: "Intel", code: "INTC" },
+  { kw: "INTC", code: "INTC" },
 ];
 
 // reverse lookup: 종목 코드 → 매칭 키워드 배열.

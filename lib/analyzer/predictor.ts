@@ -3,6 +3,7 @@ import type { HistoricalPoint } from "../providers/yahoo";
 import { isHoldingCompanyCode } from "../symbols";
 import type {
   EventItem,
+  NewsRiskAssessment,
   PriceRange,
   PriceTargets,
   Predictions,
@@ -15,6 +16,8 @@ import type {
 import { ewmaVolatility, tDistQuantile } from "./statHelpers";
 import { computeEventInflation } from "./eventVolatility";
 import { estimateBeta, lastReturn, type MacroBetaResult } from "./macroBeta";
+import { usMarketDrift } from "./marketDrift";
+import { computeNewsVolatility } from "../news/newsVolatility";
 import { computeVixGate } from "./vixGate";
 import { computeSectorLeading } from "./sectorLeading";
 import { computeMacroFactors } from "./macroFactors";
@@ -309,6 +312,8 @@ export interface PredictorInput {
   momentumActive?: boolean;
   /** KST horizon 라벨·잔여 세션 σ 스케일 (기본 Date.now()) */
   nowMs?: number;
+  /** 뉴스 리스크 평가 — 지정학·관세·제재 주도면 σ 확대 (newsVolatility.ts) */
+  newsRisk?: NewsRiskAssessment | null;
 }
 
 // 매크로 베타 회귀 결과를 한 번에 계산. 헬퍼는 표본 부족 시 null 반환.
@@ -360,6 +365,7 @@ export function predict(input: PredictorInput): Predictions {
     todayChangeRate,
     momentumActive,
     nowMs,
+    newsRisk,
   } = input;
 
   const now = nowMs ?? Date.now();
@@ -401,7 +407,14 @@ export function predict(input: PredictorInput): Predictions {
   if (hasEarningsNear && eventFactor < 1.35) {
     eventFactor = Math.max(eventFactor, 1.25);
   }
-  const adjustedSigma = sigma * eventFactor;
+
+  // ─ 뉴스 리스크 σ 확대 ────────────────────────────────────
+  // 지정학·관세·제재 주도 리스크(medium 이상)면 σ 를 최대 +25% 확대.
+  // 방향(drift)은 fair-value-macro 의 "지정학·이벤트/호재 뉴스" 보정이
+  // 담당하므로 여기서는 불확실성(밴드 폭)만 넓힌다 — 이중 반영 방지.
+  const newsVol = computeNewsVolatility(newsRisk);
+
+  const adjustedSigma = sigma * eventFactor * newsVol.factor;
 
   const price = quote.price || closes[closes.length - 1] || 0;
 
@@ -432,6 +445,9 @@ export function predict(input: PredictorInput): Predictions {
   const soxHistForLag = isUsStock
     ? (soxHistory ?? []).slice(0, -1)
     : soxHistory;
+  const ixicHistForLag = isUsStock
+    ? (ixicHistory ?? []).slice(0, -1)
+    : ixicHistory;
 
   // ─ Round3 B: 섹터 리딩 (SOX lag-1 → 한국 반도체주) ───────────
   // 한국 반도체 종목에만 적용. 데이터 부족·비반도체 종목은 null.
@@ -444,9 +460,19 @@ export function predict(input: PredictorInput): Predictions {
   const us10yLast = lastReturn(us10yHistForLag);
   const macroFactors = computeMacroFactors(meta, dxyLast, us10yLast);
 
-  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 합산.
+  // ─ 미장(나스닥) lag drift — 회귀 β × 최근 IXIC 수익률 × R² 가중 ──
+  // 한국 종목은 간밤 미국장 변동이 오늘 장의 lag-0 신호. 미국 종목은
+  // look-ahead 방지 슬라이스(ixicHistForLag) 적용. 상한 ±0.8%.
+  const ixicDrift = usMarketDrift(
+    macroBetasRaw.ixic?.beta,
+    macroBetasRaw.ixic?.r2,
+    lastReturn(ixicHistForLag)
+  );
+
+  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 + 미장(IXIC) 합산.
   // 모멘텀 활성·당일 ±4%↑ 시 drift cap ±3%로 완화 (급등장에서 너무 보수적 방지).
-  const dailyDriftRaw = (sectorLeading?.drift ?? 0) + macroFactors.drift;
+  const dailyDriftRaw =
+    (sectorLeading?.drift ?? 0) + macroFactors.drift + ixicDrift;
   const absToday =
     todayChangeRate != null && Number.isFinite(todayChangeRate)
       ? Math.abs(todayChangeRate)
@@ -729,6 +755,7 @@ export function predict(input: PredictorInput): Predictions {
     vixGate.level === "stressed" ||
     vixGate.level === "panic" ||
     eventFactor >= 1.25 ||
+    newsVol.factor >= 1.15 ||
     (todayChangeRate != null && Math.abs(todayChangeRate) >= 0.04);
 
   return {
@@ -757,6 +784,16 @@ export function predict(input: PredictorInput): Predictions {
           adjustedDailySigma: adjustedSigma,
         }
       : null,
+    // 뉴스 리스크 σ 확대 메타 — factor > 1 이고 라벨이 있을 때만 노출.
+    newsVolatility:
+      newsVol.factor > 1.01 && newsVol.label
+        ? {
+            factor: newsVol.factor,
+            geoDriven: newsVol.geoDriven,
+            label: newsVol.label,
+            topDriver: newsVol.topDriver,
+          }
+        : null,
     eventVolatility:
       eventInflation.factor >= EVENT_INFLATION_DISPLAY_THRESHOLD &&
       eventInflation.event &&

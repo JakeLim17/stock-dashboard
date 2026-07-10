@@ -53,6 +53,112 @@ function fmtDayLabel(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// 로딩 스켈레톤 — 실제 차트 형태(좌 실선·우 점선 + 밴드)를 흉내낸 가짜 곡선이
+// 반복해서 그려지고(stroke draw), 그 위로 은은한 shimmer 가 지나간다.
+// prefers-reduced-motion 이면 애니메이션을 끄고 정적 곡선만 남긴다.
+function ChartLoadingSkeleton({
+  width,
+  height,
+}: {
+  width: number;
+  height: number;
+}) {
+  // 결정적(랜덤 X) 가짜 곡선 — 완만한 상승 + 물결
+  const mid = height * 0.58;
+  const n = 26;
+  const splitIdx = Math.round(n * 0.55);
+  const yAt = (i: number) =>
+    mid + Math.sin(i * 0.85) * height * 0.13 - (i / n) * height * 0.2;
+  const seg = (from: number, to: number) => {
+    let d = "";
+    for (let i = from; i <= to; i++) {
+      const x = (i / n) * width;
+      d += `${i === from ? "M" : "L"}${x.toFixed(1)},${yAt(i).toFixed(1)}`;
+    }
+    return d;
+  };
+  const actualPath = seg(0, splitIdx);
+  const predPath = seg(splitIdx, n);
+  // 예측 구간 가짜 밴드 (부채꼴)
+  const bandTop: string[] = [];
+  const bandBot: string[] = [];
+  for (let i = splitIdx; i <= n; i++) {
+    const x = (i / n) * width;
+    const spread = ((i - splitIdx) / (n - splitIdx)) * height * 0.22;
+    bandTop.push(`${i === splitIdx ? "M" : "L"}${x.toFixed(1)},${(yAt(i) - spread).toFixed(1)}`);
+    bandBot.unshift(`L${x.toFixed(1)},${(yAt(i) + spread).toFixed(1)}`);
+  }
+  const bandPath = bandTop.join("") + bandBot.join("") + "Z";
+
+  return (
+    <div
+      className="fv-chart-loading absolute inset-0 overflow-hidden rounded-md bg-muted/25"
+      role="status"
+      aria-label="그래프 준비 중"
+    >
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block">
+        <path d={bandPath} fill="var(--color-accent)" opacity={0.06} />
+        <path
+          d={actualPath}
+          fill="none"
+          stroke="var(--color-foreground)"
+          strokeOpacity={0.28}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          pathLength={1}
+          className="fv-draw"
+        />
+        <path
+          d={predPath}
+          fill="none"
+          stroke="var(--color-accent)"
+          strokeOpacity={0.45}
+          strokeWidth={1.6}
+          strokeDasharray="4,3"
+          strokeLinecap="round"
+          pathLength={1}
+          className="fv-draw fv-draw-delay"
+        />
+      </svg>
+      {/* shimmer sweep */}
+      <div className="fv-shimmer absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-accent/10 to-transparent" />
+      <div className="absolute bottom-1 right-2 text-[9px] text-muted-foreground/80">
+        그래프 준비 중…
+      </div>
+      <style>{`
+        .fv-chart-loading .fv-draw {
+          stroke-dasharray: 1;
+          stroke-dashoffset: 1;
+          animation: fv-draw 2.2s ease-in-out infinite;
+        }
+        .fv-chart-loading .fv-draw-delay {
+          animation-delay: 0.5s;
+          /* dash 패턴 유지하면서 draw 하기 위해 dasharray 재정의 */
+          stroke-dasharray: 0.04 0.03;
+        }
+        .fv-chart-loading .fv-shimmer {
+          animation: fv-shimmer 1.8s linear infinite;
+        }
+        @keyframes fv-draw {
+          0%   { stroke-dashoffset: 1; opacity: 0.4; }
+          55%  { stroke-dashoffset: 0; opacity: 1; }
+          100% { stroke-dashoffset: 0; opacity: 0.55; }
+        }
+        @keyframes fv-shimmer {
+          0%   { transform: translateX(-130%); }
+          100% { transform: translateX(430%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fv-chart-loading .fv-draw,
+          .fv-chart-loading .fv-shimmer { animation: none !important; }
+          .fv-chart-loading .fv-draw { stroke-dashoffset: 0; }
+          .fv-chart-loading .fv-shimmer { opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export function FairValueMiniChart({
   code,
   currency,
@@ -312,12 +418,13 @@ export function FairValueMiniChart({
   return (
     <div ref={containerRef} className="w-full">
       <div className="relative" style={{ height }}>
-        {!model && (
-          <div className="absolute inset-0 grid place-items-center rounded-md bg-muted/40 animate-pulse text-[10px] text-muted-foreground">
-            {histLoading ? "그래프 로딩 중…" : "데이터 없음"}
+        {histLoading && <ChartLoadingSkeleton width={width} height={height} />}
+        {!histLoading && !model && (
+          <div className="absolute inset-0 grid place-items-center rounded-md bg-muted/40 text-[10px] text-muted-foreground">
+            가격 데이터를 불러오지 못했어요
           </div>
         )}
-        {model && (
+        {!histLoading && model && (
           <svg
             width={width}
             height={height}
@@ -423,8 +530,8 @@ export function FairValueMiniChart({
         )}
       </div>
 
-      {/* 선택 지점 리드아웃 — 드래그로 갱신, 손 떼면 고정 */}
-      {sel && (
+      {/* 선택 지점 리드아웃 — 드래그로 갱신, 손 떼면 고정 (로딩 중엔 숨김) */}
+      {!histLoading && sel && (
         <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] tabular">
           <span className="min-w-0 truncate">
             <span
@@ -451,17 +558,17 @@ export function FairValueMiniChart({
           </span>
         </div>
       )}
-      {sel?.kind === "pred" && sel.low != null && sel.high != null && (
+      {!histLoading && sel?.kind === "pred" && sel.low != null && sel.high != null && (
         <div className="text-[10px] text-muted-foreground tabular text-right">
           범위 {fmtNumber(sel.low, decimals)} ~ {fmtNumber(sel.high, decimals)}
         </div>
       )}
-      {sel?.openPrice != null && (
+      {!histLoading && sel?.openPrice != null && (
         <div className="text-[10px] text-muted-foreground tabular text-right">
           시가 추정 {fmtNumber(sel.openPrice, decimals)}
         </div>
       )}
-      {model?.hasPred && (
+      {!histLoading && model?.hasPred && (
         <div className="mt-1 text-[9px] text-muted-foreground/70">
           실선 실제 · 점선 예측 — 그래프를 드래그해 날짜별 가격 확인
         </div>

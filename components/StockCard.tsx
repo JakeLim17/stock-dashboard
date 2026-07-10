@@ -423,7 +423,7 @@ function FairValueSection({
         </div>
       )}
 
-      {topMacro.length > 0 && (
+      {(topMacro.length > 0 || snap.predictions?.newsVolatility) && (
         <div className="flex flex-wrap gap-1 pt-0.5">
           {topMacro.map((f) => (
             <span
@@ -436,6 +436,19 @@ function FairValueSection({
               {(f.bps / 100).toFixed(1)}%
             </span>
           ))}
+          {/* 뉴스 리스크 σ 확대 — 예측 밴드가 왜 넓어졌는지 근거 노출 */}
+          {snap.predictions?.newsVolatility && (
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded bg-warn/10 text-warn"
+              title={
+                snap.predictions.newsVolatility.topDriver
+                  ? `주요 요인: ${snap.predictions.newsVolatility.topDriver} · 밴드 ×${snap.predictions.newsVolatility.factor.toFixed(2)}`
+                  : undefined
+              }
+            >
+              {snap.predictions.newsVolatility.label}
+            </span>
+          )}
         </div>
       )}
       {readyList.some((h) => h.id === "tomorrow") && (

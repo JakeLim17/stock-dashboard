@@ -482,6 +482,17 @@ export interface Predictions {
     shortLabel: string;
     daysToEvent: number;
   } | null;
+  // 뉴스 리스크로 σ 가 확대된 경우 메타 (newsVolatility.ts).
+  //   factor    : σ 곱계수 (예: 1.15 = +15%)
+  //   geoDriven : 지정학·관세·제재 카테고리 주도 여부
+  //   label     : UI 칩 라벨 (예: "지정학 리스크 ↑ 변동성 확대")
+  //   topDriver : 가장 기여 큰 뉴스 키워드 라벨 (툴팁용)
+  newsVolatility?: {
+    factor: number;
+    geoDriven: boolean;
+    label: string;
+    topDriver: string | null;
+  } | null;
   /** 고변동 환경 — UI "예측 불확실성 높음" 배지 */
   highVolatility?: boolean;
   /** KST 거래 세션 컨텍스트 (1일 horizon 라벨) */

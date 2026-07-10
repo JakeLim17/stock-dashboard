@@ -771,6 +771,7 @@ export async function fetchWatchlistSnapshots(
           events: eventsForVolatility,
           todayChangeRate: quote.changeRate,
           momentumActive: !!analysis.verdict.momentumOverride,
+          newsRisk: externalRisk,
         });
         predictions = applyThinHistoryPredictionGate(predictions, dataQuality);
         if (predictions?.targets) {

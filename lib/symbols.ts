@@ -192,6 +192,15 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // 핫 테마 — AI 서버(SMCI), BTC 노출(MSTR), 코인 거래소(COIN)
   { code: "SMCI", name: "슈퍼마이크로", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "ASML", name: "ASML", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "EUV 장비 대장", currency: "USD" },
+
+  // ─── 2026-07 반도체·AI 관련 확장 (하이닉스 공급망·메모리 피어) ────────────
+  // 주의: SK하이닉스 미국 ADR(구 HXSCL·OTC)은 Yahoo Finance 에서 조회 불가
+  // (2026-07 검증 — chart/search 모두 Not Found). 야간 지표는 기존
+  // HY9H.F (프랑크푸르트 GDR) 프록시가 이미 담당하므로 별도 카드 미추가.
+  { code: "AMAT", name: "어플라이드머티어리얼즈", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "증착장비 대장", currency: "USD" },
+  { code: "LRCX", name: "램리서치", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "KLAC", name: "KLA", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  { code: "INTC", name: "인텔", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   // AI 데이터센터 인프라 (전력·냉각·서버)
   { code: "VRT", name: "버티브", kind: "us-stock", sector: "글로벌AI인프라", isSectorLeader: true, sectorLeaderLabel: "데이터센터 전력·냉각 대장", currency: "USD" },
   { code: "DELL", name: "델", kind: "us-stock", sector: "글로벌AI인프라", currency: "USD" },
@@ -510,6 +519,10 @@ export const THEMES: ThemeDefinition[] = [
       "ARM",
       "MRVL",
       "SMCI",
+      "AMAT",
+      "LRCX",
+      "KLAC",
+      "INTC",
     ],
   },
   {
@@ -581,7 +594,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "EUV·반도체 장비",
     emoji: "🔬",
     description: "EUV 리소그래피·파운드리 장비 핵심",
-    codes: ["ASML", "ARM", "TSM"],
+    codes: ["ASML", "ARM", "TSM", "AMAT", "LRCX", "KLAC"],
   },
   {
     id: "hbm_memory",
