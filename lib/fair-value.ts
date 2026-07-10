@@ -60,6 +60,15 @@ export interface FairValueInput {
   gdrImpliedKrw?: number | null;
   marketClosed: boolean;
   weights?: FairValueWeights;
+  /** 가격 반올림 자릿수 — KRW 0(정수), USD 2(센트). 기본 0. */
+  decimals?: number;
+}
+
+/** 통화별 가격 반올림 — KRW 정수, USD 센트. (기존 Math.round 고정은 저가 달러 종목에서 큰 상대 오차) */
+function roundPrice(v: number, decimals = 0): number {
+  if (decimals <= 0) return Math.round(v);
+  const f = 10 ** decimals;
+  return Math.round(v * f) / f;
 }
 
 export interface FairValueLeg {
@@ -225,7 +234,8 @@ export function blendFairValuePrice(input: FairValueInput): {
   methodLabel: string;
   detail: string;
 } | null {
-  const { live, prevClose, driftCenter, gdrImpliedKrw, marketClosed } = input;
+  const { live, prevClose, driftCenter, gdrImpliedKrw, marketClosed, decimals } =
+    input;
   const w = input.weights ?? FAIR_VALUE_WEIGHTS;
   if (!live || live <= 0 || !prevClose || prevClose <= 0) return null;
 
@@ -235,7 +245,7 @@ export function blendFairValuePrice(input: FairValueInput): {
     const cfg = marketClosed ? w.nightClosed : w.nightOpen;
     const price = gdr * cfg.gdr + driftCenter * cfg.drift + live * cfg.live;
     return {
-      price: Math.round(price),
+      price: roundPrice(price, decimals),
       methodLabel: marketClosed ? "야간 혼합" : "장중 혼합",
       detail: marketClosed
         ? `GDR ${Math.round(cfg.gdr * 100)}% · σ드리프트 ${Math.round(cfg.drift * 100)}% · 종가 ${Math.round(cfg.live * 100)}%`
@@ -247,7 +257,7 @@ export function blendFairValuePrice(input: FairValueInput): {
     const cfg = w.noGdr;
     const price = driftCenter * cfg.drift + live * cfg.live;
     return {
-      price: Math.round(price),
+      price: roundPrice(price, decimals),
       methodLabel: "σ 드리프트",
       detail: `1일 통계 중심 ${Math.round(cfg.drift * 100)}% · 현재가 ${Math.round(cfg.live * 100)}%`,
     };
@@ -256,8 +266,12 @@ export function blendFairValuePrice(input: FairValueInput): {
   return null;
 }
 
-function applyMacroPrice(base: number, macroRate: number): number {
-  return Math.round(base * (1 + macroRate));
+function applyMacroPrice(
+  base: number,
+  macroRate: number,
+  decimals = 0
+): number {
+  return roundPrice(base * (1 + macroRate), decimals);
 }
 
 function withMacroLabel(baseLabel: string, macroRate: number): string {
@@ -274,10 +288,12 @@ function macroDetailSuffix(macroRate: number): string {
 export function blendCloseFromOpen(
   openBase: number,
   driftCenter: number,
-  extension: FairValueCloseExtension = FAIR_VALUE_CLOSE_EXTENSION
+  extension: FairValueCloseExtension = FAIR_VALUE_CLOSE_EXTENSION,
+  decimals = 0
 ): { price: number; methodLabel: string; detail: string } {
-  const price = Math.round(
-    openBase * extension.openShare + driftCenter * extension.driftShare
+  const price = roundPrice(
+    openBase * extension.openShare + driftCenter * extension.driftShare,
+    decimals
   );
   return {
     price,
@@ -333,35 +349,60 @@ function getSettlementForHorizon(
   return base;
 }
 
+// predictor 실행 시점의 기준 가격 — drift=0 인 horizon(1주·2주·1개월)의 center 는
+// 정확히 predictor 시점 price 와 같다. 없으면 targets.entry(=price) → quote.price 폴백.
+function predictorBasePrice(snap: StockSnapshot): number {
+  const ranges = snap.predictions?.ranges ?? [];
+  const zeroDrift =
+    ranges.find((r) => r.horizonDays === 5) ??
+    ranges.find((r) => r.horizonDays === 10) ??
+    ranges.find((r) => r.horizonDays === 22);
+  if (zeroDrift && zeroDrift.center > 0) return zeroDrift.center;
+  const entry = snap.predictions?.targets?.entry;
+  if (entry != null && entry > 0) return entry;
+  return snap.quote.price;
+}
+
+// 예측 drift 를 "비율"로 뽑아 현재 기준가(anchor)에 다시 앵커링한다.
+//   - 기존엔 predictor 캐시(최대 1시간 전) 시점의 절대 가격(center)을 그대로 썼는데,
+//     장중 가격이 움직이면 주간·월간 추정이 옛 가격에 끌려가는 버그가 있었다.
+//   - 폴백(정확한 horizon range 없음)도 기존엔 1일 drift × rangeDays 선형 복리 외삽이라
+//     (일 ±3% → 22일 ≈ ±90%) 통계적으로 무의미한 값이 나올 수 있었다. lag-0 하루짜리
+//     신호는 예측기 driftWeight 스케줄(1일=1.0, ≤3일=0.6, 그 이상=0)대로만 반영한다.
 function driftCenterForHorizon(
   snap: StockSnapshot,
   rangeDays: number,
-  fallback: number
+  anchorPrice: number
 ): number {
   const ranges = snap.predictions?.ranges ?? [];
+  const base = predictorBasePrice(snap);
+  if (anchorPrice <= 0 || base <= 0) return anchorPrice;
+
   const exact = ranges.find((r) => r.horizonDays === rangeDays);
-  if (exact) return exact.center;
-  const oneDay = ranges.find((r) => r.horizonDays === 1);
-  if (oneDay && rangeDays > 1) {
-    const daily =
-      oneDay.center > 0 && snap.quote.price > 0
-        ? Math.log(oneDay.center / snap.quote.price) / (oneDay.horizonDays || 1)
-        : 0;
-    return snap.quote.price * Math.exp(daily * rangeDays);
+  if (exact && exact.center > 0) {
+    return anchorPrice * (exact.center / base);
   }
-  return oneDay?.center ?? fallback;
+
+  const oneDay = ranges.find((r) => r.horizonDays === 1);
+  if (oneDay && oneDay.center > 0) {
+    const dailyLogDrift = Math.log(oneDay.center / base);
+    const weight = rangeDays <= 1 ? 1 : rangeDays <= 3 ? 0.6 : 0;
+    return anchorPrice * Math.exp(dailyLogDrift * weight);
+  }
+  return anchorPrice;
 }
 
 function applyConsensusBlend(
   price: number,
   snap: StockSnapshot,
-  horizonId: FairValueHorizonId
+  horizonId: FairValueHorizonId,
+  decimals = 0
 ): number {
   const target = snap.consensus?.targetMean;
   if (target == null || target <= price) return price;
   const weight = horizonId === "month" ? 0.3 : horizonId === "week" ? 0.18 : 0;
   if (weight <= 0) return price;
-  return Math.round(price * (1 - weight) + target * weight);
+  return roundPrice(price * (1 - weight) + target * weight, decimals);
 }
 
 export function buildFairValueEstimateForHorizon(
@@ -408,6 +449,8 @@ export function buildFairValueEstimateForHorizon(
     };
   }
 
+  const priceDecimals = isKrStockCode(sym.code) ? 0 : 2;
+
   const driftCenter = driftCenterForHorizon(
     snap,
     meta.rangeDays,
@@ -428,6 +471,7 @@ export function buildFairValueEstimateForHorizon(
     gdrImpliedKrw: gdrImplied,
     marketClosed: horizonId === "tomorrow" && isKrMarketClosed(quote),
     weights,
+    decimals: priceDecimals,
   });
 
   if (!openBlend) {
@@ -453,11 +497,17 @@ export function buildFairValueEstimateForHorizon(
     const closeBase =
       horizonId === "today"
         ? driftCenter
-        : blendCloseFromOpen(openBlend.price, driftCenter).price;
+        : blendCloseFromOpen(
+            openBlend.price,
+            driftCenter,
+            undefined,
+            priceDecimals
+          ).price;
     const closePrice = applyConsensusBlend(
-      applyMacroPrice(closeBase, macro.rate),
+      applyMacroPrice(closeBase, macro.rate, priceDecimals),
       snap,
-      horizonId
+      horizonId,
+      priceDecimals
     );
     const closeLeg: FairValueLeg = {
       price: closePrice,
@@ -491,9 +541,14 @@ export function buildFairValueEstimateForHorizon(
   }
 
   const openBase = openBlend.price;
-  const openPrice = applyMacroPrice(openBase, macro.rate);
-  const closeBlend = blendCloseFromOpen(openBase, driftCenter);
-  const closePrice = applyMacroPrice(closeBlend.price, macro.rate);
+  const openPrice = applyMacroPrice(openBase, macro.rate, priceDecimals);
+  const closeBlend = blendCloseFromOpen(
+    openBase,
+    driftCenter,
+    undefined,
+    priceDecimals
+  );
+  const closePrice = applyMacroPrice(closeBlend.price, macro.rate, priceDecimals);
 
   const openLeg: FairValueLeg = {
     price: openPrice,

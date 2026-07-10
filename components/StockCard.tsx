@@ -21,11 +21,10 @@ import { StockFundamentalsBlock } from "./StockFundamentalsBlock";
 import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
+import { FairValueMiniChart } from "./FairValueMiniChart";
 import {
   buildMultiHorizonFairValue,
   buildPredictionCompactLine,
-  type FairValueHorizonId,
-  type FairValueResult,
 } from "@/lib/prediction-display";
 import { FAIR_VALUE_BACKTEST_META } from "@/lib/fair-value";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
@@ -240,9 +239,13 @@ export function StockCard({
           ) : null}
         </div>
 
-        {/* 익일 추정가 — 탭 클릭이 카드 선택(모달)으로 전파되지 않게 격리 */}
+        {/* 가격 추정 그래프 — 드래그 스크럽이 카드 선택(모달)으로 전파되지 않게 격리 */}
         <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <FairValueSection horizons={fairValueHorizons} currency={currency} />
+          <FairValueSection
+            snap={snap}
+            horizons={fairValueHorizons}
+            currency={currency}
+          />
         </div>
 
         {/* 펀더멘털 — 카드 기본 정보 (모바일·데스크탑 공통) */}
@@ -291,13 +294,6 @@ export function StockCard({
     </Card>
   );
 }
-
-const HORIZON_TABS: { id: FairValueHorizonId; short: string }[] = [
-  { id: "today", short: "오늘" },
-  { id: "tomorrow", short: "내일" },
-  { id: "week", short: "다음 주" },
-  { id: "month", short: "1개월" },
-];
 
 function CardFlowConsensusExpand({
   snap,
@@ -368,174 +364,88 @@ function CardFlowConsensusExpand({
   );
 }
 
+// 가격 추정 섹션 — 기존 "오늘/내일/다음주/1개월" 탭 + 텍스트 카드 대신
+// 최근 실제 가격 + 미래 추정 곡선을 한 장의 드래그 가능한 미니 그래프로 보여준다.
 function FairValueSection({
+  snap,
   horizons,
   currency,
 }: {
+  snap: StockSnapshot;
   horizons: ReturnType<typeof buildMultiHorizonFairValue>;
-  currency: string;
+  currency: "KRW" | "USD";
 }) {
-  const [active, setActive] = useState<FairValueHorizonId>("tomorrow");
-  const current = horizons.find((h) => h.id === active) ?? horizons[1];
-  const fairValue = current?.estimate;
+  const readyList = horizons.filter((h) => h.estimate.ready);
+  const primary =
+    readyList.find((h) => h.id === "tomorrow")?.estimate ??
+    readyList[0]?.estimate ??
+    null;
+  const pending = horizons.find((h) => !h.estimate.ready)?.estimate ?? null;
 
-  if (!fairValue) return null;
+  const topMacro =
+    primary && primary.ready
+      ? primary.macroFactors
+          .filter((f) => Math.abs(f.bps) >= 1)
+          .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
+          .slice(0, 3)
+      : [];
 
   return (
-    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2.5">
+    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-          가격 추정 · {current.label}
+          가격 추정 그래프 · ~1개월
         </div>
-        <div className="flex gap-0.5 p-0.5 rounded-md bg-muted/60 border border-border/50">
-          {HORIZON_TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActive(t.id);
-              }}
-              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-                active === t.id
-                  ? "bg-background font-semibold shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+        {primary?.ready && (
+          <span className="text-[10px] text-muted-foreground tabular">
+            {primary.settlementLabel} 기준
+          </span>
+        )}
+      </div>
+
+      <FairValueMiniChart
+        code={snap.meta.code}
+        currency={currency}
+        currentPrice={snap.quote.price}
+        horizons={horizons}
+        ranges={snap.predictions?.ranges ?? null}
+      />
+
+      {/* 일부 시계가 아직 확정 전이면 사유를 한 줄로 안내 */}
+      {readyList.length === 0 && pending && !pending.ready && (
+        <div className="text-[11px] text-muted-foreground text-center py-1">
+          {pending.pendingReason}
+        </div>
+      )}
+      {readyList.length > 0 && readyList.length < horizons.length && pending && !pending.ready && (
+        <div className="text-[10px] text-muted-foreground/70">
+          일부 시계 대기: {pending.pendingReason}
+        </div>
+      )}
+
+      {topMacro.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {topMacro.map((f) => (
+            <span
+              key={f.label}
+              className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
+                f.bps >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall"
               }`}
             >
-              {t.short}
-            </button>
+              {f.label} {f.bps >= 0 ? "+" : ""}
+              {(f.bps / 100).toFixed(1)}%
+            </span>
           ))}
         </div>
-      </div>
-
-      <FairValueBody fairValue={fairValue} currency={currency} active={active} />
-    </div>
-  );
-}
-
-function FairValueBody({
-  fairValue,
-  currency,
-  active,
-}: {
-  fairValue: FairValueResult;
-  currency: string;
-  active: FairValueHorizonId;
-}) {
-  if (fairValue.ready) {
-    const topMacro = fairValue.macroFactors
-      .filter((f) => Math.abs(f.bps) >= 1)
-      .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
-      .slice(0, 3);
-    const dualLeg = active === "tomorrow";
-    return (
-      <>
-        <div className="text-[10px] text-muted-foreground">
-          {fairValue.targetDateLabel} · {fairValue.settlementLabel}
+      )}
+      {readyList.some((h) => h.id === "tomorrow") && (
+        <div className="text-[10px] text-muted-foreground/60">
+          앱장 기준 백테스트 오차 시가{" "}
+          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
+          · 종가{" "}
+          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
         </div>
-
-        {dualLeg ? (
-          <>
-            <FairValueLegRow
-              label="시가"
-              leg={fairValue.open}
-              settlementPrice={fairValue.settlementPrice}
-              currency={currency}
-              mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextOpen.mape}
-              emphasized
-            />
-            <FairValueLegRow
-              label="종가"
-              leg={fairValue.close}
-              settlementPrice={fairValue.settlementPrice}
-              currency={currency}
-              mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
-            />
-          </>
-        ) : (
-          <FairValueLegRow
-            label={active === "today" ? "종가" : "목표가"}
-            leg={fairValue.close}
-            settlementPrice={fairValue.settlementPrice}
-            currency={currency}
-            mapeHint={FAIR_VALUE_BACKTEST_META.nightToNextClose.mape}
-            emphasized
-          />
-        )}
-
-        {topMacro.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-0.5">
-            {topMacro.map((f) => (
-              <span
-                key={f.label}
-                className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
-                  f.bps >= 0
-                    ? "bg-rise/10 text-rise"
-                    : "bg-fall/10 text-fall"
-                }`}
-              >
-                {f.label} {f.bps >= 0 ? "+" : ""}
-                {(f.bps / 100).toFixed(1)}%
-              </span>
-            ))}
-          </div>
-        )}
-        {active === "tomorrow" && (
-          <div className="text-[10px] text-muted-foreground/60">
-            앱장 기준 백테스트 오차 시가{" "}
-            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
-            · 종가{" "}
-            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
-          </div>
-        )}
-      </>
-    );
-  }
-  return (
-    <div className="text-[11px] text-muted-foreground text-center py-1">
-      {fairValue.pendingReason}
-    </div>
-  );
-}
-
-function FairValueLegRow({
-  label,
-  leg,
-  settlementPrice,
-  currency,
-  mapeHint,
-  emphasized = false,
-}: {
-  label: string;
-  leg: { price: number; vsSettlementRate: number; methodLabel: string };
-  settlementPrice: number;
-  currency: string;
-  mapeHint: number;
-  emphasized?: boolean;
-}) {
-  return (
-    <div className="flex items-end justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-[10px] text-muted-foreground">
-          {label} · {leg.methodLabel}
-        </div>
-        <div
-          className={`tabular font-bold leading-tight ${emphasized ? "text-lg" : "text-base"} ${changeColor(leg.vsSettlementRate)}`}
-        >
-          {fmtNumber(leg.price, currency === "USD" ? 2 : 0)}
-        </div>
-        <div className="text-[10px] text-muted-foreground tabular">
-          <span className={changeColor(leg.vsSettlementRate)}>
-            {fmtSigned(leg.vsSettlementRate * settlementPrice)} (
-            {fmtPercent(leg.vsSettlementRate)})
-          </span>
-        </div>
-      </div>
-      <div className="text-[9px] text-muted-foreground/70 tabular shrink-0 text-right">
-        오차
-        <br />
-        {(mapeHint * 100).toFixed(1)}%
-      </div>
+      )}
     </div>
   );
 }

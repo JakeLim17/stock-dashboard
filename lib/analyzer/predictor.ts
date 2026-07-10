@@ -481,11 +481,21 @@ export function predict(input: PredictorInput): Predictions {
       { label: "1개월", days: 22, driftWeight: 0 },
     ];
     for (const h of horizons) {
+      // 잔여 세션 반영 — 1일은 남은 세션 비율, 다일 horizon 도 같은 거래일이면
+      // 오늘 경과분만큼 차감 (예: 장 후반 "1주" = 4 + 잔여 비율 거래일).
       const effectiveDays =
-        h.days === 1 ? oneDayCtx.effectiveDays : h.days;
+        h.days === 1
+          ? oneDayCtx.effectiveDays
+          : oneDayCtx.isSameTradingDay
+            ? h.days - 1 + oneDayCtx.effectiveDays
+            : h.days;
       const horizonSigma =
         sigmaForRanges * Math.sqrt(effectiveDays) * tailMultiplier;
-      const drift = dailyDrift * h.driftWeight;
+      // drift 는 시간에 선형(σ 는 √t) — 1일 horizon 은 잔여 세션 비율만큼만 반영.
+      // (기존엔 장 마감 30분 전에도 하루치 drift 가 통째로 더해져 center 가 편향됐다.)
+      const driftTimeScale =
+        h.days === 1 ? Math.min(1, oneDayCtx.effectiveDays) : 1;
+      const drift = dailyDrift * h.driftWeight * driftTimeScale;
       const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);

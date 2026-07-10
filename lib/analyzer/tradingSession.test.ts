@@ -61,6 +61,38 @@ describe("getOneDayHorizonContext — KST 당일 라벨", () => {
   });
 });
 
+const usSemi: SymbolMeta = {
+  code: "NVDA",
+  name: "엔비디아",
+  kind: "us-stock",
+  sector: "글로벌반도체",
+};
+
+// 2026-07-11(토) · 07-12(일) · 07-13(월)
+describe("getOneDayHorizonContext — 미국 종목 주말 오분류 방지", () => {
+  it("토요일 23:00 KST — 미국장 아님 (다음 미국장)", () => {
+    const ctx = getOneDayHorizonContext(usSemi, kstDate(2026, 7, 11, 23, 0));
+    assert.equal(ctx.isSameTradingDay, false);
+    assert.equal(ctx.effectiveDays, 1);
+  });
+
+  it("토요일 03:00 KST — 금요일 ET 세션 장중", () => {
+    const ctx = getOneDayHorizonContext(usSemi, kstDate(2026, 7, 11, 3, 0));
+    assert.equal(ctx.isSameTradingDay, true);
+    assert.ok(ctx.effectiveDays < 1);
+  });
+
+  it("일요일 23:00 KST — 미국장 아님", () => {
+    const ctx = getOneDayHorizonContext(usSemi, kstDate(2026, 7, 12, 23, 0));
+    assert.equal(ctx.isSameTradingDay, false);
+  });
+
+  it("월요일 23:00 KST — 미국장 장중", () => {
+    const ctx = getOneDayHorizonContext(usSemi, kstDate(2026, 7, 13, 23, 0));
+    assert.equal(ctx.isSameTradingDay, true);
+  });
+});
+
 describe("getOneDayHorizonContext — intraday σ 스케일", () => {
   it("장 마감 직전 effectiveDays 최소 0.12", () => {
     const ctx = getOneDayHorizonContext(

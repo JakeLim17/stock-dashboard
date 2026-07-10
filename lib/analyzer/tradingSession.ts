@@ -74,13 +74,15 @@ function krPhase(minutesOfDay: number, weekday: number): TradingSessionPhase {
 }
 
 function usPhase(minutesOfDay: number, weekday: number): TradingSessionPhase {
-  // 미국 정규장 KST 22:30~익일 05:00 — 자정 넘김 구간
-  const inUsRegular =
-    minutesOfDay >= US_REGULAR_START ||
-    minutesOfDay < US_REGULAR_END ||
-    (weekday === 6 && minutesOfDay < US_REGULAR_END) ||
-    (weekday === 0 && minutesOfDay >= US_REGULAR_START);
-  return inUsRegular ? "us-regular" : "us-overnight";
+  // 미국 정규장 KST 22:30~익일 05:00 — 자정 넘김 구간.
+  // KST 월~금 22:30 이후는 "당일 밤" ET 세션, KST 화~토 05:00 이전은 "전일 밤" ET 세션.
+  // (기존 구현은 요일 무관 OR 조건이라 토·일 밤에도 us-regular 로 오분류 →
+  //  주말에 "오늘 종가" 라벨 + σ 잔여 세션 축소가 잘못 적용되던 버그.)
+  const eveningLeg =
+    weekday >= 1 && weekday <= 5 && minutesOfDay >= US_REGULAR_START;
+  const morningLeg =
+    weekday >= 2 && weekday <= 6 && minutesOfDay < US_REGULAR_END;
+  return eveningLeg || morningLeg ? "us-regular" : "us-overnight";
 }
 
 /** 1일 horizon — KST 거래 세션 기준 라벨·σ 스케일. "1일 후(명일)" 혼동 방지. */
