@@ -6,7 +6,12 @@ import {
   calendarDaysToSessionOffset,
   formatTradingSessionLabel,
 } from "./fair-value-trading-day";
-import type { OverseasNightIndicator, Quote, StockSnapshot } from "./types";
+import type {
+  OverseasNightIndicator,
+  PriceRange,
+  Quote,
+  StockSnapshot,
+} from "./types";
 
 export type { MacroAdjustmentFactor, MacroFairValueAdjustment } from "./fair-value-macro";
 export { formatNextTradingSessionLabel, getNextTradingSessionDate } from "./fair-value-trading-day";
@@ -602,4 +607,158 @@ export function buildFairValueEstimate(
   weights?: FairValueWeights
 ): FairValueResult {
   return buildFairValueEstimateForHorizon(snap, "tomorrow", weights);
+}
+
+// ─── 일별 예측 시리즈 (오늘 ~ 1개월, 거래일 단위) ─────────────────────────
+//
+// 4개 시계 앵커(오늘 0 · 내일 1 · 다음주 5 · 1개월 22거래일)를 기준으로
+// 그 사이 매 거래일의 예측 center·변동성 밴드를 파생한다. UI 미니 그래프가
+// 매일 점을 그릴 수 있게 하는 프론트 파생 계산 — API 응답에는 포함하지 않는다.
+//
+//   center : 앵커 사이 로그가격 선형 보간 (piecewise). drift 감쇠 스케줄은 앵커
+//            값에 이미 반영돼 있으므로 앵커 시점 값과 정확히 일치한다.
+//   밴드   : predictor ranges(1·3·5·10·22일)의 상대 폭 ln(low/center), ln(high/center)
+//            를 √t 공간에서 보간 — GBM σ√t 스케일과 일관, 앵커 일수에서 원본과 일치.
+//   날짜   : 주말을 건너뛰는 거래일 오프셋(getTradingSessionDateByOffset 기반 라벨).
+
+export interface FairValueDailyPoint {
+  /** 거래일 오프셋 — 0=오늘(현재 세션) */
+  sessionOffset: number;
+  isoDate: string;
+  /** "7/13(월)" */
+  label: string;
+  price: number;
+  low: number | null;
+  high: number | null;
+  /** 이 날짜가 4개 시계 앵커면 해당 id·라벨 */
+  horizonId?: FairValueHorizonId;
+  horizonLabel?: string;
+  /** 내일(dual-leg) 앵커의 시가 추정 — 종가와 다를 때만 */
+  openPrice?: number | null;
+}
+
+export function buildFairValueDailySeries(input: {
+  code: string;
+  horizons: FairValueHorizonItem[];
+  ranges?: PriceRange[] | null;
+  /** 오늘(offset 0) 앵커가 없을 때 곡선 시작점으로 쓸 기준가 (보통 현재가) */
+  basePrice: number;
+  now?: Date;
+}): FairValueDailyPoint[] {
+  const { code, horizons, ranges, basePrice, now } = input;
+  const decimals = isKrStockCode(code) ? 0 : 2;
+
+  type Anchor = {
+    offset: number;
+    price: number;
+    id?: FairValueHorizonId;
+    label?: string;
+    openPrice?: number | null;
+  };
+  const anchors: Anchor[] = [];
+  for (const h of horizons) {
+    const est = h.estimate;
+    if (!est.ready || est.close.price <= 0) continue;
+    anchors.push({
+      offset: HORIZON_META[h.id].sessionOffset,
+      price: est.close.price,
+      id: h.id,
+      label: h.label,
+      openPrice:
+        h.id === "tomorrow" && est.open.price !== est.close.price
+          ? est.open.price
+          : null,
+    });
+  }
+  anchors.sort((a, b) => a.offset - b.offset);
+  if (anchors.length === 0) return [];
+
+  // 오늘 앵커가 없으면(예: 장중이라 today pending) 기준가로 가상 시작점을 둔다.
+  if (anchors[0].offset > 0 && basePrice > 0) {
+    anchors.unshift({ offset: 0, price: basePrice });
+  }
+  const maxOffset = anchors[anchors.length - 1].offset;
+
+  // ── 밴드 상대 폭 knots — √t 보간용 ──
+  const knots = (ranges ?? [])
+    .filter(
+      (r) =>
+        r.horizonDays >= 1 && r.center > 0 && r.low > 0 && r.high > 0
+    )
+    .map((r) => ({
+      d: r.horizonDays,
+      lnLow: Math.log(r.low / r.center),
+      lnHigh: Math.log(r.high / r.center),
+    }))
+    .sort((a, b) => a.d - b.d);
+
+  const bandAt = (d: number): { lnLow: number; lnHigh: number } | null => {
+    if (d <= 0) return { lnLow: 0, lnHigh: 0 };
+    if (knots.length === 0) return null;
+    const first = knots[0];
+    if (d <= first.d) {
+      const s = Math.sqrt(d / first.d);
+      return { lnLow: first.lnLow * s, lnHigh: first.lnHigh * s };
+    }
+    const last = knots[knots.length - 1];
+    if (d >= last.d) {
+      const s = Math.sqrt(d / last.d);
+      return { lnLow: last.lnLow * s, lnHigh: last.lnHigh * s };
+    }
+    for (let i = 1; i < knots.length; i++) {
+      const k1 = knots[i - 1];
+      const k2 = knots[i];
+      if (d > k2.d) continue;
+      const t = (Math.sqrt(d) - Math.sqrt(k1.d)) / (Math.sqrt(k2.d) - Math.sqrt(k1.d));
+      return {
+        lnLow: k1.lnLow + (k2.lnLow - k1.lnLow) * t,
+        lnHigh: k1.lnHigh + (k2.lnHigh - k1.lnHigh) * t,
+      };
+    }
+    return null;
+  };
+
+  const out: FairValueDailyPoint[] = [];
+  for (let d = 0; d <= maxOffset; d++) {
+    const anchor = anchors.find((a) => a.offset === d);
+    let price: number;
+    if (anchor) {
+      price = anchor.price; // 앵커 시점은 원본 값 그대로 (보간 오차 0)
+    } else {
+      // 감싸는 두 앵커 사이 로그가격 선형 보간
+      let a1 = anchors[0];
+      let a2 = anchors[anchors.length - 1];
+      for (let i = 1; i < anchors.length; i++) {
+        if (anchors[i].offset >= d) {
+          a1 = anchors[i - 1];
+          a2 = anchors[i];
+          break;
+        }
+      }
+      if (d <= a1.offset) price = a1.price;
+      else if (d >= a2.offset) price = a2.price;
+      else {
+        const t = (d - a1.offset) / (a2.offset - a1.offset);
+        price = Math.exp(
+          Math.log(a1.price) * (1 - t) + Math.log(a2.price) * t
+        );
+      }
+      price = roundPrice(price, decimals);
+    }
+
+    const session = formatTradingSessionLabel(code, d, now);
+    const band = bandAt(d);
+    out.push({
+      sessionOffset: d,
+      isoDate: session.isoDate,
+      label: session.shortLabel,
+      price,
+      low: band ? roundPrice(price * Math.exp(band.lnLow), decimals) : null,
+      high: band ? roundPrice(price * Math.exp(band.lnHigh), decimals) : null,
+      horizonId: anchor?.id,
+      horizonLabel: anchor?.label,
+      openPrice: anchor?.openPrice ?? null,
+    });
+  }
+  return out;
 }

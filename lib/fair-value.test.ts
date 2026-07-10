@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildFairValueDailySeries,
   buildFairValueEstimate,
+  buildMultiHorizonFairValue,
   blendCloseFromOpen,
   getSettlementContext,
   macroGapScale,
@@ -207,6 +209,71 @@ describe("buildFairValueEstimate", () => {
   it("종가 추정은 시가+드리프트 혼합", () => {
     const blended = blendCloseFromOpen(100_000, 102_000);
     assert.equal(blended.price, 101_000);
+  });
+
+  it("일별 시리즈 — 앵커 일치·거래일 스킵·√t 밴드 확장", () => {
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: 100_000,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: 100_000,
+        },
+        price: 100_000,
+        prevClose: 99_000,
+      })
+    );
+    snap.predictions!.ranges = [
+      { horizonDays: 1, horizonLabel: "1일", low: 98_000, high: 102_000, center: 100_000, confidence: 0.95 },
+      { horizonDays: 5, horizonLabel: "1주", low: 95_600, high: 104_600, center: 100_000, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 91_000, high: 109_900, center: 100_000, confidence: 0.95 },
+    ];
+    const horizons = buildMultiHorizonFairValue(snap);
+    const series = buildFairValueDailySeries({
+      code: snap.meta.code,
+      horizons,
+      ranges: snap.predictions!.ranges,
+      basePrice: snap.quote.price,
+    });
+
+    // 오늘(0) ~ 1개월(22) 매 거래일
+    assert.equal(series.length, 23);
+    assert.equal(series[0].sessionOffset, 0);
+    assert.equal(series[22].sessionOffset, 22);
+
+    // 4개 앵커 시점의 일별 값 = 원본 추정치와 정확히 일치
+    const offsetById = { today: 0, tomorrow: 1, week: 5, month: 22 } as const;
+    for (const h of horizons) {
+      if (!h.estimate.ready) continue;
+      const pt = series.find(
+        (p) => p.sessionOffset === offsetById[h.id]
+      );
+      assert.ok(pt, `${h.id} 앵커 누락`);
+      assert.equal(pt!.price, h.estimate.close.price);
+      assert.equal(pt!.horizonId, h.id);
+    }
+
+    // 주말 스킵 — 모든 날짜가 서로 다른 거래일
+    const isoSet = new Set(series.map((p) => p.isoDate));
+    assert.equal(isoSet.size, series.length);
+
+    // 밴드 — 상대 폭이 √t 로 단조 확장 (offset 1 → 22)
+    const relWidth = (p: (typeof series)[number]) =>
+      p.low != null && p.high != null ? (p.high - p.low) / p.price : 0;
+    for (let i = 2; i < series.length; i++) {
+      assert.ok(
+        relWidth(series[i]) >= relWidth(series[i - 1]) - 1e-9,
+        `밴드 폭 역전 @offset ${i}`
+      );
+    }
+    // knot 시점(5일)에서 predictor 상대 폭과 일치
+    const d5 = series.find((p) => p.sessionOffset === 5)!;
+    const expected = (104_600 - 95_600) / 100_000;
+    assert.ok(Math.abs(relWidth(d5) - expected) < 0.002);
   });
 
   it("VIX 공포 시 매크로 하향 보정", () => {

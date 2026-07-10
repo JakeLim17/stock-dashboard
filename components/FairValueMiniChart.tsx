@@ -8,18 +8,22 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { PriceRange } from "@/lib/types";
-import type { FairValueHorizonId, FairValueHorizonItem } from "@/lib/fair-value";
+import {
+  buildFairValueDailySeries,
+  type FairValueHorizonItem,
+} from "@/lib/fair-value";
 import { fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 가격 추정 미니 그래프 — "오늘/내일/다음주/1개월" 텍스트 카드를 대체하는 인터랙티브 SVG.
 //
-//   - 좌측: 최근 실제 종가(약 1개월, 실선) · 우측: 미래 추정 곡선(점선 + 마커)
-//   - 예측 구간에는 predictor 변동성 범위(low~high)를 옅은 밴드로 표시
-//   - 드래그(스크럽): 포인터를 누른 채 움직이면 가장 가까운 점을 따라가고,
+//   - 좌측: 최근 실제 종가(약 1개월, 실선) · 우측: 오늘~1개월 **매 거래일** 예측 곡선(점선)
+//     + 4개 시계 앵커(오늘/내일/다음주/1개월)에는 마커 표시
+//   - 일별 예측은 buildFairValueDailySeries 가 앵커 사이를 로그가격 보간·√t 밴드로 파생
+//     (프론트 파생 계산 — API 응답·서버 비용 증가 없음)
+//   - 드래그(스크럽): 포인터를 누른 채 움직이면 일별 점을 하나씩 따라가고,
 //     손을 떼면(pointerup) 그 지점이 고정되어 아래 리드아웃에 날짜·가격이 남는다.
 //     터치·마우스 모두 pointer events 로 처리 (touch-none 으로 스크롤 간섭 차단).
-//   - 데이터: 실제 가격은 /api/history?range=1m (CardSparkline 과 같은 in-view 지연 로드),
-//     예측 점은 부모가 계산한 buildMultiHorizonFairValue 결과를 그대로 사용.
+//   - 실제 가격은 /api/history?range=1m (CardSparkline 과 같은 in-view 지연 로드).
 
 interface DailyPoint {
   date: number;
@@ -33,26 +37,16 @@ interface ChartPt {
   kind: "actual" | "pred";
   /** 리드아웃 날짜 라벨 — "6/30" 또는 "7/13(월)" */
   label: string;
-  /** 예측 점의 시계 라벨 — "오늘" 등 */
+  /** 4개 시계 앵커의 라벨 — "내일" 등 (일반 일별 점은 없음) */
   horizonLabel?: string;
   /** 내일(dual-leg)의 시가 추정 — 종가와 다를 때만 */
   openPrice?: number | null;
+  /** 예측 변동성 밴드 (있을 때만) */
+  low?: number | null;
+  high?: number | null;
+  /** 시계 앵커 여부 — 마커 표시용 */
+  isAnchor?: boolean;
 }
-
-const HORIZON_OFFSET: Record<FairValueHorizonId, number> = {
-  today: 0,
-  tomorrow: 1,
-  week: 5,
-  month: 22,
-};
-
-// 예측 밴드 폭에 쓸 predictor range horizon 매핑 (오늘·내일은 1일 σ 범위 재사용)
-const HORIZON_RANGE_DAYS: Record<FairValueHorizonId, number> = {
-  today: 1,
-  tomorrow: 1,
-  week: 5,
-  month: 22,
-};
 
 function fmtDayLabel(ms: number): string {
   const d = new Date(ms);
@@ -160,44 +154,35 @@ export function FairValueMiniChart({
     if (actualPts.length === 0) return null;
     const anchor = actualPts[actualPts.length - 1];
 
-    // ── 예측 구간 ──
-    const predPts: ChartPt[] = [];
-    for (const h of horizons) {
-      const est = h.estimate;
-      if (!est.ready) continue;
-      const offset = HORIZON_OFFSET[h.id];
-      const openPrice =
-        h.id === "tomorrow" && Math.abs(est.open.price - est.close.price) > 0
-          ? est.open.price
-          : null;
-      predPts.push({
-        x: anchor.x + offset,
-        price: est.close.price,
-        kind: "pred",
-        label: est.targetDateLabel,
-        horizonLabel: h.label,
-        openPrice,
-      });
-    }
-    predPts.sort((a, b) => a.x - b.x);
+    // ── 예측 구간 — 오늘~1개월 매 거래일 시리즈 ──
+    const daily = buildFairValueDailySeries({
+      code,
+      horizons,
+      ranges,
+      basePrice: currentPrice > 0 ? currentPrice : anchor.price,
+    });
+    const predPts: ChartPt[] = daily
+      // 가상 시작점(offset 0, 앵커 아님)은 현재가 복제라 스크럽·라인에서 제외
+      .filter((p) => p.sessionOffset > 0 || p.horizonId != null)
+      .map((p) => ({
+        x: anchor.x + p.sessionOffset,
+        price: p.price,
+        kind: "pred" as const,
+        label: p.label,
+        horizonLabel: p.horizonLabel,
+        openPrice: p.openPrice,
+        low: p.low,
+        high: p.high,
+        isAnchor: p.horizonId != null,
+      }));
 
-    // ── 예측 밴드 (predictor 변동성 범위의 상대 폭 재사용) ──
+    // ── 예측 밴드 — 일별 low~high 를 부드러운 폴리곤으로 ──
     const band: { x: number; low: number; high: number }[] = [];
-    if (ranges?.length && predPts.length > 0) {
+    if (predPts.some((p) => p.low != null && p.high != null)) {
       band.push({ x: anchor.x, low: anchor.price, high: anchor.price });
-      for (const p of predPts) {
-        if (p.x <= anchor.x) continue;
-        const h = horizons.find(
-          (hh) => hh.estimate.ready && anchor.x + HORIZON_OFFSET[hh.id] === p.x
-        );
-        const rd = h ? HORIZON_RANGE_DAYS[h.id] : null;
-        const r = rd != null ? ranges.find((rr) => rr.horizonDays === rd) : null;
-        if (!r || r.center <= 0) continue;
-        band.push({
-          x: p.x,
-          low: p.price * (r.low / r.center),
-          high: p.price * (r.high / r.center),
-        });
+      for (const p of daily) {
+        if (p.sessionOffset <= 0 || p.low == null || p.high == null) continue;
+        band.push({ x: anchor.x + p.sessionOffset, low: p.low, high: p.high });
       }
     }
 
@@ -280,7 +265,7 @@ export function FairValueMiniChart({
       defaultIdx,
       hasPred: predPts.length > 0,
     };
-  }, [hist, horizons, ranges, currentPrice, width, height]);
+  }, [hist, horizons, ranges, currentPrice, width, height, code]);
 
   // ── 스크럽 핸들러 ──
   const pickNearest = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -396,9 +381,9 @@ export function FairValueMiniChart({
               r={2.4}
               fill="var(--color-foreground)"
             />
-            {/* 예측 마커 */}
+            {/* 시계 앵커 마커 (오늘/내일/다음주/1개월) — 일별 점은 라인으로만 */}
             {model.allPts
-              .filter((p) => p.kind === "pred")
+              .filter((p) => p.kind === "pred" && p.isAnchor)
               .map((p) => (
                 <circle
                   key={`${p.x}-${p.price}`}
@@ -464,6 +449,11 @@ export function FairValueMiniChart({
               </span>
             )}
           </span>
+        </div>
+      )}
+      {sel?.kind === "pred" && sel.low != null && sel.high != null && (
+        <div className="text-[10px] text-muted-foreground tabular text-right">
+          범위 {fmtNumber(sel.low, decimals)} ~ {fmtNumber(sel.high, decimals)}
         </div>
       )}
       {sel?.openPrice != null && (
