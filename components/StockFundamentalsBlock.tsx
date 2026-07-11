@@ -5,6 +5,8 @@ import { Badge } from "./ui/Badge";
 import { DataQualityBadge } from "./DataQualityBadge";
 import { PriceTicker } from "./PriceTicker";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { AnimatedMeter } from "./ui/AnimatedMeter";
+import { useSurgeFlash } from "@/hooks/useSurgeFlash";
 import {
   changeColor,
   currencyOf,
@@ -144,11 +146,26 @@ export function StockFundamentalsBlock({
         <Row
           label="RSI(14)"
           value={
-            analysisPending
-              ? "분석 중"
-              : tech.rsi14 != null
-                ? tech.rsi14.toFixed(0)
+            tech.rsi14 != null
+              ? tech.rsi14.toFixed(0)
+              : analysisPending
+                ? "분석 중"
                 : "—"
+          }
+          meter={
+            tech.rsi14 != null
+              ? {
+                  value: tech.rsi14,
+                  fillClass:
+                    tech.rsi14 >= 70
+                      ? "bg-up"
+                      : tech.rsi14 <= 30
+                        ? "bg-down"
+                        : "bg-muted-foreground",
+                  surgeRate: snap.quote.changeRate,
+                  priceTick: snap.quote.price,
+                }
+              : undefined
           }
         />
         {/* 거래대금 — KIS WS 가 줄 때만 노출 (한국 종목 + Phase 3 active). 단위 자동 (억/조). */}
@@ -160,18 +177,21 @@ export function StockFundamentalsBlock({
         )}
       </div>
 
-      {/* 수급 — 외인/기관/개인 당일 + 5일 누적 + 출처 (한국 종목만 실데이터, 그 외는 placeholder) */}
-      {analysisPending ? (
-        <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-          수급(외인·기관) 분석 중…
-        </div>
-      ) : (
+      {/* 수급 — 데이터가 있으면 phase 와 무관하게 표시 */}
+      {flow.foreignNet != null ||
+      flow.institutionNet != null ||
+      flow.individualNet != null ||
+      !analysisPending ? (
         <FlowSection
           flow={flow}
           code={meta.code}
           variant={variant}
           kisActive={kisActive}
         />
+      ) : (
+        <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+          수급(외인·기관) 분석 중…
+        </div>
       )}
 
       {/* 프로그램 매매 — KIS 활성 시 종목별 차익/비차익. 데이터 없으면 미노출. */}
@@ -191,15 +211,47 @@ export function StockFundamentalsBlock({
 function Row({
   label,
   value,
+  meter,
 }: {
   label: React.ReactNode;
   value: string;
+  meter?: {
+    value: number;
+    fillClass: string;
+    surgeRate?: number | null;
+    priceTick?: number | null;
+  };
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="tabular font-medium">{value}</span>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular font-medium">{value}</span>
+      </div>
+      {meter && <RsiMeter {...meter} />}
     </div>
+  );
+}
+
+function RsiMeter({
+  value,
+  fillClass,
+  surgeRate,
+  priceTick,
+}: {
+  value: number;
+  fillClass: string;
+  surgeRate?: number | null;
+  priceTick?: number | null;
+}) {
+  const surge = useSurgeFlash(surgeRate, { priceTick: priceTick ?? null });
+  return (
+    <AnimatedMeter
+      value={value}
+      fillClass={fillClass}
+      heightClass="h-1"
+      surge={surge}
+    />
   );
 }
 
@@ -409,6 +461,8 @@ function FlowSection({
 
   // 비-한국 종목(US/지수/환율 등) 또는 mock 출처 — 외인/기관 수급은 KIS·네이버가 한국 시장만
   // 신뢰 가능. 그 외엔 의미 없는 가짜 숫자(±500억 등)가 노출되지 않도록 placeholder 만.
+  // historyDays/thinHistory 는 카드 헤더 DataQualityBadge(snap.dataQuality)가 SSOT —
+  // 여기서 0일로 하드코딩하지 않음 (해외 신규상장 오해 방지).
   const isKR = isKrStockCode(code);
   if (!isKR || flow.source === "mock") {
     return (

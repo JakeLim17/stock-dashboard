@@ -10,7 +10,9 @@ import {
 import type { PriceRange } from "@/lib/types";
 import {
   buildFairValueDailySeries,
+  dailyVolFromCloses,
   type FairValueHorizonItem,
+  type PathFactor,
 } from "@/lib/fair-value";
 import { fmtNumber, fmtPercent } from "@/lib/utils";
 
@@ -18,7 +20,7 @@ import { fmtNumber, fmtPercent } from "@/lib/utils";
 //
 //   - 좌측: 최근 실제 종가(약 1개월, 실선) · 우측: 오늘~1개월 **매 거래일** 예측 곡선(점선)
 //     + 4개 시계 앵커(오늘/내일/다음주/1개월)에는 마커 표시
-//   - 일별 예측은 buildFairValueDailySeries 가 앵커 사이를 로그가격 보간·√t 밴드로 파생
+//   - 일별 예측은 buildFairValueDailySeries 가 요인 기반 일별 경로 + √t 밴드로 파생
 //     (프론트 파생 계산 — API 응답·서버 비용 증가 없음)
 //   - 드래그(스크럽): 포인터를 누른 채 움직이면 일별 점을 하나씩 따라가고,
 //     손을 떼면(pointerup) 그 지점이 고정되어 아래 리드아웃에 날짜·가격이 남는다.
@@ -165,6 +167,7 @@ export function FairValueMiniChart({
   currentPrice,
   horizons,
   ranges,
+  pathFactors,
   height = 92,
 }: {
   code: string;
@@ -172,6 +175,7 @@ export function FairValueMiniChart({
   currentPrice: number;
   horizons: FairValueHorizonItem[];
   ranges?: PriceRange[] | null;
+  pathFactors?: PathFactor[] | null;
   height?: number;
 }) {
   const decimals = currency === "USD" ? 2 : 0;
@@ -261,11 +265,23 @@ export function FairValueMiniChart({
     const anchor = actualPts[actualPts.length - 1];
 
     // ── 예측 구간 — 오늘~1개월 매 거래일 시리즈 ──
+    // 최근 실현 vol·로그수익률 shape 로 종목별 경로 생성
+    const closes = actualPts.map((p) => p.price);
+    const realizedVol = dailyVolFromCloses(closes);
+    const recentLogReturns: number[] = [];
+    for (let i = 1; i < closes.length; i++) {
+      const a = closes[i - 1]!;
+      const b = closes[i]!;
+      if (a > 0 && b > 0) recentLogReturns.push(Math.log(b / a));
+    }
     const daily = buildFairValueDailySeries({
       code,
       horizons,
       ranges,
       basePrice: currentPrice > 0 ? currentPrice : anchor.price,
+      pathFactors,
+      realizedVol,
+      recentLogReturns,
     });
     const predPts: ChartPt[] = daily
       // 가상 시작점(offset 0, 앵커 아님)은 현재가 복제라 스크럽·라인에서 제외
@@ -293,24 +309,70 @@ export function FairValueMiniChart({
     }
 
     // ── 스케일 ──
+    // 핵심: 밴드 extreme을 domain에 풀로 넣으면 (±8~16%) 예측 center(±1~4%)가
+    // 픽셀 2~5px로 깔려 "죽은 점선"이 됨 → center(실제+예측) 기준 + 밴드는 약하게만.
     const xMax = Math.max(
       anchor.x,
       predPts.length > 0 ? predPts[predPts.length - 1].x : anchor.x
     );
-    const prices = [
+    const softBandPull = (
+      cMin: number,
+      cMax: number
+    ): { minP: number; maxP: number } => {
+      if (band.length === 0) return { minP: cMin, maxP: cMax };
+      const bMin = Math.min(...band.map((b) => b.low));
+      const bMax = Math.max(...band.map((b) => b.high));
+      // 변동 큰 종목(SK스퀘어 등) 밴드·path 가 viewBox 밖으로 잘리지 않게
+      const BAND_PULL = 0.42;
+      return {
+        minP: cMin - BAND_PULL * Math.max(0, cMin - bMin),
+        maxP: cMax + BAND_PULL * Math.max(0, bMax - cMax),
+      };
+    };
+
+    let centerMin = Math.min(
       ...actualPts.map((p) => p.price),
       ...predPts.map((p) => p.price),
-      ...band.flatMap((b) => [b.low, b.high]),
-      ...(currentPrice > 0 ? [currentPrice] : []),
-    ];
-    let minP = Math.min(...prices);
-    let maxP = Math.max(...prices);
-    const padP = (maxP - minP || maxP * 0.01 || 1) * 0.1;
+      ...(currentPrice > 0 ? [currentPrice] : [])
+    );
+    let centerMax = Math.max(
+      ...actualPts.map((p) => p.price),
+      ...predPts.map((p) => p.price),
+      ...(currentPrice > 0 ? [currentPrice] : [])
+    );
+
+    // 예측(+최근 실적) span이 전체의 24% 미만이면 domain을 그 창으로 조여
+    // 과거 극단이 축을 잡아먹어 점선이 직선처럼 보이는 것을 막음
+    const predOnly = [anchor.price, ...predPts.map((p) => p.price)];
+    const predSpan = Math.max(...predOnly) - Math.min(...predOnly);
+    const fullSpan = centerMax - centerMin;
+    const MIN_PRED_SHARE = 0.24;
+    if (predSpan > 0 && fullSpan > 0 && predSpan / fullSpan < MIN_PRED_SHARE) {
+      const recentN = Math.max(8, Math.floor(actualPts.length * 0.4));
+      const focus = [
+        ...actualPts.slice(-recentN).map((p) => p.price),
+        ...predOnly,
+      ];
+      let fMin = Math.min(...focus);
+      let fMax = Math.max(...focus);
+      const need = Math.max(fMax - fMin, predSpan / MIN_PRED_SHARE);
+      if (fMax - fMin < need) {
+        const mid = (fMin + fMax) / 2;
+        fMin = mid - need / 2;
+        fMax = mid + need / 2;
+      }
+      centerMin = fMin;
+      centerMax = fMax;
+    }
+
+    let { minP, maxP } = softBandPull(centerMin, centerMax);
+    const padP = (maxP - minP || maxP * 0.01 || 1) * 0.14;
     minP -= padP;
     maxP += padP;
 
     const padX = 4;
-    const padY = 4;
+    // 마커·스트로크·밴드가 하단에서 잘리지 않게 Y 패딩 확보
+    const padY = 10;
     const innerW = width - padX * 2;
     const innerH = height - padY * 2;
     const sx = (x: number) => padX + (xMax === 0 ? 0 : (x / xMax) * innerW);
@@ -371,7 +433,7 @@ export function FairValueMiniChart({
       defaultIdx,
       hasPred: predPts.length > 0,
     };
-  }, [hist, horizons, ranges, currentPrice, width, height, code]);
+  }, [hist, horizons, ranges, pathFactors, currentPrice, width, height, code]);
 
   // ── 스크럽 핸들러 ──
   const pickNearest = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -417,7 +479,10 @@ export function FairValueMiniChart({
 
   return (
     <div ref={containerRef} className="w-full">
-      <div className="relative" style={{ height }}>
+      <div
+        className="relative overflow-hidden rounded-md"
+        style={{ height }}
+      >
         {histLoading && <ChartLoadingSkeleton width={width} height={height} />}
         {!histLoading && !model && (
           <div className="absolute inset-0 grid place-items-center rounded-md bg-muted/40 text-[10px] text-muted-foreground">
@@ -429,7 +494,7 @@ export function FairValueMiniChart({
             width={width}
             height={height}
             viewBox={`0 0 ${width} ${height}`}
-            className="block touch-none select-none cursor-crosshair"
+            className="block touch-none select-none cursor-crosshair overflow-visible"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -548,10 +613,22 @@ export function FairValueMiniChart({
               {sel.horizonLabel ? ` · ${sel.horizonLabel}` : ""}
             </span>
           </span>
-          <span className="shrink-0 font-semibold">
+          <span
+            className={`shrink-0 font-bold tabular leading-none ${
+              sel.kind === "pred"
+                ? "text-lg text-up"
+                : "text-sm font-semibold text-foreground"
+            }`}
+          >
             {fmtNumber(sel.price, decimals)}
             {selDelta != null && Math.abs(selDelta) >= 0.0005 && (
-              <span className="ml-1 font-normal text-muted-foreground">
+              <span
+                className={`ml-1.5 font-medium ${
+                  sel.kind === "pred"
+                    ? "text-sm text-up/80"
+                    : "text-[11px] font-normal text-muted-foreground"
+                }`}
+              >
                 ({fmtPercent(selDelta, 1)})
               </span>
             )}

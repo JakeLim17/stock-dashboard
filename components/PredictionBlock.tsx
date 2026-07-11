@@ -2,6 +2,7 @@
 
 import type { StockSnapshot } from "@/lib/types";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { PriceTicker } from "./PriceTicker";
 import { DataQualityBadge, predictionQualityHint } from "./DataQualityBadge";
 import {
   buildConfidenceBreakdown,
@@ -10,8 +11,11 @@ import {
   estimateAtrPct,
   takeProfit2SourceLabel,
 } from "@/lib/prediction-display";
-import { formatChronoPulseBps } from "@/lib/analyzer/chronoPulse";
+import { formatFactorChip } from "@/lib/analyzer/chronoPulse";
 import { HelpTooltip } from "./HelpTooltip";
+import { AnimatedMarker, AnimatedMeter } from "./ui/AnimatedMeter";
+import { useSurgeFlash } from "@/hooks/useSurgeFlash";
+import { useSpringValue } from "@/hooks/useSpringValue";
 import {
   currencyOf,
   fmtNumber,
@@ -80,6 +84,10 @@ export function PredictionBlock({
   const chronoPulse = p?.chronoPulse;
   const topFactors =
     chronoPulse?.factors.filter((f) => Math.abs(f.bps) >= 1).slice(0, 5) ?? [];
+  // 당일 등락 ±3%↑ 이면 미터에 짧은 pulse (가격 틱마다 재트리거)
+  const meterSurge = useSurgeFlash(snap.quote.changeRate, {
+    priceTick: snap.quote.price,
+  });
 
   // 데이터 부족·변동 구간 없음 — 카드가 비대해지지 않게 (얇은 히스토리는 안내만).
   const hasAny =
@@ -121,16 +129,9 @@ export function PredictionBlock({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1 text-xs text-muted-foreground tracking-wide uppercase">
-            {chronoPulse ? (
-              <>
-                <span className="text-accent font-medium">{chronoPulse.name}</span>
-                <span className="opacity-60">· 단기 밴드</span>
-              </>
-            ) : (
-              "가격 변동 추정 · 단기"
-            )}
+            가격 변동 추정 · 단기
             <HelpTooltip
-              content="베이스는 통계 경로, ChronoPulse 칩은 수급·뉴스 가산 알파입니다. 막대는 √t 변동 참고 구간이에요."
+              content="점선·막대는 통계 경로(모멘텀·평균회귀)와 수급·뉴스 등 요인을 합친 단기 참고 구간이에요. 멀수록 불확실 · 밴드를 함께 보세요. 확정 목표가 아닙니다."
               label="예측 밴드 안내"
             />
           </div>
@@ -181,39 +182,17 @@ export function PredictionBlock({
         </div>
       </div>
 
-      {chronoPulse && (
+      {chronoPulse && topFactors.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          <span className="text-[9px] text-muted-foreground w-full tabular">
-            베이스{" "}
-            {((chronoPulse.baseDaily ?? 0) * 100).toFixed(2)}%
-            {" · "}
-            알파{" "}
-            {((chronoPulse.alphaDaily ?? chronoPulse.driftDaily) * 100).toFixed(2)}%
-            {" · "}
-            합계{" "}
-            {(
-              (chronoPulse.totalDaily ??
-                (chronoPulse.baseDaily ?? 0) + chronoPulse.driftDaily) *
-              100
-            ).toFixed(2)}
-            %
-          </span>
-          {(chronoPulse.baseDaily != null &&
-            Math.abs(chronoPulse.baseDaily) >= 0.0001) && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded tabular bg-muted text-muted-foreground">
-              통계 베이스{" "}
-              {chronoPulse.baseDaily >= 0 ? "+" : ""}
-              {(chronoPulse.baseDaily * 100).toFixed(2)}%
-            </span>
-          )}
           {topFactors.map((f) => (
             <span
               key={`${f.id}-${f.label}`}
               className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
                 f.bps >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall"
               }`}
+              title={`요인 · ${f.label}`}
             >
-              {f.label} {formatChronoPulseBps(f.bps)}
+              {formatFactorChip(f)}
             </span>
           ))}
         </div>
@@ -237,13 +216,13 @@ export function PredictionBlock({
         </p>
       )}
 
-      {/* 1일/1주 변동 참고 구간 */}
-      {thinHistory ? (
+      {/* 1일/1주 변동 참고 구간 — 얇은 히스토리여도 단기 밴드는 표시 */}
+      {thinHistory && (
         <p className="text-[11px] text-warn leading-snug rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5">
-          데이터 부족 ({dq?.historyDays ?? 0}일) — 변동 참고 구간을 표시하지 않습니다.
+          데이터 축적 중 ({dq?.historyDays ?? 0}일) — 단기 구간만 참고하세요. 장기 목표·시나리오는 보류합니다.
         </p>
-      ) : (
-        (oneDay || oneWeek || oneMonth) && (
+      )}
+      {(oneDay || oneWeek || oneMonth) && (
           <div className="space-y-2">
             {oneDay && (
               <PredictionRangeRow
@@ -254,6 +233,7 @@ export function PredictionBlock({
                 center={oneDay.center}
                 decimals={decimals}
                 driftPct={oneDayDrift}
+                surge={meterSurge}
               />
             )}
             {oneWeek && (
@@ -264,6 +244,7 @@ export function PredictionBlock({
                 high={oneWeek.high}
                 center={oneWeek.center}
                 decimals={decimals}
+                surge={meterSurge}
               />
             )}
             {oneMonth && (
@@ -274,10 +255,10 @@ export function PredictionBlock({
                 high={oneMonth.high}
                 center={oneMonth.center}
                 decimals={decimals}
+                surge={meterSurge}
               />
             )}
           </div>
-        )
       )}
 
       {qualityHint && (
@@ -319,8 +300,18 @@ export function PredictionBlock({
 
       {/* 매수/매도 강도 게이지 — 카드 내에선 한 줄에 두 개 stack */}
       <div className="grid grid-cols-2 gap-2">
-        <StrengthGauge label="매수 강도" value={buyStrength} kind="up" />
-        <StrengthGauge label="매도 강도" value={sellStrength} kind="down" />
+        <StrengthGauge
+          label="매수 강도"
+          value={buyStrength}
+          kind="up"
+          surge={meterSurge}
+        />
+        <StrengthGauge
+          label="매도 강도"
+          value={sellStrength}
+          kind="down"
+          surge={meterSurge}
+        />
       </div>
 
       {/* 손익비 + 손절/목표1·2 + ATR% 근거 */}
@@ -446,6 +437,7 @@ function PredictionRangeRow({
   center,
   decimals,
   driftPct,
+  surge = null,
 }: {
   horizonLabel: string;
   currentPrice: number;
@@ -454,22 +446,34 @@ function PredictionRangeRow({
   center: number;
   decimals: number;
   driftPct?: number | null;
+  surge?: "up" | "down" | null;
 }) {
   const span = high - low;
-  if (span <= 0 || currentPrice <= 0) return null;
-  const padding = span * 0.2;
+  const valid = span > 0 && currentPrice > 0;
+  const padding = valid ? span * 0.2 : 0;
   const visLow = low - padding;
   const visHigh = high + padding;
-  const totalSpan = visHigh - visLow;
+  const totalSpan = valid ? visHigh - visLow : 1;
   const pct = (v: number) =>
     Math.max(0, Math.min(100, ((v - visLow) / totalSpan) * 100));
-  const lowPct = pct(low);
-  const highPct = pct(high);
-  const centerPct = pct(center);
-  const currentPct = pct(currentPrice);
+  const lowPct = valid ? pct(low) : 0;
+  const highPct = valid ? pct(high) : 0;
+  const centerPct = valid ? pct(center) : 0;
+  const currentPct = valid ? pct(currentPrice) : 0;
+  const sprungLow = useSpringValue(lowPct);
+  const sprungWidth = useSpringValue(Math.max(0, highPct - lowPct));
+  const sprungCenter = useSpringValue(centerPct);
   const inRange = currentPrice >= low && currentPrice <= high;
-  const lowDelta = low / currentPrice - 1;
-  const highDelta = high / currentPrice - 1;
+  const lowDelta = valid ? low / currentPrice - 1 : 0;
+  const highDelta = valid ? high / currentPrice - 1 : 0;
+  const surgeClass =
+    surge === "up"
+      ? "meter-surge-up"
+      : surge === "down"
+        ? "meter-surge-down"
+        : "";
+
+  if (!valid) return null;
 
   return (
     <div>
@@ -477,31 +481,39 @@ function PredictionRangeRow({
         <span className="text-muted-foreground uppercase tracking-wider">
           {horizonLabel}
         </span>
-        <span className="tabular text-muted-foreground">
-          ± {fmtPercent((high - low) / (2 * currentPrice), 1).replace("+", "")}
+        <span className="tabular text-up text-sm font-bold leading-none">
+          <PriceTicker
+            value={center}
+            decimals={decimals}
+            animateMs={480}
+            className="text-up text-sm font-bold"
+          />
           {driftPct != null && Math.abs(driftPct) >= 0.0005 && (
-            <span className="ml-1">
-              · drift {fmtPercent(driftPct, 1)}
+            <span className="ml-1 text-[11px] font-semibold text-up/80">
+              {fmtPercent(driftPct, 1)}
             </span>
           )}
         </span>
       </div>
-      <div className="relative h-2.5 w-full">
+      <div className={`relative h-2.5 w-full rounded-sm ${surgeClass}`}>
         <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-0.5 bg-muted rounded-full" />
         <div
           className="absolute top-1/2 -translate-y-1/2 h-1.5 bg-accent/40 rounded-full"
-          style={{ left: `${lowPct}%`, width: `${highPct - lowPct}%` }}
+          style={{
+            left: `${Math.max(0, Math.min(100, sprungLow))}%`,
+            width: `${Math.max(0, Math.min(100, sprungWidth))}%`,
+          }}
         />
         <div
           className="absolute top-1/2 -translate-y-1/2 h-2.5 w-0.5 bg-accent"
-          style={{ left: `${centerPct}%` }}
+          style={{ left: `${Math.max(0, Math.min(100, sprungCenter))}%` }}
           title={`중심 ${fmtNumber(center, decimals)}`}
         />
-        <div
+        <AnimatedMarker
+          pct={currentPct}
           className={`absolute top-1/2 -translate-y-1/2 h-3 w-1 rounded ${
             inRange ? "bg-foreground" : "bg-warn"
           }`}
-          style={{ left: `calc(${currentPct}% - 2px)` }}
           title={`현재가 ${fmtNumber(currentPrice, decimals)}`}
         />
       </div>
@@ -511,6 +523,9 @@ function PredictionRangeRow({
           <span className="text-muted-foreground ml-0.5">
             ({fmtPercent(lowDelta, 1)})
           </span>
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          ± {fmtPercent((high - low) / (2 * currentPrice), 1).replace("+", "")}
         </span>
         <span className="text-up">
           {fmtNumber(high, decimals)}
@@ -529,12 +544,13 @@ function StrengthGauge({
   label,
   value,
   kind,
+  surge = null,
 }: {
   label: string;
   value: number;
   kind: "up" | "down";
+  surge?: "up" | "down" | null;
 }) {
-  const safe = Math.max(0, Math.min(100, value));
   const fillClass = kind === "up" ? "bg-up" : "bg-down";
   return (
     <div>
@@ -542,12 +558,7 @@ function StrengthGauge({
         <span className="text-muted-foreground">{label}</span>
         <span className="tabular font-semibold">{Math.round(value)}</span>
       </div>
-      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-        <div
-          className={`h-full ${fillClass} transition-all`}
-          style={{ width: `${safe}%` }}
-        />
-      </div>
+      <AnimatedMeter value={value} fillClass={fillClass} surge={surge} />
     </div>
   );
 }

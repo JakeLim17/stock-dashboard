@@ -5,6 +5,9 @@ import type { OverseasNightIndicator, StockSnapshot } from "@/lib/types";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { AnimatedMarker, AnimatedMeter } from "./ui/AnimatedMeter";
+import { useSurgeFlash } from "@/hooks/useSurgeFlash";
+import { useSpringValue } from "@/hooks/useSpringValue";
 import {
   buildConfidenceBreakdown,
   buildMacroImpactLine,
@@ -63,6 +66,9 @@ export function PredictionPanel({
     () => snaps.find((s) => s.meta.code === activeCode) ?? snaps[0],
     [activeCode, snaps]
   );
+  const meterSurge = useSurgeFlash(snap?.quote.changeRate, {
+    priceTick: snap?.quote.price,
+  });
 
   if (!snap) {
     if (embedded) {
@@ -227,6 +233,7 @@ export function PredictionPanel({
                           low={r.low}
                           center={r.center}
                           high={r.high}
+                          surge={meterSurge}
                         />
                         <div className="flex items-center justify-between text-[11px] tabular text-muted-foreground">
                           <span>{fmtNumber(r.low)}</span>
@@ -403,6 +410,7 @@ export function PredictionPanel({
                     color={
                       p.valuation.riskScore >= 45 ? "bg-down" : "bg-muted-foreground"
                     }
+                    surge={meterSurge}
                   />
                   <ul className="text-xs text-muted-foreground space-y-1">
                     {p.valuation.reasons.map((r) => (
@@ -417,11 +425,17 @@ export function PredictionPanel({
               title="신호 강도"
               icon={<TrendingDown className="h-3.5 w-3.5" />}
             >
-              <StrengthBar label="매수 강도" value={p.strength.buy} color="bg-up" />
+              <StrengthBar
+                label="매수 강도"
+                value={p.strength.buy}
+                color="bg-up"
+                surge={meterSurge}
+              />
               <StrengthBar
                 label="매도 강도"
                 value={p.strength.sell}
                 color="bg-down"
+                surge={meterSurge}
               />
             </Section>
           </div>
@@ -570,9 +584,19 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
       : 0;
   const isDelayed = staleMs > 15 * 60 * 1000;
   const isEur = signal.currency?.toUpperCase() === "EUR";
+  const spr = signal.sharesPerReceipt ?? 1;
+  const receiptsPerShare = spr > 0 && spr < 1 ? Math.round(1 / spr) : null;
   const fxText = isEur
-    ? `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.eurUsd, 4)} × ${fmtNumber(signal.usdKrw, 0)} ÷ ${signal.sharesPerReceipt ?? 1}`
-    : `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.fxToKrw, 0)} ÷ ${signal.sharesPerReceipt ?? 1}`;
+    ? receiptsPerShare != null
+      ? `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.eurUsd, 4)} × ${fmtNumber(signal.usdKrw, 0)} × ${receiptsPerShare}`
+      : `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.eurUsd, 4)} × ${fmtNumber(signal.usdKrw, 0)} ÷ ${spr}`
+    : receiptsPerShare != null
+      ? `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.fxToKrw, 0)} × ${receiptsPerShare}`
+      : `${fmtNumber(signal.price, 2)} × ${fmtNumber(signal.fxToKrw, 0)} ÷ ${spr}`;
+  const receiptLabel =
+    receiptsPerShare != null
+      ? `${signal.proxyKind === "gdr" ? "GDR" : "ADR"} ${receiptsPerShare}주=원주 1주`
+      : `${spr}주 환산`;
 
   return (
     <div className="rounded-xl border border-border bg-background p-4 space-y-3">
@@ -619,7 +643,7 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
         <MiniMetric
           label={`${signal.currency ?? ""} 원가격`}
           value={`${fmtNumber(signal.price, 2)} ${signal.currency ?? ""}`}
-          sub={`${signal.sharesPerReceipt ?? 1}주 환산`}
+          sub={receiptLabel}
         />
       </div>
 
@@ -630,7 +654,11 @@ function NightValuationCard({ signal }: { signal: NightSignal }) {
         )}
         <MiniMetric label="USDKRW" value={fmtNumber(signal.usdKrw, 0)} />
         <MiniMetric
-          label="GDR 등락"
+          label={
+            /ADR/i.test(signal.name) || signal.proxyKind === "adr"
+              ? "ADR 등락"
+              : "GDR 등락"
+          }
           value={fmtPercent(signal.changeRate)}
           color={changeColor(signal.changeRate)}
         />
@@ -793,50 +821,61 @@ function RangeBar({
   low,
   center,
   high,
+  surge = null,
 }: {
   currentPrice: number;
   low: number;
   center: number;
   high: number;
+  surge?: "up" | "down" | null;
 }) {
-  // 시각화 범위: low/high의 ±20%까지 여백
   const span = high - low;
-  if (span <= 0) return null;
-  const padding = span * 0.2;
+  const valid = span > 0;
+  const padding = valid ? span * 0.2 : 0;
   const visLow = low - padding;
   const visHigh = high + padding;
-  const totalSpan = visHigh - visLow;
+  const totalSpan = valid ? visHigh - visLow : 1;
 
   const pct = (v: number) =>
     Math.max(0, Math.min(100, ((v - visLow) / totalSpan) * 100));
 
-  const lowPct = pct(low);
-  const highPct = pct(high);
-  const centerPct = pct(center);
-  const currentPct = pct(currentPrice);
+  const lowPct = valid ? pct(low) : 0;
+  const highPct = valid ? pct(high) : 0;
+  const centerPct = valid ? pct(center) : 0;
+  const currentPct = valid ? pct(currentPrice) : 0;
+  const sprungLow = useSpringValue(lowPct);
+  const sprungWidth = useSpringValue(Math.max(0, highPct - lowPct));
+  const sprungCenter = useSpringValue(centerPct);
 
   const inRange = currentPrice >= low && currentPrice <= high;
+  const surgeClass =
+    surge === "up"
+      ? "meter-surge-up"
+      : surge === "down"
+        ? "meter-surge-down"
+        : "";
+
+  if (!valid) return null;
 
   return (
-    <div className="relative h-2 w-full">
-      {/* 전체 트랙 */}
+    <div className={`relative h-2 w-full rounded-sm ${surgeClass}`}>
       <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 bg-muted rounded-full" />
-      {/* low~high 범위 */}
       <div
         className="absolute top-1/2 -translate-y-1/2 h-1.5 bg-accent/40 rounded-full"
-        style={{ left: `${lowPct}%`, width: `${highPct - lowPct}%` }}
+        style={{
+          left: `${Math.max(0, Math.min(100, sprungLow))}%`,
+          width: `${Math.max(0, Math.min(100, sprungWidth))}%`,
+        }}
       />
-      {/* 중심 */}
       <div
         className="absolute top-1/2 -translate-y-1/2 h-2 w-0.5 bg-accent"
-        style={{ left: `${centerPct}%` }}
+        style={{ left: `${Math.max(0, Math.min(100, sprungCenter))}%` }}
       />
-      {/* 현재가 마커 */}
-      <div
+      <AnimatedMarker
+        pct={currentPct}
         className={`absolute top-1/2 -translate-y-1/2 h-3 w-1 rounded ${
           inRange ? "bg-foreground" : "bg-warn"
         }`}
-        style={{ left: `calc(${currentPct}% - 2px)` }}
         title={`현재가 ${fmtNumber(currentPrice)}`}
       />
     </div>
@@ -847,10 +886,12 @@ function StrengthBar({
   label,
   value,
   color,
+  surge = null,
 }: {
   label: string;
   value: number;
   color: string;
+  surge?: "up" | "down" | null;
 }) {
   return (
     <div className="mb-2 last:mb-0">
@@ -858,12 +899,7 @@ function StrengthBar({
         <span>{label}</span>
         <span className="tabular font-medium text-foreground">{value}</span>
       </div>
-      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-        <div
-          className={`h-full ${color} transition-all`}
-          style={{ width: `${value}%` }}
-        />
-      </div>
+      <AnimatedMeter value={value} fillClass={color} surge={surge} />
     </div>
   );
 }

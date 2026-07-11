@@ -270,21 +270,29 @@ export function computeMacroFairValueAdjustment(
     );
   }
 
-  // ── 수급 (외인 5일) ───────────────────────────────────
+  // ── 수급 (외인 5일 + 연속일) ───────────────────────────────────
   const f5 = flow.foreignNet5d;
   if (f5 != null && flow.source !== "mock") {
     const eok = f5 / 1e8;
     if (eok >= 300) rate += pushFactor(factors, "외인 5일 순매수", 22);
     else if (eok <= -300) rate += pushFactor(factors, "외인 5일 순매도", -22);
   }
+  if (flow.source !== "mock" && flow.foreignStreak != null) {
+    const s = flow.foreignStreak;
+    if (s >= 3) rate += pushFactor(factors, `외인 연속매수 ${s}일`, Math.min(18, 4 * s));
+    else if (s <= -3)
+      rate += pushFactor(factors, `외인 연속매도 ${Math.abs(s)}일`, Math.max(-20, 4 * s));
+  }
 
-  // GDR 괴리는 blendFairValuePrice(야간 60% 가중)에 이미 반영 — 중복 시 월요일 하락 편향.
+  // 야간 괴리 — blend에 이미 반영된 경우 스킵. 종가·경로 기준 (갭 확정 문구 없음).
   if (!skipGdrPremium) {
     const prem = snap.overseasNight?.premiumRate;
     if (prem != null && Math.abs(prem) > 0.005) {
+      const kind =
+        snap.overseasNight?.proxyKind === "adr" ? "ADR" : "GDR";
       rate += pushFactor(
         factors,
-        "GDR 괴리",
+        `${kind} 야간 괴리`,
         Math.round(prem * 0.25 * 10_000)
       );
     }

@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import { toKisCode } from "../symbols";
 import type { HistoricalPoint } from "./yahoo";
+import { computeNetStreak } from "../analyzer/flowStreak";
 
 // 한국투자증권(KIS) Open API provider.
 // - 토큰: 메모리 캐싱 + 만료 5분 전 자동 갱신, 동시 호출 시 단일 in-flight 공유.
@@ -828,12 +829,16 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
     let institution5d = 0;
     let individual5d = 0;
     let any5d = false;
+    const foreignDaily: Array<number | null> = [];
+    const institutionDaily: Array<number | null> = [];
     for (let i = 0; i < days; i++) {
       const it = list[i];
       const close = n(it.stck_clpr) ?? todayClose;
       const f = toKrwNet(n(it.frgn_ntby_qty), n(it.frgn_ntby_tr_pbmn), close);
       const o = toKrwNet(n(it.orgn_ntby_qty), n(it.orgn_ntby_tr_pbmn), close);
       const p = toKrwNet(n(it.prsn_ntby_qty), n(it.prsn_ntby_tr_pbmn), close);
+      foreignDaily.push(f);
+      institutionDaily.push(o);
       if (f != null) {
         foreign5d += f;
         any5d = true;
@@ -863,6 +868,8 @@ export async function fetchKrFlow(code: string): Promise<FlowData | null> {
       foreignNet5d: any5d ? foreign5d : null,
       institutionNet5d: any5d ? institution5d : null,
       individualNet5d: any5d ? individual5d : null,
+      foreignStreak: computeNetStreak(foreignDaily),
+      institutionStreak: computeNetStreak(institutionDaily),
       source: "kis",
       fetchedAt: Date.now(),
     };

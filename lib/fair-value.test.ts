@@ -277,6 +277,257 @@ describe("buildFairValueEstimate", () => {
     assert.ok(Math.abs(relWidth(d5) - expected) < 0.002);
   });
 
+  it("일별 시리즈 — 요인 경로면 day-to-day 변화가 수평이 아님", () => {
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: 100_000,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: 100_000,
+        },
+        price: 100_000,
+        prevClose: 99_000,
+      })
+    );
+    // 의도적으로 flat-ish 앵커 (예전 보간은 거의 수평)
+    snap.predictions!.ranges = [
+      { horizonDays: 1, horizonLabel: "1일", low: 99_000, high: 101_500, center: 100_400, confidence: 0.95 },
+      { horizonDays: 5, horizonLabel: "1주", low: 97_000, high: 103_500, center: 100_200, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 92_000, high: 108_000, center: 100_100, confidence: 0.95 },
+    ];
+    const horizons = buildMultiHorizonFairValue(snap);
+    const series = buildFairValueDailySeries({
+      code: snap.meta.code,
+      horizons,
+      ranges: snap.predictions!.ranges,
+      basePrice: snap.quote.price,
+      now: new Date("2026-06-17T12:00:00+09:00"),
+      pathFactors: [
+        { id: "listing-adr", label: "상장·ADR 호재", bps: 40 },
+        { id: "supply", label: "수급 순매수", bps: 25 },
+        { id: "ixic", label: "나스닥", bps: -15 },
+      ],
+      realizedVol: 0.015,
+      // 상승→급락→반등 패턴 (종목 A)
+      recentLogReturns: [
+        0.012, 0.008, -0.004, 0.015, -0.02, 0.006, -0.011, 0.009, 0.003, -0.007,
+      ],
+    });
+    let absSum = 0;
+    const rets: number[] = [];
+    for (let i = 1; i < series.length; i++) {
+      const d = series[i]!.price - series[i - 1]!.price;
+      absSum += Math.abs(d);
+      rets.push(d);
+    }
+    assert.ok(absSum > 500, `absSum=${absSum} — flat 금지`);
+    // 부호가 한쪽으로만 고정되지 않게 (오르락내리락)
+    const ups = rets.filter((r) => r > 0).length;
+    const downs = rets.filter((r) => r < 0).length;
+    assert.ok(ups >= 2 && downs >= 2, `ups=${ups} downs=${downs}`);
+    // 시각적 flat 방지 — peak-to-trough 가 가격의 ≥2% (픽셀 대비 확보)
+    const prices = series.map((p) => p.price);
+    const spanPct =
+      ((Math.max(...prices) - Math.min(...prices)) / series[0]!.price) * 100;
+    assert.ok(spanPct >= 3.2, `spanPct=${spanPct.toFixed(2)} — 육안 굴곡 부족`);
+  });
+
+  it("약한 요인+수평 앵커여도 realizedVol 스케일로 굴곡 유지", () => {
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: 100_000,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: 100_000,
+        },
+        price: 100_000,
+        prevClose: 100_000,
+      })
+    );
+    snap.predictions!.ranges = [
+      { horizonDays: 1, horizonLabel: "1일", low: 99_000, high: 101_000, center: 100_200, confidence: 0.95 },
+      { horizonDays: 5, horizonLabel: "1주", low: 97_500, high: 102_500, center: 100_100, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 93_000, high: 107_000, center: 100_050, confidence: 0.95 },
+    ];
+    const horizons = buildMultiHorizonFairValue(snap);
+    const series = buildFairValueDailySeries({
+      code: snap.meta.code,
+      horizons,
+      ranges: snap.predictions!.ranges,
+      basePrice: 100_000,
+      now: new Date("2026-06-17T12:00:00+09:00"),
+      pathFactors: [{ id: "supply", label: "수급", bps: 6 }],
+      realizedVol: 0.018,
+      recentLogReturns: [
+        -0.01, 0.004, 0.012, -0.008, 0.006, -0.015, 0.011, 0.002, -0.005, 0.008,
+      ],
+    });
+    const prices = series.map((p) => p.price);
+    const spanPct =
+      ((Math.max(...prices) - Math.min(...prices)) / 100_000) * 100;
+    assert.ok(spanPct >= 3.5, `weak-factor spanPct=${spanPct.toFixed(2)}`);
+    // 앵커 일치
+    const d1 = series.find((p) => p.sessionOffset === 1)!;
+    const d5 = series.find((p) => p.sessionOffset === 5)!;
+    const tomorrow = horizons.find((h) => h.id === "tomorrow")!.estimate;
+    const week = horizons.find((h) => h.id === "week")!.estimate;
+    assert.ok(tomorrow.ready && week.ready);
+    assert.equal(d1.price, tomorrow.close.price);
+    assert.equal(d5.price, week.close.price);
+  });
+
+  it("종목별 최근 수익률·요인이 다르면 일별 center Δ% 상관이 과도하지 않음", () => {
+    // 예전 sine/bend 템플릿은 vol만 달라도 모양이 거의 동일 → 상관 ≈ 1
+    function closedSnap(ranges: NonNullable<StockSnapshot["predictions"]>["ranges"]) {
+      const snap = minimalSnap(
+        quote({
+          marketState: "CLOSED",
+          extendedHours: {
+            session: "kr-after",
+            price: 100_000,
+            changeAbs: 0,
+            changeRate: 0,
+            active: false,
+            regularClose: 100_000,
+          },
+          price: 100_000,
+          prevClose: 99_000,
+        })
+      );
+      snap.predictions!.ranges = ranges;
+      return snap;
+    }
+    const rangesA = [
+      { horizonDays: 1, horizonLabel: "1일", low: 98_000, high: 104_000, center: 102_000, confidence: 0.95 },
+      { horizonDays: 5, horizonLabel: "1주", low: 95_000, high: 108_000, center: 103_500, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 88_000, high: 115_000, center: 105_000, confidence: 0.95 },
+    ];
+    const rangesB = [
+      { horizonDays: 1, horizonLabel: "1일", low: 96_000, high: 101_000, center: 98_500, confidence: 0.95 },
+      { horizonDays: 5, horizonLabel: "1주", low: 92_000, high: 102_000, center: 97_000, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 85_000, high: 105_000, center: 96_000, confidence: 0.95 },
+    ];
+    const snapA = closedSnap(rangesA);
+    const snapB = closedSnap(rangesB);
+    snapA.meta.code = "402340.KS";
+    snapB.meta.code = "000660.KS";
+
+    const seriesA = buildFairValueDailySeries({
+      code: snapA.meta.code,
+      horizons: buildMultiHorizonFairValue(snapA),
+      ranges: rangesA,
+      basePrice: 100_000,
+      now: new Date("2026-06-17T12:00:00+09:00"),
+      pathFactors: [
+        { id: "supply-fstreak", label: "외인연속", bps: 35 },
+        { id: "listing-adr", label: "ADR", bps: 28 },
+      ],
+      realizedVol: 0.028,
+      recentLogReturns: [
+        0.03, -0.02, 0.025, 0.01, -0.035, 0.015, -0.01, 0.02, -0.005, 0.018,
+      ],
+    });
+    const seriesB = buildFairValueDailySeries({
+      code: snapB.meta.code,
+      horizons: buildMultiHorizonFairValue(snapB),
+      ranges: rangesB,
+      basePrice: 100_000,
+      now: new Date("2026-06-17T12:00:00+09:00"),
+      pathFactors: [
+        { id: "valuation", label: "밸류", bps: -20 },
+        { id: "ixic", label: "나스닥", bps: -18 },
+        { id: "supply", label: "수급", bps: 8 },
+      ],
+      realizedVol: 0.014,
+      recentLogReturns: [
+        -0.008, -0.012, 0.004, -0.006, 0.002, -0.01, 0.003, -0.005, 0.001, -0.004,
+      ],
+    });
+
+    const n = Math.min(seriesA.length, seriesB.length);
+    // 앵커 구간별 선형(piecewise chord) 대비 잔차 — 글로벌 chord면 반대 앵커만으로도 미러처럼 보임
+    const anchorOffs = [0, 1, 5, 22].filter((d) => d < n);
+    const segResid = (series: typeof seriesA) => {
+      const lns = series.slice(0, n).map((p) => Math.log(Math.max(p.price, 1e-9)));
+      const out = new Array(n).fill(0);
+      for (let s = 0; s < anchorOffs.length - 1; s++) {
+        const a1 = anchorOffs[s]!;
+        const a2 = anchorOffs[s + 1]!;
+        const span = a2 - a1;
+        for (let d = a1; d <= a2; d++) {
+          const t = span > 0 ? (d - a1) / span : 0;
+          const chord = (1 - t) * lns[a1]! + t * lns[a2]!;
+          out[d] = lns[d]! - chord;
+        }
+      }
+      return out as number[];
+    };
+    const rA = segResid(seriesA);
+    const rB = segResid(seriesB);
+    const peak = (xs: number[]) =>
+      Math.max(...xs.map((x) => Math.abs(x)), 1e-9);
+    const nA = rA.map((x) => x / peak(rA));
+    const nB = rB.map((x) => x / peak(rB));
+    const rms = (xs: number[]) =>
+      Math.sqrt(xs.reduce((s, x) => s + x * x, 0) / Math.max(1, xs.length));
+    const rmsDiff = rms(nA.map((x, i) => x - nB[i]!));
+    const rmsFlip = rms(nA.map((x, i) => x + nB[i]!));
+    const templateScore = Math.min(rmsDiff, rmsFlip);
+    assert.ok(
+      templateScore > 0.25,
+      `seg-resid templateScore=${templateScore.toFixed(3)} (diff=${rmsDiff.toFixed(3)} flip=${rmsFlip.toFixed(3)})`
+    );
+    const peakDay = (r: number[]) => {
+      let best = 2;
+      let bestAbs = 0;
+      for (let i = 2; i < r.length - 1; i++) {
+        if (anchorOffs.includes(i)) continue;
+        const a = Math.abs(r[i]!);
+        if (a > bestAbs) {
+          bestAbs = a;
+          best = i;
+        }
+      }
+      return best;
+    };
+    // 피크일이 같으면 Δ% 시계열 상관이라도 낮아야 함
+    const dA: number[] = [];
+    const dB: number[] = [];
+    for (let i = 1; i < n; i++) {
+      dA.push(seriesA[i]!.price / seriesA[i - 1]!.price - 1);
+      dB.push(seriesB[i]!.price / seriesB[i - 1]!.price - 1);
+    }
+    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+    const mA = mean(dA);
+    const mB = mean(dB);
+    let num = 0;
+    let denA = 0;
+    let denB = 0;
+    for (let i = 0; i < dA.length; i++) {
+      const a = dA[i]! - mA;
+      const b = dB[i]! - mB;
+      num += a * b;
+      denA += a * a;
+      denB += b * b;
+    }
+    const corr = num / Math.sqrt(Math.max(1e-18, denA * denB));
+    const samePeak = peakDay(rA) === peakDay(rB);
+    if (samePeak) {
+      assert.ok(
+        Math.abs(corr) < 0.82,
+        `peak 동일·corr=${corr.toFixed(3)} — 템플릿 복붙 의심`
+      );
+    }
+  });
+
   it("컨센 목표가가 2배여도 1개월 추정은 매크로 상한(±9%) 안", () => {
     // 회귀 방지 — 예전엔 applyConsensusBlend가 targetMean을 가격에 22% 직접
     // 혼합해 1개월 추정이 +20~29%로 부풀었다 (전 종목 우상향 편향의 주범).
@@ -359,5 +610,114 @@ describe("buildFairValueEstimate", () => {
       assert.ok(fv.open.price < fv.open.baseBlendedPrice);
       assert.ok(fv.macroFactors.some((f) => f.label.includes("VIX")));
     }
+  });
+
+  it("SKHY ADR +12% — 1일·내일 center > 현재가, day0→day1 상방 (주 앵커 왜곡 방지)", () => {
+    // 구버그: predictorBasePrice 가 1주 center 를 기준으로 써서
+    // 1일 center(+1.7%) < 1주(+3.5%) 이면 내일 추정이 하방으로 뒤집힘.
+    const PRICE = 2_180_000;
+    const day1 = Math.round(PRICE * 1.017);
+    const week = Math.round(PRICE * 1.035);
+    const month = Math.round(PRICE * 1.008);
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: PRICE,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: PRICE,
+        },
+        price: PRICE,
+        prevClose: PRICE,
+      })
+    );
+    snap.meta.code = "000660.KS";
+    snap.predictions!.ranges = [
+      {
+        horizonDays: 1,
+        horizonLabel: "1일",
+        low: Math.round(day1 * 0.97),
+        high: Math.round(day1 * 1.03),
+        center: day1,
+        confidence: 0.95,
+      },
+      {
+        horizonDays: 5,
+        horizonLabel: "1주",
+        low: Math.round(week * 0.94),
+        high: Math.round(week * 1.06),
+        center: week,
+        confidence: 0.95,
+      },
+      {
+        horizonDays: 22,
+        horizonLabel: "1개월",
+        low: Math.round(month * 0.9),
+        high: Math.round(month * 1.1),
+        center: month,
+        confidence: 0.95,
+      },
+    ];
+    snap.predictions!.targets = {
+      entry: PRICE,
+      stopLoss: PRICE * 0.95,
+      takeProfit1: PRICE * 1.05,
+      takeProfit2: PRICE * 1.08,
+      support: PRICE * 0.94,
+      resistance: PRICE * 1.1,
+      riskReward: 1.5,
+    };
+    snap.overseasNight = {
+      baseCode: "000660.KS",
+      proxyCode: "SKHY",
+      name: "SK하이닉스 ADR",
+      exchange: "NASDAQ",
+      sharesPerReceipt: 0.1,
+      proxyKind: "adr",
+      price: 168,
+      changeRate: 0.12,
+      currency: "USD",
+      fxToKrw: 1_380,
+      impliedKrwPrice: Math.round(168 * 1_380 * 10),
+      krxClose: PRICE,
+      premiumRate: (168 * 1_380 * 10) / PRICE - 1,
+      fetchedAt: Date.now(),
+    };
+
+    const horizons = buildMultiHorizonFairValue(snap);
+    const tomorrow = horizons.find((h) => h.id === "tomorrow")!.estimate;
+    assert.equal(tomorrow.ready, true);
+    if (!tomorrow.ready) return;
+
+    assert.ok(
+      tomorrow.close.price > PRICE,
+      `내일 종가 center ${tomorrow.close.price} ≤ 현재가 ${PRICE}`
+    );
+    assert.ok(
+      tomorrow.open.price > PRICE,
+      `내일 시가 ${tomorrow.open.price} ≤ 현재가 ${PRICE}`
+    );
+
+    const series = buildFairValueDailySeries({
+      code: snap.meta.code,
+      horizons,
+      ranges: snap.predictions!.ranges,
+      basePrice: PRICE,
+      now: new Date("2026-07-11T20:00:00+09:00"),
+      pathFactors: [
+        { id: "overnight", label: "ADR 야간 +2.0% 반영", bps: 200 },
+        { id: "listing-adr", label: "상장·ADR 호재", bps: 39 },
+      ],
+      realizedVol: 0.02,
+    });
+    const d0 = series.find((p) => p.sessionOffset === 0)!;
+    const d1 = series.find((p) => p.sessionOffset === 1)!;
+    assert.ok(
+      d1.price > d0.price,
+      `day0→day1 상방 필요: ${d0.price} → ${d1.price}`
+    );
   });
 });

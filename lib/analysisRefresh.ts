@@ -12,6 +12,7 @@ import {
   fetchEventsForSymbol,
   getMacroEventsCached,
 } from "./providers/eventCalendar";
+import { collectExtraAlphaFactors } from "./providers/extraAlpha";
 import {
   analyze,
   predict,
@@ -206,6 +207,10 @@ async function refreshOneSymbol(
     ...upcomingEvents,
     ...ctx.macroEvents,
   ];
+  const extraFactors = await collectExtraAlphaFactors({
+    code: meta.code,
+    relatedNews: [],
+  }).catch(() => []);
   const rawPredictions = predict({
     quote,
     history: hist,
@@ -229,6 +234,7 @@ async function refreshOneSymbol(
     externalRisk: emptyRisk,
     externalOpportunity: emptyOpp,
     consensusUpside: bundle.consensus?.upsidePercent ?? null,
+    extraFactors,
   });
   const predictions = applyThinHistoryPredictionGate(rawPredictions, dataQuality);
 

@@ -81,7 +81,10 @@ const FULL_SNAPSHOT_MIN_MS = envInt(
 );
 /** 클라이언트 fetch 하드 타임아웃 — 서버 hang 시 UI 무한 대기 방지 */
 const LITE_FETCH_TIMEOUT_MS = 25_000;
-const FULL_FETCH_TIMEOUT_MS = 60_000;
+/** 서버 full 상한(~22s)보다 약간 길게 — 응답 discard 레이스 방지와 맞춤 */
+const FULL_FETCH_TIMEOUT_MS = 28_000;
+/** lite 상태로 이 시간 넘기면 「분석 중」 강제 해제 (고착 방지) */
+const ANALYSIS_STUCK_GUARD_MS = 45_000;
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
 const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";
@@ -124,9 +127,10 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   return OFF_HOURS_REFRESH_MS;
 }
 
-/** lite 응답은 시세·지표만 갱신 — 분석·예측·뉴스는 full 스냅샷 유지.
+/** lite 응답은 시세·지표만 갱신 — 분석·예측·뉴스는 full/core 스냅샷 유지.
  *  prev 에 없던 신규 종목(방금 추가된 카드)은 lite 항목(시세 + "분석 중" placeholder)을
- *  그대로 append — 추가 직후 카드가 가격부터 즉시 채워지도록. */
+ *  그대로 append — 추가 직후 카드가 가격부터 즉시 채워지도록.
+ *  ※ phase 는 prev 유지 — lite 가 full/core 를 다시 "lite" 로 되돌리면 분석 중 고착. */
 function mergeLiteIntoSnapshot(
   prev: DashboardSnapshot,
   lite: DashboardSnapshot
@@ -134,9 +138,12 @@ function mergeLiteIntoSnapshot(
   const quoteByCode = new Map(lite.primaries.map((p) => [p.meta.code, p.quote]));
   const prevCodes = new Set(prev.primaries.map((p) => p.meta.code));
   const appended = lite.primaries.filter((p) => !prevCodes.has(p.meta.code));
+  const keepPhase =
+    prev.phase === "full" || prev.phase === "core" ? prev.phase : lite.phase;
   return {
     ...prev,
     generatedAt: lite.generatedAt,
+    phase: keepPhase,
     indicators: lite.indicators,
     marketMood: lite.marketMood,
     macroEvents: lite.macroEvents,
@@ -149,6 +156,41 @@ function mergeLiteIntoSnapshot(
       }),
       ...appended,
     ],
+  };
+}
+
+/** core(수급·컨센·RSI·규칙분석) 응답 — 예측·야간은 full 대기 시 기존 값 유지. */
+function mergeCoreIntoSnapshot(
+  prev: DashboardSnapshot,
+  core: DashboardSnapshot
+): DashboardSnapshot {
+  const byCode = new Map(core.primaries.map((p) => [p.meta.code, p]));
+  return {
+    ...prev,
+    generatedAt: core.generatedAt,
+    phase: "core",
+    indicators: core.indicators.length ? core.indicators : prev.indicators,
+    marketMood: core.marketMood ?? prev.marketMood,
+    macroEvents: core.macroEvents ?? prev.macroEvents,
+    kisActive: core.kisActive ?? prev.kisActive,
+    errors: { ...prev.errors, ...core.errors },
+    news: prev.news?.length ? prev.news : core.news ?? [],
+    primaries: (() => {
+      const merged = prev.primaries.map((p) => {
+        const c = byCode.get(p.meta.code);
+        if (!c) return p;
+        // core 는 예측·야간을 skip — 이미 full 에 있던 값은 유지
+        return {
+          ...c,
+          predictions: c.predictions ?? p.predictions,
+          overseasNight: c.overseasNight ?? p.overseasNight,
+        };
+      });
+      for (const c of core.primaries) {
+        if (!merged.some((p) => p.meta.code === c.meta.code)) merged.push(c);
+      }
+      return merged;
+    })(),
   };
 }
 
@@ -188,10 +230,16 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const liteAbortRef = useRef<AbortController | null>(null);
   const fullAbortRef = useRef<AbortController | null>(null);
   const fullRetryCountRef = useRef(0);
-  const lastQueryRef = useRef<string>("");
+  /** lite 와 full 의 requestKey 를 분리 — lite 폴링이 full 응답을 discard 하던 고착 원인 */
+  const lastLiteQueryRef = useRef<string>("");
+  const lastFullQueryRef = useRef<string>("");
+  /** 진행 중 core/full 의 requestKey — Strict Mode abort 후 재진입 판별용 */
+  const inflightAnalysisKeyRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootedRef = useRef(false);
-  const fullFetchStartedRef = useRef(false);
+  const analysisStartedAtRef = useRef<number>(
+    initial.phase === "lite" ? Date.now() : 0
+  );
   const watchCodesRef = useRef(watchCodes);
   const pendingCodesRef = useRef<ReadonlySet<string>>(pendingCodes);
   const overseasNightRef = useRef(useOverseasNight);
@@ -201,7 +249,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     initial.primaries[0] ?? null
   );
   const lastFullFetchAtRef = useRef<number>(
-    initial.phase === "full" ? Date.now() : 0
+    initial.phase === "full" || initial.phase === "core" ? Date.now() : 0
   );
   // 모바일 sheet "예측" 탭 점프 등 외부 제어용 ref. 데스크탑/모바일 양쪽 동일 사용.
   const detailRef = useRef<StockDetailPanelHandle>(null);
@@ -218,16 +266,40 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const analysisPending = snap.phase === "lite" && !analysisGaveUp;
   const isMobile = useIsMobile();
 
+  const giveUpAnalysis = useCallback((msg?: string) => {
+    setAnalysisGaveUp(true);
+    setPendingCodes(new Set());
+    setShowNews(true);
+    inflightAnalysisKeyRef.current = null;
+    if (msg) setError(msg);
+  }, []);
+
+  /** 실패·타임아웃 재시도 (횟수 제한) */
   const scheduleFullRetry = useCallback(() => {
-    fullFetchStartedRef.current = false;
+    inflightAnalysisKeyRef.current = null;
     if (fullRetryCountRef.current >= 2) {
-      setAnalysisGaveUp(true);
-      setPendingCodes(new Set());
-      setShowNews(true);
+      giveUpAnalysis(
+        "분석을 불러오지 못했어요. 시세는 유지됩니다. 아래 버튼으로 다시 시도할 수 있어요."
+      );
       return;
     }
     fullRetryCountRef.current += 1;
-    window.setTimeout(() => setFullRetryNonce((n) => n + 1), 2_500);
+    window.setTimeout(() => setFullRetryNonce((n) => n + 1), 2_000);
+  }, [giveUpAnalysis]);
+
+  /** Strict Mode cleanup / 키 교체로 abort 된 경우 — 실패로 세지 않고 Phase B 재진입 */
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const reenterAnalysisFetch = useCallback(() => {
+    inflightAnalysisKeyRef.current = null;
+    window.setTimeout(() => {
+      if (mountedRef.current) setFullRetryNonce((n) => n + 1);
+    }, 0);
   }, []);
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
@@ -240,8 +312,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       nightMode?: boolean,
       force = false,
       silent = false,
-      // "lite": 시세만 빠르게 / "full": 분석 포함 전체 / 생략(auto): 시간 기준 자동
-      mode?: "lite" | "full"
+      // "lite": 시세만 / "core": 예측·RSI·수급 우선 / "full": 뉴스·공시 포함 / 생략(auto)
+      mode?: "lite" | "core" | "full"
     ) => {
       const target = codes ?? watchCodesRef.current;
       const query = encodeURIComponent(target.join(","));
@@ -251,12 +323,29 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         force ||
         lastFullFetchAtRef.current === 0 ||
         now - lastFullFetchAtRef.current >= FULL_SNAPSHOT_MIN_MS;
-      const useLite =
-        mode === "lite" ? true : mode === "full" ? false : !force && !needsFull;
-      const requestKey = `${query}:${includeNight ? "night" : "regular"}:${
-        force ? "force" : useLite ? "lite" : "full"
-      }`;
-      lastQueryRef.current = requestKey;
+      let useLite = false;
+      let useCore = false;
+      if (mode === "lite") useLite = true;
+      else if (mode === "core") useCore = true;
+      else if (mode === "full") {
+        /* full */
+      } else {
+        // auto: force/주기면 full, 아니면 lite
+        useLite = !force && !needsFull;
+      }
+      const phaseTag = force
+        ? "force"
+        : useLite
+          ? "lite"
+          : useCore
+            ? "core"
+            : "full";
+      const requestKey = `${query}:${includeNight ? "night" : "regular"}:${phaseTag}`;
+      if (useLite) lastLiteQueryRef.current = requestKey;
+      else {
+        lastFullQueryRef.current = requestKey;
+        inflightAnalysisKeyRef.current = requestKey;
+      }
 
       // lite는 full을 끊지 않음 — 분석 중에도 시세 폴링 가능
       if (useLite) {
@@ -275,52 +364,70 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       }, timeoutMs);
 
       if (!silent) setRefreshing(true);
-      setError(null);
+      if (!useLite) setError(null);
       try {
         const r = await fetch(
           `/api/snapshot?symbols=${query}${includeNight ? "&night=1" : ""}${
-            useLite ? "&lite=1" : ""
+            useLite ? "&lite=1" : useCore ? "&core=1" : ""
           }${force ? "&refresh=1" : ""}`,
           {
-            cache: force ? "no-store" : "default",
+            // core/full 은 브라우저 HTTP 캐시 금지 — stale·discard 고착 방지
+            cache: useLite && !force ? "default" : "no-store",
             signal: ctrl.signal,
           }
         );
         if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
         const j = (await r.json()) as DashboardSnapshot;
-        if (lastQueryRef.current === requestKey) {
-          if (useLite) {
-            setSnap((prev) => mergeLiteIntoSnapshot(prev, j));
+        // lite / full 키를 분리 — lite 폴링이 full 응답을 버려 「분석 중」 고착시키던 버그 수정
+        const keyStillCurrent = useLite
+          ? lastLiteQueryRef.current === requestKey
+          : lastFullQueryRef.current === requestKey;
+        if (!keyStillCurrent) {
+          if (
+            !useLite &&
+            inflightAnalysisKeyRef.current === requestKey
+          ) {
+            // 응답 전에 키가 바뀌었는데 이 요청이 마지막 inflight 면 재진입
+            reenterAnalysisFetch();
+          }
+          return;
+        }
+        if (useLite) {
+          setSnap((prev) => mergeLiteIntoSnapshot(prev, j));
+        } else {
+          lastFullFetchAtRef.current = Date.now();
+          fullRetryCountRef.current = 0;
+          setAnalysisGaveUp(false);
+          if (inflightAnalysisKeyRef.current === requestKey) {
+            inflightAnalysisKeyRef.current = null;
+          }
+          if (useCore || j.phase === "core") {
+            setSnap((prev) => mergeCoreIntoSnapshot(prev, j));
           } else {
-            lastFullFetchAtRef.current = Date.now();
-            fullRetryCountRef.current = 0;
-            setAnalysisGaveUp(false);
             setSnap(j);
-            // full 분석 도착 — 방금 추가된 종목의 "분석 중" 상태 해제.
-            const arrived = new Set(j.primaries.map((p) => p.meta.code));
-            // 요청했는데 응답에 빠진 신규 종목 → 롤백 + 한국어 안내.
-            const failed = target.filter(
-              (c) => pendingCodesRef.current.has(c) && !arrived.has(c)
+          }
+          const arrived = new Set(j.primaries.map((p) => p.meta.code));
+          const failed = target.filter(
+            (c) => pendingCodesRef.current.has(c) && !arrived.has(c)
+          );
+          if (pendingCodesRef.current.size > 0) {
+            setPendingCodes((prev) => {
+              const next = new Set(
+                [...prev].filter((c) => !arrived.has(c) && !failed.includes(c))
+              );
+              return next.size === prev.size ? prev : next;
+            });
+          }
+          if (failed.length > 0 && failed.length < target.length) {
+            const names = failed
+              .map((c) => CANDIDATE_BY_CODE.get(c)?.name ?? c)
+              .join(", ");
+            setWatchCodes((prev) =>
+              normalizeWatchCodes(prev.filter((c) => !failed.includes(c)))
             );
-            if (pendingCodesRef.current.size > 0) {
-              setPendingCodes((prev) => {
-                const next = new Set(
-                  [...prev].filter((c) => !arrived.has(c) && !failed.includes(c))
-                );
-                return next.size === prev.size ? prev : next;
-              });
-            }
-            if (failed.length > 0 && failed.length < target.length) {
-              const names = failed
-                .map((c) => CANDIDATE_BY_CODE.get(c)?.name ?? c)
-                .join(", ");
-              setWatchCodes((prev) =>
-                normalizeWatchCodes(prev.filter((c) => !failed.includes(c)))
-              );
-              setError(
-                `${names} 종목 데이터를 불러오지 못해 관심 종목에서 제외했어요. 잠시 후 다시 추가해주세요.`
-              );
-            }
+            setError(
+              `${names} 종목 데이터를 불러오지 못해 관심 종목에서 제외했어요. 잠시 후 다시 추가해주세요.`
+            );
           }
         }
       } catch (e) {
@@ -329,13 +436,19 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             setError(
               useLite
                 ? `시세 요청이 ${Math.round(timeoutMs / 1000)}초를 넘겨 중단됐어요. 새로고침 해 주세요.`
-                : `분석·뉴스 요청이 ${Math.round(timeoutMs / 1000)}초를 넘겨 중단됐어요. 시세는 유지되며, 잠시 후 자동으로 다시 시도합니다.`
+                : `분석 요청이 ${Math.round(timeoutMs / 1000)}초를 넘겨 중단됐어요. 시세는 유지되며, 잠시 후 다시 시도합니다.`
             );
             if (!useLite) scheduleFullRetry();
             setShowNews(true);
           } else if (!useLite) {
-            // 다른 full 요청에 의해 중단 — Phase B 재진입 허용
-            fullFetchStartedRef.current = false;
+            // Strict Mode cleanup · 다른 core/full 교체 abort
+            // 교체 요청이 이미 inflight 면 재진입 스킵, 아니면 Phase B 재진입
+            if (
+              inflightAnalysisKeyRef.current === requestKey ||
+              inflightAnalysisKeyRef.current === null
+            ) {
+              reenterAnalysisFetch();
+            }
           }
           return;
         }
@@ -352,23 +465,69 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         }
       }
     },
-    [scheduleFullRetry]
+    [scheduleFullRetry, reenterAnalysisFetch]
   );
 
-  // Phase B — lite 도착 직후 full snapshot 백그라운드 fetch (UI 블로킹 없음).
+  // Phase B — lite → core(수급·컨센·RSI·규칙분석) → full(ChronoPulse 예측·뉴스·공시).
+  // lite 폴링과 abort 슬롯 분리. core 는 예측을 기다리지 않음.
+  // ※ fullFetchStartedRef 게이트 제거: React Strict Mode 가 mount effect 를
+  //   setup→cleanup(abort)→setup 하면 첫 abort 후 플래그만 true 로 남아
+  //   두 번째 setup 이 early-return → core 응답 discard → 「분석 중」 영구 고착.
+  //   대신 inflight 키 + abort 시 reenterAnalysisFetch 로 복구.
   useEffect(() => {
-    if (snap.phase !== "lite") {
+    if (analysisGaveUp) return;
+
+    // 이미 full 이고 신규 pending 없으면 완료
+    if (snap.phase === "full" && pendingCodes.size === 0) {
       fullRetryCountRef.current = 0;
-      setAnalysisGaveUp(false);
       return;
     }
-    if (analysisGaveUp) return;
-    if (fullFetchStartedRef.current) return;
-    fullFetchStartedRef.current = true;
-    void refresh(undefined, undefined, false, true, "full");
-  }, [snap.phase, refresh, fullRetryNonce, analysisGaveUp]);
 
-  // full snapshot 도착 후 뉴스 패널 defer — 카드·시세 우선, 글로벌 뉴스는 idle/2s 후.
+    // 동일 단계 요청이 이미 진행 중이면 중복 호출 방지
+    const wantMode: "core" | "full" =
+      snap.phase === "core" && pendingCodes.size === 0 ? "full" : "core";
+    const night = overseasNightRef.current ? "night" : "regular";
+    const q = encodeURIComponent(watchCodesRef.current.join(","));
+    const expectKey = `${q}:${night}:${wantMode}`;
+    if (inflightAnalysisKeyRef.current === expectKey) return;
+
+    if (snap.phase === "full" && pendingCodes.size > 0) {
+      void refresh(undefined, undefined, false, true, "core");
+      return;
+    }
+    if (snap.phase === "lite") {
+      if (!analysisStartedAtRef.current) analysisStartedAtRef.current = Date.now();
+      void refresh(undefined, undefined, false, true, "core");
+    } else if (snap.phase === "core") {
+      void refresh(undefined, undefined, false, true, "full");
+    }
+  }, [snap.phase, refresh, fullRetryNonce, analysisGaveUp, pendingCodes]);
+
+  // 고착 가드 — lite 에 너무 오래 머물면 「분석 중」 강제 해제
+  useEffect(() => {
+    if (snap.phase !== "lite" || analysisGaveUp) return;
+    const started = analysisStartedAtRef.current || Date.now();
+    analysisStartedAtRef.current = started;
+    const left = ANALYSIS_STUCK_GUARD_MS - (Date.now() - started);
+    const t = window.setTimeout(
+      () => {
+        if (fullAbortRef.current) {
+          try {
+            fullAbortRef.current.abort();
+          } catch {
+            /* ignore */
+          }
+        }
+        giveUpAnalysis(
+          "분석이 오래 걸려 중단했어요. 시세는 유지됩니다. 다시 시도해 주세요."
+        );
+      },
+      Math.max(1_000, left)
+    );
+    return () => clearTimeout(t);
+  }, [snap.phase, analysisGaveUp, giveUpAnalysis, fullRetryNonce]);
+
+  // full/core 도착 후 뉴스 패널 defer — 카드·시세 우선, 글로벌 뉴스는 idle/2s 후.
   useEffect(() => {
     if (analysisPending) {
       setShowNews(false);
@@ -426,11 +585,13 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       setWatchLoading(true);
       setPendingCodes((prev) => new Set([...prev, ...added]));
       debounceRef.current = setTimeout(async () => {
-        // 1) lite — 시세만 빠르게 받아 새 카드부터 채움 (silent: 전역 spinner 없음)
+        // lite — 시세만. 분석은 Phase B(core→full)가 이어받음 (여기서 full 치면 abort 레이스).
+        analysisStartedAtRef.current = Date.now();
+        setAnalysisGaveUp(false);
+        inflightAnalysisKeyRef.current = null;
+        fullRetryCountRef.current = 0;
         await refresh(normalized, undefined, false, true, "lite");
         setWatchLoading(false);
-        // 2) full — 분석·예측·컨센서스를 백그라운드로 채움
-        void refresh(normalized, undefined, false, true, "full");
       }, COMMIT_DEBOUNCE_MS);
     },
     [refresh]
@@ -805,7 +966,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             해외 야간 {useOverseasNight ? "ON" : "OFF"}
           </button>
           <HelpTooltip
-            content="미국·유럽 야간·프리마켓 GDR·ADR 프록시 시세를 반영해 국내 종목 예측에 가중합니다. 삼성전자·SK하이닉스 등 GDR 연동 종목에 유효해요."
+            content="미국·유럽 야간·프리마켓 ADR·GDR 프록시 시세를 반영해 국내 종목 단기 예측에 가중합니다. SK하이닉스는 SKHY ADR 우선(폴백 HY9H.F), 삼성전자는 SMSN.IL GDR이에요."
             label="해외 야간 안내"
             side="bottom"
           />
@@ -972,8 +1133,42 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       />
 
       {error && (
-        <div className="rounded-xl border border-down/30 bg-down/10 text-down text-sm px-4 py-3">
-          {error}
+        <div className="rounded-xl border border-down/30 bg-down/10 text-down text-sm px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+          <span>{error}</span>
+          {analysisGaveUp && (
+            <button
+              type="button"
+              className="shrink-0 text-xs px-3 py-1.5 rounded-lg border border-down/40 bg-card text-foreground hover:bg-muted transition-colors"
+              onClick={() => {
+                analysisStartedAtRef.current = Date.now();
+                setAnalysisGaveUp(false);
+                setError(null);
+                fullRetryCountRef.current = 0;
+                inflightAnalysisKeyRef.current = null;
+                setFullRetryNonce((n) => n + 1);
+              }}
+            >
+              분석 다시 시도
+            </button>
+          )}
+        </div>
+      )}
+      {!error && analysisGaveUp && snap.phase === "lite" && (
+        <div className="rounded-xl border border-border bg-muted/30 text-muted-foreground text-sm px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+          <span>예측·수급 분석을 불러오지 못했어요. 시세는 유지됩니다.</span>
+          <button
+            type="button"
+            className="shrink-0 text-xs px-3 py-1.5 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors"
+            onClick={() => {
+              analysisStartedAtRef.current = Date.now();
+              setAnalysisGaveUp(false);
+              fullRetryCountRef.current = 0;
+              inflightAnalysisKeyRef.current = null;
+              setFullRetryNonce((n) => n + 1);
+            }}
+          >
+            분석 다시 시도
+          </button>
         </div>
       )}
 

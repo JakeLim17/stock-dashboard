@@ -82,7 +82,14 @@ export function applyThinHistoryAnalysisGate(
   };
 }
 
-/** 변동성 참고 구간 — 얇은 히스토리면 ranges/targets 제거. */
+/**
+ * 얇은 히스토리 예측 게이트.
+ * - 예전: ranges 전부 제거 → 상장 직후(0~수 일) 예측이 영구히 안 보임
+ * - 지금: 단기(≤5거래일) 밴드는 유지, 장기·목표가·시나리오만 보수 처리
+ *   (현재가 + 단기 예측은 상장 직후에도 가능해야 함)
+ */
+export const THIN_HISTORY_KEEP_HORIZON_DAYS = 5;
+
 export function applyThinHistoryPredictionGate(
   predictions: Predictions | null,
   dq: DataQualityInfo
@@ -90,10 +97,13 @@ export function applyThinHistoryPredictionGate(
   if (!predictions || !dq.thinHistory) return predictions;
   return {
     ...predictions,
-    ranges: [],
+    ranges: (predictions.ranges ?? []).filter(
+      (r) => r.horizonDays <= THIN_HISTORY_KEEP_HORIZON_DAYS
+    ),
     targets: null,
     scenarios: [],
-    intradayRange: null,
+    // 일중 밴드는 시세만으로도 가능 — 유지
+    intradayRange: predictions.intradayRange,
   };
 }
 

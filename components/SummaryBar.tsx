@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/types";
 import { Badge } from "./ui/Badge";
+import { AnimatedMeter } from "./ui/AnimatedMeter";
+import { useSurgeFlash } from "@/hooks/useSurgeFlash";
 import { changeColor, fmtNumber, fmtPercent, marketDisplayLabel } from "@/lib/utils";
 import { Activity, AlertTriangle, Newspaper } from "lucide-react";
 
@@ -105,18 +107,7 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
           // 값이 있을 때는 0(급랭)·50(중립)·100(과열) 의미를 한눈에 알 수 있도록 톤 라벨 동반.
           // (사용자가 "0/100" 을 "데이터 없음" 으로 오해하는 사례 방지.)
           mood.semiHeat != null ? (
-            <span
-              className="tabular text-base font-semibold inline-flex items-baseline gap-1"
-              title="SOX·NVDA 평균 등락률을 0~100으로 환산. 50=중립, 0=급랭, 100=과열."
-            >
-              <span className={semiHeatTone(mood.semiHeat).color}>
-                {mood.semiHeat}
-              </span>
-              <span className="text-xs text-muted-foreground">/100</span>
-              <span className={`text-[10px] ml-1 ${semiHeatTone(mood.semiHeat).color}`}>
-                {semiHeatTone(mood.semiHeat).label}
-              </span>
-            </span>
+            <SemiHeatMeter value={mood.semiHeat} />
           ) : (
             <span
               className="tabular text-base font-semibold text-muted-foreground"
@@ -188,12 +179,41 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 
 // 반도체 과열도 점수를 짧은 톤 라벨 + 색으로 환산.
 // 0/100 같은 극단값이 "데이터 없음" 이 아니라 실제 시장 상태임을 시각적으로 보강.
-function semiHeatTone(v: number): { label: string; color: string } {
-  if (v <= 20) return { label: "급랭", color: "text-down" };
-  if (v <= 40) return { label: "약세", color: "text-muted-foreground" };
-  if (v <= 60) return { label: "중립", color: "text-foreground" };
-  if (v <= 80) return { label: "강세", color: "text-up" };
-  return { label: "과열", color: "text-warn" };
+function semiHeatTone(v: number): { label: string; color: string; fill: string } {
+  if (v <= 20) return { label: "급랭", color: "text-down", fill: "bg-down" };
+  if (v <= 40) return { label: "약세", color: "text-muted-foreground", fill: "bg-muted-foreground" };
+  if (v <= 60) return { label: "중립", color: "text-foreground", fill: "bg-foreground/50" };
+  if (v <= 80) return { label: "강세", color: "text-up", fill: "bg-up" };
+  return { label: "과열", color: "text-warn", fill: "bg-warn" };
+}
+
+/** 과열도 숫자 + 미니 게이지. 과열(≥75)·급랭(≤25) 일 때 짧은 surge. */
+function SemiHeatMeter({ value }: { value: number }) {
+  const tone = semiHeatTone(value);
+  // 과열·급랭을 ±등락률처럼 매핑해 pulse (75→+3%급, 25→-3%급)
+  const fakeRate =
+    value >= 75 ? 0.04 : value <= 25 ? -0.04 : value >= 65 ? 0.031 : null;
+  const surge = useSurgeFlash(fakeRate, { priceTick: value });
+
+  return (
+    <div
+      className="min-w-[7.5rem]"
+      title="SOX·NVDA 평균 등락률을 0~100으로 환산. 50=중립, 0=급랭, 100=과열."
+    >
+      <span className="tabular text-base font-semibold inline-flex items-baseline gap-1">
+        <span className={tone.color}>{value}</span>
+        <span className="text-xs text-muted-foreground">/100</span>
+        <span className={`text-[10px] ml-1 ${tone.color}`}>{tone.label}</span>
+      </span>
+      <AnimatedMeter
+        value={value}
+        fillClass={tone.fill}
+        heightClass="h-1"
+        surge={surge}
+        className="mt-1"
+      />
+    </div>
+  );
 }
 
 function MoodBadge({ mood }: { mood: "강세" | "중립" | "약세" }) {

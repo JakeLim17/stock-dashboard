@@ -27,7 +27,11 @@ import {
   buildMultiHorizonFairValue,
   buildPredictionCompactLine,
 } from "@/lib/prediction-display";
-import { formatChronoPulseBps } from "@/lib/analyzer/chronoPulse";
+import { formatFactorChip } from "@/lib/analyzer/chronoPulse";
+import {
+  estimateOvernightOpenBand,
+  inferOvernightKind,
+} from "@/lib/analyzer/overnightPassThrough";
 import { FAIR_VALUE_BACKTEST_META } from "@/lib/fair-value";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
@@ -124,6 +128,23 @@ export function StockCard({
       <Minus className="h-4 w-4" />
     );
 
+  // 예측만 별도 대기 — 수급·컨센·RSI 는 데이터 있으면 phase 와 무관하게 표시
+  const hasCoreIndicators =
+    snap.tech.rsi14 != null ||
+    snap.flow.foreignNet != null ||
+    snap.flow.institutionNet != null ||
+    !!snap.consensus ||
+    !!snap.consensusValuation ||
+    (snap.analysis.verdict.label !== "분석 중" &&
+      !(snap.analysis.headline ?? "").includes("분석 중"));
+  const predictionPending = snap.predictions == null;
+  const corePending = analysisPending && !hasCoreIndicators;
+  const analysisStub =
+    corePending ||
+    (!hasCoreIndicators &&
+      (snap.analysis.verdict.label === "분석 중" ||
+        (snap.analysis.headline ?? "").includes("분석 중")));
+
   return (
     <Card
       role="button"
@@ -177,7 +198,11 @@ export function StockCard({
             <div
               className={`text-xl font-bold tabular leading-none shrink-0 ${changeColor(liveChangeRate)}`}
             >
-              <PriceTicker value={livePrice} decimals={decimals} />
+              <PriceTicker
+                value={livePrice}
+                decimals={decimals}
+                changeRate={liveChangeRate}
+              />
             </div>
             <CardSparkline
               code={meta.code}
@@ -198,7 +223,9 @@ export function StockCard({
           )}
           <div className="flex items-start justify-between gap-2 mt-1 flex-wrap">
             <div
-              className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(liveChangeRate)}`}
+              className={`tabular text-sm inline-flex items-center gap-1 ${changeColor(liveChangeRate)} ${
+                Math.abs(liveChangeRate) >= 0.03 ? "scale-pop" : ""
+              }`}
             >
               {trendIcon}
               {fmtSigned(liveChangeAbs)} ({fmtPercent(liveChangeRate)})
@@ -247,6 +274,7 @@ export function StockCard({
             snap={snap}
             horizons={fairValueHorizons}
             currency={currency}
+            analysisPending={predictionPending}
           />
         </div>
 
@@ -258,7 +286,7 @@ export function StockCard({
             variant="card"
             kisActive={kisActive}
             tradeOverride={tradeOverride}
-            analysisPending={analysisPending}
+            analysisPending={corePending}
           />
         </div>
 
@@ -268,20 +296,20 @@ export function StockCard({
           krwRate={krwRate}
           kisActive={kisActive}
           isMobile={isMobile}
-          analysisPending={analysisPending}
+          analysisPending={corePending}
           onOpenDetailSheet={onOpenDetailSheet}
         />
 
         {/* 분석 요약 — 모바일은 한 줄, 데스크탑은 전체 */}
         <AnalysisSection
           snap={snap}
-          analysisPending={analysisPending}
+          analysisPending={analysisStub}
           isMobile={isMobile}
           compactPredLine={compactPredLine}
         />
 
         {/* 데스크탑만 — 카드에 예측 블록 전체 */}
-        {!isMobile && !analysisPending && (
+        {!isMobile && !predictionPending && (
           <div onClick={(e) => e.stopPropagation()}>
             <PredictionBlock snap={snap} krwRate={krwRate} />
           </div>
@@ -334,11 +362,16 @@ function CardFlowConsensusExpand({
       </button>
       {open && (
         <div className="mt-2 space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
-          {isMobile && !analysisPending && (
+          {isMobile && snap.predictions && (
             <PredictionBlock snap={snap} krwRate={krwRate} />
           )}
           {hasConsensus ? (
             <ConsensusPanel snap={snap} embedded />
+          ) : analysisPending ? (
+            <p className="text-[11px] text-muted-foreground px-1 inline-flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              컨센서스 불러오는 중…
+            </p>
           ) : (
             <p className="text-[11px] text-muted-foreground px-1">
               컨센서스 데이터를 불러오지 못했습니다.
@@ -349,7 +382,11 @@ function CardFlowConsensusExpand({
             krwRate={krwRate}
             variant="detail"
             kisActive={kisActive}
-            analysisPending={analysisPending}
+            analysisPending={
+              analysisPending &&
+              snap.tech.rsi14 == null &&
+              snap.flow.foreignNet == null
+            }
           />
           {isMobile && onOpenDetailSheet && (
             <button
@@ -372,10 +409,12 @@ function FairValueSection({
   snap,
   horizons,
   currency,
+  analysisPending = false,
 }: {
   snap: StockSnapshot;
   horizons: ReturnType<typeof buildMultiHorizonFairValue>;
   currency: "KRW" | "USD";
+  analysisPending?: boolean;
 }) {
   const readyList = horizons.filter((h) => h.estimate.ready);
   const primary =
@@ -398,80 +437,114 @@ function FairValueSection({
       .filter((f) => Math.abs(f.bps) >= 1)
       .slice(0, 4) ?? [];
 
+  const night = snap.overseasNight;
+  const openBand =
+    night != null &&
+    Number.isFinite(night.changeRate) &&
+    Math.abs(night.changeRate) >= 0.003
+      ? estimateOvernightOpenBand(
+          night.changeRate,
+          night.proxyKind ??
+            inferOvernightKind({
+              proxyCode: night.proxyCode,
+              name: night.name,
+              exchange: night.exchange,
+            }),
+          { sessionLabel: "월요 시초" }
+        )
+      : null;
+
+  // lite stub: full 분석 전 predictions 없으면 가짜 앵커 곡선 숨기고 로딩만
+  const showChart =
+    !analysisPending &&
+    snap.predictions != null &&
+    readyList.length > 0;
+
   return (
-    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2">
+    <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2 overflow-visible">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 min-w-0">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-            {chronoPulse ? (
-              <>
-                <span className="text-accent font-medium">{chronoPulse.name}</span>
-                <span className="mx-1 opacity-50">·</span>
-                {chronoPulse.subtitle}
-              </>
-            ) : (
-              "가격 추정 그래프 · ~1개월"
-            )}
+            예측 그래프 · ~1개월
           </div>
             <HelpTooltip
-              content="베이스는 통계(모멘텀·평균회귀·√t 밴드), ChronoPulse는 수급·뉴스·미장 가산 알파입니다. 점선은 합산 경로, 음영은 변동 밴드예요."
+              content="점선은 통계(모멘텀·평균회귀)와 수급·뉴스 등 요인을 합친 예측 경로, 음영은 변동 참고 밴드예요. 멀수록 불확실 · 밴드를 함께 보세요."
               label="예측 그래프 안내"
               side="bottom"
             />
         </div>
-        {primary?.ready && (
+        {primary?.ready && showChart && (
           <span className="text-[10px] text-muted-foreground tabular">
             {primary.settlementLabel} 기준
           </span>
         )}
+        {analysisPending && (
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            분석 중
+          </span>
+        )}
       </div>
 
-      <FairValueMiniChart
-        code={snap.meta.code}
-        currency={currency}
-        currentPrice={snap.quote.price}
-        horizons={horizons}
-        ranges={snap.predictions?.ranges ?? null}
-      />
-
-      {/* 일부 시계가 아직 확정 전이면 사유를 한 줄로 안내 */}
-      {readyList.length === 0 && pending && !pending.ready && (
-        <div className="text-[11px] text-muted-foreground text-center py-1">
-          {pending.pendingReason}
+      {openBand && showChart && (
+        <div
+          className={`text-[10px] tabular ${
+            openBand.midPct >= 0 ? "text-rise" : "text-fall"
+          }`}
+          title="야간 ADR/GDR 전달률×할인 밴드 · 시초 확정가 아님"
+        >
+          {openBand.label}
         </div>
       )}
-      {readyList.length > 0 && readyList.length < horizons.length && pending && !pending.ready && (
+
+      {showChart ? (
+        <FairValueMiniChart
+          code={snap.meta.code}
+          currency={currency}
+          currentPrice={snap.quote.price}
+          horizons={horizons}
+          ranges={snap.predictions?.ranges ?? null}
+          pathFactors={chronoPulse?.factors ?? null}
+          height={108}
+        />
+      ) : (
+        <div
+          className="relative overflow-hidden rounded-md bg-muted/25"
+          style={{ height: 108 }}
+          role="status"
+          aria-label="예측 그래프 분석 중"
+        >
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+            <span>가격·수급 분석 후 예측 곡선을 그립니다</span>
+          </div>
+        </div>
+      )}
+
+      {showChart &&
+        readyList.length > 0 &&
+        readyList.length < horizons.length &&
+        pending &&
+        !pending.ready && (
         <div className="text-[10px] text-muted-foreground/70">
           일부 시계 대기: {pending.pendingReason}
         </div>
       )}
 
-      {(topChronoFactors.length > 0 ||
-        (chronoPulse?.baseDaily != null &&
-          Math.abs(chronoPulse.baseDaily) >= 0.0001) ||
-        topMacro.length > 0 ||
-        snap.predictions?.newsVolatility) && (
+      {showChart &&
+        (topChronoFactors.length > 0 ||
+          topMacro.length > 0 ||
+          snap.predictions?.newsVolatility) && (
         <div className="flex flex-wrap gap-1 pt-0.5">
-          {chronoPulse?.baseDaily != null &&
-            Math.abs(chronoPulse.baseDaily) >= 0.0001 && (
-              <span
-                className="text-[9px] px-1.5 py-0.5 rounded tabular bg-muted text-muted-foreground"
-                title="통계 베이스(모멘텀·평균회귀)"
-              >
-                통계 베이스{" "}
-                {chronoPulse.baseDaily >= 0 ? "+" : ""}
-                {(chronoPulse.baseDaily * 100).toFixed(2)}%
-              </span>
-            )}
           {topChronoFactors.map((f) => (
             <span
               key={`cp-${f.id}-${f.label}`}
               className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
                 f.bps >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall"
               }`}
-              title={`ChronoPulse 알파 · ${f.label}`}
+              title={`요인 · ${f.label}`}
             >
-              {f.label} {formatChronoPulseBps(f.bps)}
+              {formatFactorChip(f)}
             </span>
           ))}
           {topMacro.map((f) => (
@@ -500,7 +573,7 @@ function FairValueSection({
           )}
         </div>
       )}
-      {readyList.some((h) => h.id === "tomorrow") && (
+      {showChart && readyList.some((h) => h.id === "tomorrow") && (
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
           <span>
             앱장 기준 백테스트 오차(참고·삼성전자) 시가{" "}

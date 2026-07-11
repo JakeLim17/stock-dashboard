@@ -34,7 +34,7 @@ export function DataQualityBadge({
       key: "thin",
       label: `데이터 축적 중 (${dq.historyDays}일)`,
       variant: "warn",
-      title: `거래 이력 ${dq.historyDays}일 — 30일 미만이면 변동 구간·단기 신호를 보수 처리합니다`,
+      title: `거래 이력 ${dq.historyDays}일 — 30일 미만이면 단기 예측만 표시하고 신호는 보수 처리합니다`,
     });
   }
 
@@ -57,7 +57,7 @@ export function predictionQualityHint(input: {
   modelConfidenceLabel?: "high" | "medium" | "low" | null;
 }): string | null {
   if (input.dq?.thinHistory) {
-    return `거래 이력 ${input.dq.historyDays}일 — 변동 참고 구간·단기 신호는 데이터 부족으로 제한됩니다.`;
+    return `거래 이력 ${input.dq.historyDays}일 — 단기 예측만 표시하고 장기·신호는 보수 처리합니다.`;
   }
   if (input.modelConfidenceLabel === "low") {
     return "모델 신뢰도 낮음 — 변동 구간은 통계 참고용이며 방향 예측이 아닙니다.";

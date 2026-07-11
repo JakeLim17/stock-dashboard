@@ -124,6 +124,46 @@ html, body {
   will-change: transform;
 }
 
+/* 급등·급락 시 미터 트랙 짧은 glow — AnimatedMeter / 범위 마커용 */
+@keyframes meter-glow-up {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    filter: brightness(1);
+  }
+  45% {
+    box-shadow: 0 0 10px 1px rgba(239, 68, 68, 0.4);
+    filter: brightness(1.12);
+  }
+}
+@keyframes meter-glow-down {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+    filter: brightness(1);
+  }
+  45% {
+    box-shadow: 0 0 10px 1px rgba(96, 165, 250, 0.4);
+    filter: brightness(1.1);
+  }
+}
+.meter-surge-up {
+  animation: meter-glow-up 0.7s ease-out;
+}
+.meter-surge-down {
+  animation: meter-glow-down 0.7s ease-out;
+}
+
+/* 가격·예측가 큰 변동 시 살짝 스케일 팝 */
+@keyframes scale-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.scale-pop {
+  animation: scale-pop 0.45s cubic-bezier(0.34, 1.4, 0.64, 1);
+  display: inline-block;
+  transform-origin: left center;
+}
+
 /* 모션 줄이기 사용자 환경에선 모든 가격 애니메이션을 끔 */
 @media (prefers-reduced-motion: reduce) {
   .flash-up,
@@ -131,7 +171,10 @@ html, body {
   .pulse-up,
   .pulse-down,
   .shake-soft,
-  .shake-warn {
+  .shake-warn,
+  .meter-surge-up,
+  .meter-surge-down,
+  .scale-pop {
     animation: none !important;
   }
 }

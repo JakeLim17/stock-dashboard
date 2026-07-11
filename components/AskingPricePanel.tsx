@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import type { RealtimeAspEntry } from "@/hooks/useRealtime";
 import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
+import { useSpringValue } from "@/hooks/useSpringValue";
 
 // 선택 종목 1개의 호가 + 체결 폴링 패널.
 // KIS 미활성 또는 한국 종목 아니면 빈 메시지.
@@ -296,6 +297,7 @@ function AskingTable({ asking }: { asking: AskingPriceData }) {
   const totalLevelQty = asking.totalAskQty + asking.totalBidQty;
   const bidShare =
     totalLevelQty > 0 ? (asking.totalBidQty / totalLevelQty) * 100 : 50;
+  const sprungBid = useSpringValue(bidShare);
 
   return (
     <div className="space-y-3">
@@ -320,12 +322,14 @@ function AskingTable({ asking }: { asking: AskingPriceData }) {
       <div className="h-2 rounded-full overflow-hidden bg-muted/40 flex">
         <div
           className="bg-up/70"
-          style={{ width: `${bidShare}%` }}
+          style={{ width: `${Math.max(0, Math.min(100, sprungBid))}%` }}
           title={`매수잔량 ${asking.totalBidQty.toLocaleString("ko-KR")}`}
         />
         <div
           className="bg-down/70"
-          style={{ width: `${100 - bidShare}%` }}
+          style={{
+            width: `${Math.max(0, Math.min(100, 100 - sprungBid))}%`,
+          }}
           title={`매도잔량 ${asking.totalAskQty.toLocaleString("ko-KR")}`}
         />
       </div>

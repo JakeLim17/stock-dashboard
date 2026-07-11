@@ -9,6 +9,7 @@ import type {
   Valuation,
   ValuationMetrics,
 } from "../types";
+import { computeNetStreak } from "../analyzer/flowStreak";
 
 /**
  * 네이버 금융 모바일 API를 이용한 실시간 한국 주식 시세 조회.
@@ -315,6 +316,8 @@ export interface NaverFlowResult {
   foreignNet5d: number | null;
   institutionNet5d: number | null;
   individualNet5d: number | null;
+  foreignStreak?: number | null;
+  institutionStreak?: number | null;
   // dealTrendInfos[0].bizdate 그대로 (KST YYYYMMDD). 응답에 없으면 undefined.
   bizdate?: string;
 }
@@ -635,6 +638,8 @@ export async function fetchNaverFlow(
     let foreign5dKrw = 0;
     let organ5dKrw = 0;
     let individual5dKrw = 0;
+    const foreignDaily: number[] = [];
+    const organDaily: number[] = [];
     const days = Math.min(deals.length, 5);
     for (let i = 0; i < days; i++) {
       const dayClose = parseSignedNumber(deals[i].closePrice) ?? currentPrice ?? 0;
@@ -644,6 +649,8 @@ export async function fetchNaverFlow(
       foreign5dKrw += f * dayClose;
       organ5dKrw += o * dayClose;
       individual5dKrw += ind * dayClose;
+      foreignDaily.push(f * dayClose);
+      organDaily.push(o * dayClose);
     }
 
     // 당일은 가장 최근 영업일 종가로 환산 (currentPrice가 시간외에 흔들려도 안정).
@@ -657,6 +664,8 @@ export async function fetchNaverFlow(
       foreignNet5d: foreign5dKrw,
       institutionNet5d: organ5dKrw,
       individualNet5d: individual5dKrw,
+      foreignStreak: computeNetStreak(foreignDaily),
+      institutionStreak: computeNetStreak(organDaily),
       bizdate: today.bizdate,
     };
   } catch {

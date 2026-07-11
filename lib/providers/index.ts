@@ -4,6 +4,7 @@ import {
   fetchQuotesBatch as fetchYahooQuotesBatch,
   fetchHistorical as fetchYahooHistorical,
   computeTech,
+  seedHistoryFromQuote,
 } from "./yahoo";
 import { fetchNaverQuote, fetchNaverFlow, isKrStock } from "./naver";
 import {
@@ -99,11 +100,16 @@ async function fetchQuote(code: string, name: string): Promise<Quote> {
   // KIS HHDFS00000300 은 ~100ms 안에 실시간 last 를 주는데 Yahoo free API 는 정규장에서도
   // 종종 수 분 stale 응답을 준다. 화면에 "5분 전" 으로 굳어 보이는 원인.
   // KIS 키가 없거나 비ASCII 티커(인덱스/환율)는 자연스럽게 Yahoo 로 떨어진다.
+  // 신규상장(SKHY 등)은 KIS 가 rt_cd=0·빈 last 를 주는 경우가 있어 Yahoo chart 폴백이 필수.
   if (kisEnabled() && isUsTicker(code)) {
     const kis = await getUsQuoteCached(code, name).catch(() => null);
     if (kis && kis.price > 0) return kis;
   }
-  return fetchYahooQuote(code, name);
+  const yahoo = await fetchYahooQuote(code, name);
+  if (!(yahoo.price > 0)) {
+    throw new Error(`${code}: 유효 시세 없음`);
+  }
+  return yahoo;
 }
 
 async function fetchQuotesBatch(
@@ -151,6 +157,7 @@ export {
   fetchHistorical,
   computeTech,
   fetchYahooQuotesBatch,
+  seedHistoryFromQuote,
 };
 export {
   fetchAllNews,
@@ -218,6 +225,8 @@ export async function fetchFlowOrMock(
           foreignNet5d: naverFlow.foreignNet5d,
           institutionNet5d: naverFlow.institutionNet5d,
           individualNet5d: naverFlow.individualNet5d,
+          foreignStreak: naverFlow.foreignStreak ?? null,
+          institutionStreak: naverFlow.institutionStreak ?? null,
           source: "naver",
           bizdate: naverFlow.bizdate,
           fetchedAt: Date.now(),

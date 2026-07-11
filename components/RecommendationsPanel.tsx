@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   Recommendation,
   RecommendationCategory,
@@ -29,6 +29,8 @@ import {
   fmtRelative,
 } from "@/lib/utils";
 import { PriceWithKrw } from "./PriceWithKrw";
+import { AnimatedMeter } from "./ui/AnimatedMeter";
+import { useSurgeFlash } from "@/hooks/useSurgeFlash";
 import { SectorLeaderBadge } from "./SectorLeaderBadge";
 import { SignalMarkBadges } from "./SignalMarkBadges";
 import { VerdictHint } from "./VerdictHint";
@@ -441,6 +443,7 @@ function RecommendationCard({
   // "왜 이 종목인가" 펼침. 기본 접힘 — 카드가 그리드라 모두 펼치면 길어진다.
   // 사용자가 관심 가는 카드만 펼쳐서 reason을 확인하는 패턴.
   const [expanded, setExpanded] = useState(false);
+  const meterSurge = useSurgeFlash(rec.changeRate, { priceTick: rec.price });
 
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2.5 space-y-2 hover:border-foreground/20 transition-colors">
@@ -518,6 +521,7 @@ function RecommendationCard({
           value={rec.buyScore}
           variantHigh="up"
           bonus={rec.contextBonus}
+          surge={meterSurge}
         />
         <MiniScoreBar
           label={
@@ -528,6 +532,7 @@ function RecommendationCard({
           }
           value={rec.heatScore}
           variantHigh="warn"
+          surge={meterSurge}
         />
       </div>
 
@@ -716,11 +721,13 @@ function MiniScoreBar({
   value,
   variantHigh,
   bonus,
+  surge = null,
 }: {
-  label: React.ReactNode;
+  label: ReactNode;
   value: number;
   variantHigh: "up" | "warn";
   bonus?: number;
+  surge?: "up" | "down" | null;
 }) {
   // variantHigh="up"  : 높은 값이 좋음 (매수우위)
   // variantHigh="warn": 높은 값이 위험 (과열)
@@ -756,12 +763,12 @@ function MiniScoreBar({
           )}
         </span>
       </div>
-      <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
-        <div
-          className={`h-full ${color} transition-all`}
-          style={{ width: `${value}%` }}
-        />
-      </div>
+      <AnimatedMeter
+        value={value}
+        fillClass={color}
+        heightClass="h-1"
+        surge={surge}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   buildSnapshot,
+  buildSnapshotCore,
   buildSnapshotLite,
   buildSnapshotShared,
   invalidateSnapshotCache,
@@ -11,12 +12,15 @@ import { invalidateEventCalendarCache } from "@/lib/providers/eventCalendar";
 import { invalidateKisExtraCache } from "@/lib/providers/kisExtraCache";
 import {
   NO_STORE,
+  SNAPSHOT_CORE_CACHE,
   SNAPSHOT_FULL_CACHE,
   SNAPSHOT_LITE_CACHE,
 } from "@/lib/http-cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+/** Vercel/Node 상한 — 클라이언트 28s 타임아웃보다 짧게 서버에서 끊음 */
+export const maxDuration = 30;
 
 export async function GET(req: Request) {
   try {
@@ -31,10 +35,10 @@ export async function GET(req: Request) {
     const liteMode =
       url.searchParams.get("lite") === "1" ||
       url.searchParams.get("phase") === "quotes";
+    const coreMode =
+      url.searchParams.get("core") === "1" ||
+      url.searchParams.get("phase") === "core";
 
-    // ?refresh=1 또는 ?refresh=true → 해당 종목들의 컨센서스/시장경보 캐시를 비우고 새로 fetch.
-    // (시세·뉴스는 항상 fresh 호출이라 캐시 무관. 캐시 대상은 consensus + marketAlert 두 in-memory 맵.)
-    // symbols가 비어있으면 전체 캐시를 비운다 (수동 강제 갱신).
     const refreshParam = url.searchParams.get("refresh");
     const forceRefresh = refreshParam === "1" || refreshParam === "true";
     if (forceRefresh) {
@@ -48,15 +52,12 @@ export async function GET(req: Request) {
       } else {
         invalidateConsensusCache();
         invalidateMarketAlertCache();
-        // 매크로 이벤트 캐시(global)도 비워 새 발표 일정이 즉시 반영되게 함.
         invalidateEventCalendarCache();
         invalidateKisExtraCache();
       }
-      // 스냅샷 + 시장지표 soft TTL 캐시도 함께 비움 — refresh 의도와 일치.
       invalidateSnapshotCache();
     }
 
-    // Phase A — 시세·지표만 (lite=1 | phase=quotes). refresh 와 무관하게 항상 경량 경로.
     if (liteMode) {
       const snap = await buildSnapshotLite(symbols, { includeOverseasNight });
       return NextResponse.json(snap, {
@@ -66,8 +67,15 @@ export async function GET(req: Request) {
       });
     }
 
-    // 평상시는 in-flight dedup + soft TTL 로 동시 호출 압축.
-    // refresh=1 은 분석/컨센서스 캐시도 비웠으니 신선한 호출이 가도록 직접 buildSnapshot.
+    if (coreMode) {
+      const snap = await buildSnapshotCore(symbols, { includeOverseasNight });
+      return NextResponse.json(snap, {
+        headers: {
+          "Cache-Control": forceRefresh ? NO_STORE : SNAPSHOT_CORE_CACHE,
+        },
+      });
+    }
+
     const snap = forceRefresh
       ? await buildSnapshot(symbols, { includeOverseasNight })
       : await buildSnapshotShared(symbols, { includeOverseasNight });

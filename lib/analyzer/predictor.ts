@@ -27,8 +27,9 @@ import {
   chronoPulseDriftForHorizon,
   computeChronoPulse,
 } from "./chronoPulse";
-import {
-  baseDriftForHorizon,
+import { inferOvernightKind } from "./overnightPassThrough";
+import { capHorizonSigma } from "./bandWidth";
+import {  baseDriftForHorizon,
   computeBaseDriftDaily,
 } from "./baseDrift";
 import type { FlowData } from "../types";
@@ -327,6 +328,8 @@ export interface PredictorInput {
   externalOpportunity?: import("../types").OpportunityAssessment;
   consensusUpside?: number | null;
   marketContext?: import("../types").StockSnapshot["marketContext"];
+  /** 공시·뉴스감성·호가 등 ChronoPulse 추가 팩터 */
+  extraFactors?: import("./chronoPulse").ChronoPulseFactor[] | null;
 }
 
 // 매크로 베타 회귀 결과를 한 번에 계산. 헬퍼는 표본 부족 시 null 반환.
@@ -384,6 +387,7 @@ export function predict(input: PredictorInput): Predictions {
     externalOpportunity,
     consensusUpside,
     marketContext,
+    extraFactors,
   } = input;
 
   const now = nowMs ?? Date.now();
@@ -397,6 +401,26 @@ export function predict(input: PredictorInput): Predictions {
   // (최근 변동성 가중 + fat-tail). 미달이면 단순 stddev + 정규분포(±1.96σ)로 폴백.
   let sigma =
     returns.length >= 30 ? ewmaVolatility(returns, EWMA_LAMBDA) : stddev(returns);
+  // 상장 직후(표본 0~1) — OHLC 일중 폭 또는 기본 σ 로 단기 밴드 가능케
+  const FALLBACK_DAILY_SIGMA = 0.022;
+  if (!(sigma > 0) && history.length > 0) {
+    const last = history[history.length - 1]!;
+    if (last.high > last.low && last.close > 0) {
+      sigma = Math.max(
+        FALLBACK_DAILY_SIGMA * 0.45,
+        Math.log(last.high / Math.max(last.low, 1e-9)) / 2
+      );
+    } else if (last.open > 0 && last.close > 0 && last.open !== last.close) {
+      sigma = Math.max(
+        FALLBACK_DAILY_SIGMA * 0.45,
+        Math.abs(Math.log(last.close / last.open))
+      );
+    } else {
+      sigma = FALLBACK_DAILY_SIGMA;
+    }
+  } else if (!(sigma > 0)) {
+    sigma = FALLBACK_DAILY_SIGMA;
+  }
   const volKind: "ewma-t" | "stddev-normal" =
     returns.length >= 30 ? "ewma-t" : "stddev-normal";
   const tailMultiplier =
@@ -514,8 +538,18 @@ export function predict(input: PredictorInput): Predictions {
     newsRisk,
     events,
     overseasNightRate: overseasNight?.changeRate ?? null,
+    overseasNightKind:
+      overseasNight?.proxyKind ??
+      (overseasNight
+        ? inferOvernightKind({
+            proxyCode: overseasNight.proxyCode,
+            name: overseasNight.name,
+            exchange: overseasNight.exchange,
+          })
+        : null),
     dxyLastReturn: dxyLast,
     us10yLastReturn: us10yLast,
+    extraFactors,
   });
 
   const absToday =
@@ -523,7 +557,7 @@ export function predict(input: PredictorInput): Predictions {
       ? Math.abs(todayChangeRate)
       : 0;
   const driftCap =
-    momentumActive || absToday >= 0.04 ? 0.03 : 0.02;
+    momentumActive || absToday >= 0.04 ? 0.04 : 0.028;
   const alphaDaily = Math.max(
     -driftCap,
     Math.min(driftCap, chronoPulse.driftDaily)
@@ -536,7 +570,26 @@ export function predict(input: PredictorInput): Predictions {
     -driftCap,
     Math.min(driftCap, chronoPulse.lag0Daily)
   );
-  const baseDaily = computeBaseDriftDaily(returns, todayChangeRate);
+  const baseDaily = computeBaseDriftDaily(
+    // 상장 첫날: close-to-close 수익이 없으면 시가→종가 로그수익으로 모멘텀 시드
+    returns.length > 0
+      ? returns
+      : (() => {
+          const last = history[history.length - 1];
+          if (last && last.open > 0 && last.close > 0 && last.open !== last.close) {
+            return [Math.log(last.close / last.open)];
+          }
+          if (
+            todayChangeRate != null &&
+            Number.isFinite(todayChangeRate) &&
+            Math.abs(todayChangeRate) > 1e-6
+          ) {
+            return [Math.log(1 + todayChangeRate)];
+          }
+          return returns;
+        })(),
+    todayChangeRate
+  );
   const totalDaily = Math.max(
     -driftCap,
     Math.min(driftCap, baseDaily + alphaDaily)
@@ -557,15 +610,24 @@ export function predict(input: PredictorInput): Predictions {
   const sigmaForRanges = adjustedSigma * rangeSigmaMult;
 
   // A. 가격 범위 — 베이스(통계) + ChronoPulse 알파 + √t 밴드
+  // 표본 충분(≥15): 전체 horizon. 상장 직후·얇은 히스토리: 단기만 (현재가+단기 예측 유지).
   const ranges: PriceRange[] = [];
-  if (price > 0 && returns.length >= 15) {
-    const horizons: { label: string; days: number }[] = [
-      { label: "1일", days: 1 },
-      { label: "3일", days: 3 },
-      { label: "1주", days: 5 },
-      { label: "2주", days: 10 },
-      { label: "1개월", days: 22 },
-    ];
+  const MIN_RETURNS_FULL = 15;
+  if (price > 0 && sigma > 0) {
+    const horizons: { label: string; days: number }[] =
+      returns.length >= MIN_RETURNS_FULL
+        ? [
+            { label: "1일", days: 1 },
+            { label: "3일", days: 3 },
+            { label: "1주", days: 5 },
+            { label: "2주", days: 10 },
+            { label: "1개월", days: 22 },
+          ]
+        : [
+            { label: "1일", days: 1 },
+            { label: "3일", days: 3 },
+            { label: "1주", days: 5 },
+          ];
     for (const h of horizons) {
       // 잔여 세션 반영 — 1일은 남은 세션 비율, 다일 horizon 도 같은 거래일이면
       // 오늘 경과분만큼 차감 (예: 장 후반 "1주" = 4 + 잔여 비율 거래일).
@@ -575,19 +637,46 @@ export function predict(input: PredictorInput): Predictions {
           : oneDayCtx.isSameTradingDay
             ? h.days - 1 + oneDayCtx.effectiveDays
             : h.days;
-      const horizonSigma =
+      const rawHorizonSigma =
         sigmaForRanges * Math.sqrt(effectiveDays) * tailMultiplier;
+      // σ√t·뉴스·이벤트 곱 폭주 방지 — horizon별 절대 반폭 캡 (±10~32%)
+      const horizonSigma = capHorizonSigma(
+        rawHorizonSigma,
+        h.days,
+        closes
+      );
       // drift 는 시간에 선형(σ 는 √t) — 1일 horizon 은 잔여 세션 비율만큼만 반영.
       const driftTimeScale =
         h.days === 1 ? Math.min(1, oneDayCtx.effectiveDays) : 1;
       const baseH =
         baseDriftForHorizon(baseDaily, h.days) * driftTimeScale;
-      const alphaH =
+      let alphaH =
         chronoPulseDriftForHorizon(alphaDaily, h.days, {
           structuralDaily,
           lag0Daily,
         }) * driftTimeScale;
-      const drift = baseH + alphaH;
+      // ADR/GDR 야간 상방: 1~2거래일 center 는 전달 알파가 구조 하방에 묻히지 않게.
+      // 1개월은 과열·평균회귀로 완만(깊은 −5% 디폴트만 방지). “무조건 갭상” 하드코딩 금지.
+      const overnightFactor = chronoPulse.factors.find((f) => f.id === "overnight");
+      const overnightBps = overnightFactor?.bps ?? 0;
+      const overnightUp = overnightBps > 0;
+      const listingUp = chronoPulse.factors.some(
+        (f) => f.id === "listing-adr" && f.bps > 0
+      );
+      if (overnightUp && h.days <= 2) {
+        const minAlpha = (overnightBps / 10_000) * 0.85;
+        alphaH = Math.max(alphaH, minAlpha);
+      } else if (listingUp && overnightUp && h.days <= 5) {
+        alphaH = Math.max(alphaH, 0.004);
+      } else if (listingUp && overnightUp && h.days >= 22) {
+        alphaH = Math.max(alphaH, -0.02);
+      }
+      let drift = baseH + alphaH;
+      // 야간 칩 ≥+1% 이면 1~2일 total 은 현재가 대비 명확 상방
+      if (overnightBps >= 100 && h.days <= 2) {
+        const minTotal = Math.min(0.018, (overnightBps / 10_000) * 0.75);
+        if (drift < minTotal) drift = minTotal;
+      }
       const baseCenter = price * Math.exp(baseH);
       const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);

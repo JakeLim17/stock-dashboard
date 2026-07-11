@@ -12,6 +12,7 @@ import {
   reclassifyWithTitleKo,
   riskKeywords,
   fetchYahooQuotesBatch,
+  seedHistoryFromQuote,
 } from "./providers";
 import { translateTitleToKo } from "./news/translation";
 import { getConsensusBundle } from "./providers/consensusCache";
@@ -19,6 +20,7 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import { kisEnabled } from "./providers/kis";
+import { collectExtraAlphaFactors } from "./providers/extraAlpha";
 import {
   fetchEventsForSymbol,
   getMacroEventsCached,
@@ -43,6 +45,7 @@ import {
   pickTopSignalMarks,
 } from "./analyzer";
 import { dailySigmaFromCloses } from "./analyzer/statHelpers";
+import { resolveOvernightProxyRate } from "./analyzer/overnightPassThrough";
 import {
   assessDataQuality,
   applyThinHistoryAnalysisGate,
@@ -56,6 +59,7 @@ import {
   PRIMARY_SYMBOLS,
   MARKET_INDICATORS,
   WATCHLIST_CANDIDATES,
+  getOverseasNightFallback,
   getOverseasNightProxy,
   resolveWatchSymbols,
 } from "./symbols";
@@ -164,7 +168,21 @@ export interface WatchlistDeps {
   usdKrw?: number | null;
   macroHistories?: MarketIndicatorsResult["macroHistories"];
   options?: BuildSnapshotOptions;
+  /**
+   * core: 시세+히스토리+수급+컨센+규칙분석 (예측·매크로·공시 skip) — 체감 3s 목표.
+   * full: ChronoPulse 예측·뉴스·공시·야간지표 포함.
+   */
+  mode?: "core" | "full";
 }
+
+const EMPTY_MARKET_CONTEXT: MarketContextSnapshot = {
+  semiHeat: null,
+  nasdaqRate: 0,
+  fxRate: 0,
+  vix: 0,
+  kospiRate: 0,
+  soxRate: 0,
+};
 
 // ──────────────────────────────────────────────────────────────
 // 스탬피드 가드 — 동일 결과를 짧은 시간 안에 여러 클라이언트가 동시에 요청하면
@@ -177,6 +195,17 @@ const MARKET_INDICATOR_TTL_MS = 60_000;
 type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
 let marketIndicatorCache: MarketIndicatorCache | null = null;
 let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
+
+/** 웜 캐시만 즉시 반환 — core 가 지표 90일 fanout 에 막히지 않게. */
+function peekMarketIndicators(): MarketIndicatorsResult | null {
+  if (
+    marketIndicatorCache &&
+    Date.now() - marketIndicatorCache.at < MARKET_INDICATOR_TTL_MS
+  ) {
+    return marketIndicatorCache.data;
+  }
+  return null;
+}
 
 // 풀 스냅샷 — 60s TTL. CDN s-maxage(600s)보다 짧게 — 동일 인스턴스 내 중복만 막음.
 const SNAPSHOT_TTL_MS = 60_000;
@@ -443,7 +472,7 @@ export async function fetchNewsItemsWithSymbols(
   // 영문 글로벌 헤드라인 보강 — 상위 N개에 대해 시간 예산 안에서 번역.
   // 첫 cold 호출은 ~5s 안에서 가능한 만큼만 채우고, 나머지는 다음 폴링 사이클에서
   // translateTitleToKo 의 24h 캐시 hit 으로 즉시 채워진다.
-  await enrichTitleKoWithBudget(dedup.slice(0, 30), 5000);
+  await enrichTitleKoWithBudget(dedup.slice(0, 24), 2_000);
   // Round 4: titleKo 가 채워진 항목 중 neutral/null 이었던 sentiment 를 재분류.
   //   영문 원문 사전이 빈약할 수 있어 한국어 번역본을 함께 검사하면 분류율이 크게 ↑.
   //   이미 호재/악재인 항목은 보존(번역 노이즈로 흔들림 방지).
@@ -511,31 +540,43 @@ export async function fetchWatchlistSnapshots(
   const errors: Record<string, string> = {};
   const watchSymbols: SymbolMeta[] = resolveWatchSymbols(requestedSymbols);
   const includeOverseasNight = deps.options?.includeOverseasNight === true;
+  const mode = deps.mode ?? "full";
+  const isCore = mode === "core";
 
   // indicators / news / context 가 없으면 자체 fetch (독립 호출 시 안전망).
+  // core 는 지표 fanout 을 기다리지 않음 — 빈 컨텍스트로 수급·컨센만 진행.
   let indicators = deps.indicators;
   let context = deps.context;
   let usdKrw = deps.usdKrw ?? null;
   if (!indicators || !context) {
-    const r = await fetchMarketIndicators();
-    indicators = r.indicators;
-    context = r.context;
-    usdKrw = r.usdKrw;
-    Object.assign(errors, r.errors);
+    if (isCore) {
+      indicators = indicators ?? [];
+      context = context ?? EMPTY_MARKET_CONTEXT;
+    } else {
+      const r = await fetchMarketIndicators();
+      indicators = r.indicators;
+      context = r.context;
+      usdKrw = r.usdKrw;
+      Object.assign(errors, r.errors);
+    }
   }
 
   const newsAllPromise: Promise<NewsItem[]> = deps.news
     ? Promise.resolve(deps.news)
-    : fetchNewsItems(30).catch((e) => {
-        errors["news"] = e instanceof Error ? e.message : String(e);
-        return [] as NewsItem[];
-      });
+    : isCore
+      ? Promise.resolve([] as NewsItem[])
+      : fetchNewsItems(30).catch((e) => {
+          errors["news"] = e instanceof Error ? e.message : String(e);
+          return [] as NewsItem[];
+        });
 
-  // 베타 시나리오용 시장 시계열 — indicators 단계에서 이미 받은 90일 히스토리 재사용.
+  // core: 매크로 시계열·야간 EUR 을 기다리지 않음 — 예측은 full 에서.
+  // full: 베타 시나리오용 시장 시계열 — indicators 단계에서 이미 받은 90일 히스토리 재사용.
   const mh = deps.macroHistories;
   const histOrFetch = async (
     code: (typeof WATCHLIST_MACRO_CODES)[number]
   ): Promise<HistoricalPoint[]> => {
+    if (isCore) return [];
     const cached = mh?.[code];
     if (cached && cached.length >= 30) return cached;
     return fetchHistorical(code, 90).catch(() => []);
@@ -559,7 +600,7 @@ export async function fetchWatchlistSnapshots(
     histOrFetch("^SOX"),
     histOrFetch("DX-Y.NYB"),
     histOrFetch("^TNX"),
-    includeOverseasNight
+    !isCore && includeOverseasNight
       ? fetchQuote("EURUSD=X", "유로/달러").catch((e) => {
           errors["EURUSD=X"] = e instanceof Error ? e.message : String(e);
           return null;
@@ -569,7 +610,7 @@ export async function fetchWatchlistSnapshots(
   ]);
   // DX-Y.NYB 가 빈 배열이면 선물 DX=F 로 폴백 (분 단위 응답이라 일별 close 신선도는 약간 낮으나 방향성은 동일).
   const dxyHistory =
-    dxyHistoryPrimary.length >= 30
+    isCore || dxyHistoryPrimary.length >= 30
       ? dxyHistoryPrimary
       : await fetchHistorical("DX=F", 90).catch(() => []);
 
@@ -581,54 +622,90 @@ export async function fetchWatchlistSnapshots(
   const eurUsd = eurUsdQuote?.price ?? null;
 
   const primaries: StockSnapshot[] = [];
+  // core: 수급·컨센·RSI 우선 — 종목당 5s. full: 예측·공시 포함 12s.
+  const SYMBOL_BUDGET_MS = isCore ? 5_000 : 12_000;
+  const FLOW_TIMEOUT_MS = isCore ? 2_500 : 8_000;
+  const CONSENSUS_TIMEOUT_MS = isCore ? 2_500 : 8_000;
+  const emptyConsensus = {
+    consensus: null,
+    valuation: null,
+    researches: [] as Awaited<
+      ReturnType<typeof getConsensusBundle>
+    >["researches"],
+  };
   const primaryResults = await Promise.allSettled(
     watchSymbols.map(async (meta) => {
+      const work = async (): Promise<StockSnapshot> => {
+      // 시세·히스토리·수급·컨센서스를 한 번에 — 예전엔 수급이 이벤트 뒤에 직렬이라 체감 지연.
       const [
         quoteRes,
-        hist,
+        histRaw,
         bundle,
         marketAlert,
         upcomingEvents,
+        flowEarly,
       ] = await Promise.all([
         fetchQuotesBatch([meta]).then((r) => r[0]),
         fetchHistorical(meta.code, 90),
-        getConsensusBundle(meta.code).catch(() => ({
-          consensus: null,
-          valuation: null,
-          researches: [],
-        })),
+        withTimeout(
+          getConsensusBundle(meta.code).catch(() => emptyConsensus),
+          CONSENSUS_TIMEOUT_MS,
+          emptyConsensus
+        ),
         isKrStock(meta.code)
           ? getMarketAlertCached(meta.code).catch(() => null)
           : Promise.resolve(null),
-        fetchEventsForSymbol(meta).catch(() => []),
+        isCore
+          ? Promise.resolve([] as EventItem[])
+          : withTimeout(
+              fetchEventsForSymbol(meta).catch(() => [] as EventItem[]),
+              2_500,
+              [] as EventItem[]
+            ),
+        withTimeout(
+          fetchFlowOrMock(meta.code, 0).catch(() => ({
+            flow: { ...PENDING_FLOW },
+            source: "mock" as const,
+          })),
+          FLOW_TIMEOUT_MS,
+          { flow: { ...PENDING_FLOW }, source: "mock" as const }
+        ),
       ]);
+      let hist = histRaw;
 
       let upcomingEventsMerged = dedupeEventItems([
         ...upcomingEvents,
         ...getCuratedUpcomingForSymbol(meta.code, 90),
       ]);
 
-      const peer = getGroupCatalystPeer(meta.code);
-      if (peer && peer.leaderCode !== meta.code) {
-        const leaderInWatch = watchSymbols.find((m) => m.code === peer.leaderCode);
-        const leaderMeta =
-          leaderInWatch ??
-          WATCHLIST_CANDIDATES.find((m) => m.code === peer.leaderCode);
-        if (leaderMeta) {
-          const leaderCurated = getCuratedUpcomingForSymbol(
-            peer.leaderCode,
-            90
-          ).filter((e) => e.symbolCode === peer.leaderCode);
-          const leaderApiEvents = await fetchEventsForSymbol(leaderMeta).catch(
-            () => []
+      // full 만 peer spillover (Yahoo 이벤트 추가 호출). core 는 curated 로 충분.
+      if (!isCore) {
+        const peer = getGroupCatalystPeer(meta.code);
+        if (peer && peer.leaderCode !== meta.code) {
+          const leaderInWatch = watchSymbols.find(
+            (m) => m.code === peer.leaderCode
           );
-          upcomingEventsMerged = dedupeEventItems([
-            ...upcomingEventsMerged,
-            ...spilloverLeaderEvents(meta.code, [
-              ...leaderApiEvents,
-              ...leaderCurated,
-            ]),
-          ]);
+          const leaderMeta =
+            leaderInWatch ??
+            WATCHLIST_CANDIDATES.find((m) => m.code === peer.leaderCode);
+          if (leaderMeta) {
+            const leaderCurated = getCuratedUpcomingForSymbol(
+              peer.leaderCode,
+              90
+            ).filter((e) => e.symbolCode === peer.leaderCode);
+            const leaderApiEvents = await withTimeout(
+              fetchEventsForSymbol(leaderMeta).catch(() => [] as EventItem[]),
+              2_000,
+              [] as EventItem[]
+            );
+            upcomingEventsMerged = dedupeEventItems([
+              ...upcomingEventsMerged,
+              ...spilloverLeaderEvents(meta.code, [
+                ...leaderApiEvents,
+                ...leaderCurated,
+              ]),
+            ]);
+          }
         }
       }
 
@@ -637,6 +714,12 @@ export async function fetchWatchlistSnapshots(
         ...quoteRes.quote,
         marketAlert,
       };
+
+      // 신규상장(SKHY 등): Yahoo chart 폴백으로 시세는 있는데 history 가 빈 배열이면
+      // "0일" 배지·예측 게이트가 거짓으로 걸린다 → quote OHLC 로 1봉 시드.
+      if (hist.length === 0 && quote.price > 0) {
+        hist = seedHistoryFromQuote(quote);
+      }
 
       // 컨센서스 upsidePercent는 캐시 시점 가격 기준이라 매번 재계산 — 룰/UI가 같은 값을 보도록.
       const consensus = bundle.consensus
@@ -659,26 +742,36 @@ export async function fetchWatchlistSnapshots(
       const consensusValuation = bundle.valuation;
       const researches = bundle.researches;
 
-      const overseasNight = includeOverseasNight
-        ? await fetchOverseasNightIndicator(
-            meta,
-            quote,
-            usdKrw,
-            eurUsd
-          ).catch((e) => {
-            errors[`night:${meta.code}`] =
-              e instanceof Error ? e.message : String(e);
-            return null;
-          })
-        : null;
+      // core: 야간 지표 skip (full 에서 채움). 예측 critical path 차단 방지.
+      const overseasNight =
+        !isCore && includeOverseasNight
+          ? await fetchOverseasNightIndicator(
+              meta,
+              quote,
+              usdKrw,
+              eurUsd
+            ).catch((e) => {
+              errors[`night:${meta.code}`] =
+                e instanceof Error ? e.message : String(e);
+              return null;
+            })
+          : null;
 
-      const flowRes = await fetchFlowOrMock(meta.code, quote.price);
+      // flowEarly 는 price=0 으로 먼저 떴을 수 있음 — 실가격으로 한 번 더(캐시 hit 면 즉시).
+      const flowRes =
+        quote.price > 0
+          ? await withTimeout(
+              fetchFlowOrMock(meta.code, quote.price).catch(() => flowEarly),
+              FLOW_TIMEOUT_MS,
+              flowEarly
+            )
+          : flowEarly;
       const tech = computeTech(hist);
       const flow = { ...flowRes.flow, fetchedAt: quote.fetchedAt };
 
       // 한국 종목 + 정규장 진행 중일 때만 1분봉 호출 (TTL 60s 캐시).
       const intradayBars =
-        isKrStock(meta.code) && isKrMarketOpen()
+        !isCore && isKrStock(meta.code) && isKrMarketOpen()
           ? await fetchIntradayBars(meta.code).catch(() => null)
           : null;
       const intradayMetrics = intradayBars
@@ -699,6 +792,15 @@ export async function fetchWatchlistSnapshots(
         meta.name
       );
 
+      // core: OpenDART/SEC/호가 알파 skip — full 에서만 (budget 로도 막히게).
+      const extraFactors = isCore
+        ? []
+        : await collectExtraAlphaFactors({
+            code: meta.code,
+            relatedNews,
+            skipSlowSources: false,
+          }).catch(() => []);
+
       const dataQuality = assessDataQuality({
         code: meta.code,
         historyLength: hist.length,
@@ -714,6 +816,8 @@ export async function fetchWatchlistSnapshots(
       let predictions: Predictions | null;
 
       const buildPredictions = (a: AnalysisResult): Predictions | null => {
+        // core: ChronoPulse·매크로 예측은 full 로 미룸 — 수급·컨센 UI 가 같이 기다리지 않게.
+        if (isCore) return null;
         let pred: Predictions | null = predict({
           quote,
           history: hist,
@@ -740,6 +844,7 @@ export async function fetchWatchlistSnapshots(
           externalOpportunity,
           consensusUpside: consensus?.upsidePercent ?? null,
           marketContext: context ?? undefined,
+          extraFactors,
         });
         pred = applyThinHistoryPredictionGate(pred, dataQuality);
         if (pred?.targets) {
@@ -756,6 +861,11 @@ export async function fetchWatchlistSnapshots(
           }
         }
         return pred;
+      };
+
+      const analysisContext = {
+        ...(context ?? EMPTY_MARKET_CONTEXT),
+        overseasNightRate: overseasNight?.changeRate ?? null,
       };
 
       if (cachedAnalysis) {
@@ -776,10 +886,7 @@ export async function fetchWatchlistSnapshots(
           valuation: consensusValuation,
           externalRisk,
           externalOpportunity,
-          context: {
-            ...context!,
-            overseasNightRate: overseasNight?.changeRate ?? null,
-          },
+          context: analysisContext,
           history: hist,
         });
         analysis = applyThinHistoryAnalysisGate(analysisRaw, dataQuality);
@@ -843,15 +950,26 @@ export async function fetchWatchlistSnapshots(
         closeHistory: closeHistory.length >= 2 ? closeHistory : undefined,
         dataQuality,
         marketContext: {
-          semiHeat: context!.semiHeat,
-          nasdaqRate: context!.nasdaqRate,
-          fxRate: context!.fxRate,
-          vix: context!.vix,
-          kospiRate: context!.kospiRate,
-          soxRate: context!.soxRate,
+          semiHeat: (context ?? EMPTY_MARKET_CONTEXT).semiHeat,
+          nasdaqRate: (context ?? EMPTY_MARKET_CONTEXT).nasdaqRate,
+          fxRate: (context ?? EMPTY_MARKET_CONTEXT).fxRate,
+          vix: (context ?? EMPTY_MARKET_CONTEXT).vix,
+          kospiRate: (context ?? EMPTY_MARKET_CONTEXT).kospiRate,
+          soxRate: (context ?? EMPTY_MARKET_CONTEXT).soxRate,
         },
         analysisCachedAt: cachedAnalysis?.cachedAt ?? null,
       };
+      };
+
+      const snap = await withTimeout(
+        work(),
+        SYMBOL_BUDGET_MS,
+        null as StockSnapshot | null
+      );
+      if (!snap) {
+        throw new Error(`${meta.code} 종목 분석 ${SYMBOL_BUDGET_MS}ms 초과`);
+      }
+      return snap;
     })
   );
 
@@ -970,6 +1088,105 @@ export async function buildSnapshotLite(
 }
 
 // ──────────────────────────────────────────────────────────────
+// Phase A.5 — core 스냅샷: 시세+히스토리+수급+컨센+규칙분석 (예측·공시 skip).
+//   목표: 콜드 <3s. ChronoPulse·매크로·OpenDART 는 full 로 미룸.
+// ──────────────────────────────────────────────────────────────
+const CORE_SNAPSHOT_TTL_MS = 20_000;
+type CoreSnapshotCache = { data: DashboardSnapshot; at: number };
+const coreSnapshotCache = new Map<string, CoreSnapshotCache>();
+const coreSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
+
+function coreSnapshotKey(
+  symbols: string[],
+  options: BuildSnapshotOptions
+): string {
+  const normalized = Array.from(new Set(symbols)).sort().join(",");
+  return `core:${normalized}|night=${options.includeOverseasNight ? "1" : "0"}`;
+}
+
+async function buildSnapshotCoreInner(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  const TIMING = process.env.BUILD_SNAPSHOT_TIMING === "1";
+  const t0 = TIMING ? performance.now() : 0;
+  // core 는 지표 90일 fanout 을 기다리지 않음 — lite/full 이 이미(또는 곧) 채움.
+  // 웜 캐시가 있으면 재사용, 없으면 빈 컨텍스트로 수급·컨센·RSI 만 빠르게.
+  const peeked = peekMarketIndicators();
+  const indicatorResult =
+    peeked ??
+    ({
+      indicators: [],
+      errors: {},
+      context: EMPTY_MARKET_CONTEXT,
+      usdKrw: null,
+      macroHistories: {},
+    } satisfies MarketIndicatorsResult);
+  // 백그라운드로 지표 워밍 (응답은 막지 않음)
+  if (!peeked) {
+    void cachedMarketIndicators().catch(() => null);
+  }
+  const watchResult = await fetchWatchlistSnapshots(requestedSymbols, {
+    indicators: indicatorResult.indicators,
+    news: [],
+    context: indicatorResult.context,
+    usdKrw: indicatorResult.usdKrw,
+    macroHistories: {},
+    options,
+    mode: "core",
+  });
+  if (TIMING) {
+    console.warn(
+      `[snapshot:core] total=${(performance.now() - t0).toFixed(0)}ms primaries=${watchResult.primaries.length}`
+    );
+  }
+  return {
+    generatedAt: Date.now(),
+    phase: "core",
+    primaries: watchResult.primaries,
+    indicators: indicatorResult.indicators,
+    marketMood: buildMarketMood(
+      indicatorResult.indicators,
+      [],
+      indicatorResult.context.semiHeat
+    ),
+    news: [],
+    errors: { ...indicatorResult.errors, ...watchResult.errors },
+    macroEvents: fetchMacroEvents(),
+    kisActive: kisEnabled(),
+  };
+}
+
+export async function buildSnapshotCore(
+  requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
+  options: BuildSnapshotOptions = {}
+): Promise<DashboardSnapshot> {
+  const key = coreSnapshotKey(requestedSymbols, options);
+  const now = Date.now();
+  const hit = coreSnapshotCache.get(key);
+  if (hit && now - hit.at < CORE_SNAPSHOT_TTL_MS) return hit.data;
+  const inflight = coreSnapshotInFlight.get(key);
+  if (inflight) return inflight;
+  const p = buildSnapshotCoreInner(requestedSymbols, options)
+    .then((data) => {
+      coreSnapshotCache.set(key, { data, at: Date.now() });
+      if (coreSnapshotCache.size > 64) {
+        const firstKey = coreSnapshotCache.keys().next().value;
+        if (firstKey !== undefined) coreSnapshotCache.delete(firstKey);
+      }
+      return data;
+    })
+    .finally(() => {
+      coreSnapshotInFlight.delete(key);
+    });
+  coreSnapshotInFlight.set(key, p);
+  return p;
+}
+
+/** full 빌드 전체 상한 — 초과 시 core partial 반환 (서버 hang 방지) */
+const FULL_BUILD_BUDGET_MS = 22_000;
+
+// ──────────────────────────────────────────────────────────────
 // 기존 호환 — 메인 대시보드 1회 분의 통합 스냅샷.
 //   indicators + news 를 병렬로 받고 → watchlist 분석에 deps로 주입.
 //   외부 인터페이스(반환 shape)는 종전과 동일.
@@ -978,57 +1195,115 @@ export async function buildSnapshot(
   requestedSymbols: string[] = PRIMARY_SYMBOLS.map((s) => s.code),
   options: BuildSnapshotOptions = {}
 ): Promise<DashboardSnapshot> {
-  // 뉴스 실패는 치명적이지 않음 — 빈 배열로 진행. 호출자가 별도 fetch 시도해도 무방.
-  // cached* 사용 — page.tsx의 first-paint RSC가 동일 request 내에서 먼저 호출했다면
-  // 그 결과를 그대로 재사용 (Promise dedup으로 외부 호출 1회).
-  // 단계별 타이밍 (BUILD_SNAPSHOT_TIMING=1 일 때만 stderr 로 출력 — dev 진단용).
   const TIMING = process.env.BUILD_SNAPSHOT_TIMING === "1";
   const t0 = TIMING ? performance.now() : 0;
-  // 뉴스 — 시장 전반 + 워치리스트 종목별 통합. 종목별 fetch 는 5s timeout 으로
-  // cold start 응답 지연을 막는다. 실패해도 시장 전반 뉴스만으로 진행.
-  const watchSymbolsForNews = resolveWatchSymbols(requestedSymbols).map(
-    (s) => s.code
-  );
-  const [indicatorResult, news] = await Promise.all([
-    cachedMarketIndicators(),
-    fetchNewsItemsWithSymbols(watchSymbolsForNews, 60, 8, 80).catch(
-      () => [] as NewsItem[]
-    ),
-  ]);
-  const t1 = TIMING ? performance.now() : 0;
 
-  const watchResult = await fetchWatchlistSnapshots(requestedSymbols, {
-    indicators: indicatorResult.indicators,
-    news,
-    context: indicatorResult.context,
-    usdKrw: indicatorResult.usdKrw,
-    macroHistories: indicatorResult.macroHistories,
-    options,
-  });
-  const t2 = TIMING ? performance.now() : 0;
-  if (TIMING) {
-    console.warn(
-      `[snapshot] indicators+news=${(t1 - t0).toFixed(0)}ms watchlist=${(t2 - t1).toFixed(0)}ms total=${(t2 - t0).toFixed(0)}ms news=${news.length} primaries=${watchResult.primaries.length}`
+  const buildFull = async (): Promise<DashboardSnapshot> => {
+    const watchSymbolsForNews = resolveWatchSymbols(requestedSymbols).map(
+      (s) => s.code
     );
-  }
+    // 뉴스는 전체 budget 의 일부만 — 막히면 빈 배열로 진행해 예측은 먼저.
+    const [indicatorResult, news] = await Promise.all([
+      cachedMarketIndicators(),
+      withTimeout(
+        fetchNewsItemsWithSymbols(watchSymbolsForNews, 60, 8, 80).catch(
+          () => [] as NewsItem[]
+        ),
+        6_000,
+        [] as NewsItem[]
+      ),
+    ]);
+    const t1 = TIMING ? performance.now() : 0;
 
-  const errors = { ...indicatorResult.errors, ...watchResult.errors };
-
-  return {
-    generatedAt: Date.now(),
-    phase: "full",
-    primaries: watchResult.primaries,
-    indicators: indicatorResult.indicators,
-    marketMood: buildMarketMood(
-      indicatorResult.indicators,
+    const watchResult = await fetchWatchlistSnapshots(requestedSymbols, {
+      indicators: indicatorResult.indicators,
       news,
-      indicatorResult.context.semiHeat
-    ),
-    news,
-    errors,
-    macroEvents: fetchMacroEvents(),
-    kisActive: kisEnabled(),
+      context: indicatorResult.context,
+      usdKrw: indicatorResult.usdKrw,
+      macroHistories: indicatorResult.macroHistories,
+      options,
+      mode: "full",
+    });
+    const t2 = TIMING ? performance.now() : 0;
+    if (TIMING) {
+      console.warn(
+        `[snapshot] indicators+news=${(t1 - t0).toFixed(0)}ms watchlist=${(t2 - t1).toFixed(0)}ms total=${(t2 - t0).toFixed(0)}ms news=${news.length} primaries=${watchResult.primaries.length}`
+      );
+    }
+
+    const errors = { ...indicatorResult.errors, ...watchResult.errors };
+    return {
+      generatedAt: Date.now(),
+      phase: "full",
+      primaries: watchResult.primaries,
+      indicators: indicatorResult.indicators,
+      marketMood: buildMarketMood(
+        indicatorResult.indicators,
+        news,
+        indicatorResult.context.semiHeat
+      ),
+      news,
+      errors,
+      macroEvents: fetchMacroEvents(),
+      kisActive: kisEnabled(),
+    };
   };
+
+  // 전체 hard budget — hang 시 core partial 로라도 예측·RSI 반환
+  const fullP = buildFull();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = await Promise.race([
+    fullP.then((data) => ({ ok: true as const, data })),
+    new Promise<{ ok: false }>((resolve) => {
+      timer = setTimeout(() => resolve({ ok: false }), FULL_BUILD_BUDGET_MS);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+
+  if (timedOut.ok) return timedOut.data;
+
+  console.warn(
+    `[snapshot] full budget ${FULL_BUILD_BUDGET_MS}ms exceeded → core partial`
+  );
+  try {
+    const core = await buildSnapshotCore(requestedSymbols, options);
+    return {
+      ...core,
+      phase: "full" as const,
+      errors: {
+        ...core.errors,
+        _budget: `full ${FULL_BUILD_BUDGET_MS}ms 초과 → core partial`,
+      },
+    };
+  } catch (e) {
+    // core 도 실패하면 fullP 가 끝날 때까지 조금 더 기다림 (이미 진행 중)
+    try {
+      return await withTimeout(fullP, 8_000, {
+        generatedAt: Date.now(),
+        phase: "full" as const,
+        primaries: [],
+        indicators: [],
+        marketMood: {
+          label: "중립" as const,
+          semiHeat: null,
+          riskKeywords: [],
+        },
+        news: [],
+        errors: {
+          _fatal: e instanceof Error ? e.message : String(e),
+        },
+        macroEvents: fetchMacroEvents(),
+        kisActive: kisEnabled(),
+      });
+    } catch (e2) {
+      console.warn(
+        "[snapshot] full+core failed",
+        e2 instanceof Error ? e2.message : String(e2)
+      );
+      throw e2;
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1073,6 +1348,7 @@ export async function buildSnapshotShared(
 export function invalidateSnapshotCache(): void {
   snapshotCache.clear();
   liteSnapshotCache.clear();
+  coreSnapshotCache.clear();
   marketIndicatorCache = null;
 }
 
@@ -1082,51 +1358,76 @@ async function fetchOverseasNightIndicator(
   usdKrw: number | null,
   eurUsd: number | null
 ): Promise<OverseasNightIndicator | null> {
-  const proxy = getOverseasNightProxy(meta.code);
-  if (!proxy) return null;
+  const primary = getOverseasNightProxy(meta.code);
+  if (!primary) return null;
+  const candidates = [primary, getOverseasNightFallback(meta.code)].filter(
+    (p): p is NonNullable<typeof p> => p != null
+  );
 
-  const quote = await fetchQuote(proxy.proxyCode, proxy.name);
-  if (!quote.price || quote.changeRate == null) return null;
-  const currency = quote.currency?.toUpperCase();
-  const fxToKrw =
-    currency === "KRW"
-      ? 1
-      : currency === "USD"
-        ? usdKrw
-        : currency === "EUR" && eurUsd != null && usdKrw != null
-          ? eurUsd * usdKrw
-          : null;
-  const impliedKrwPrice =
-    fxToKrw != null ? (quote.price * fxToKrw) / proxy.sharesPerReceipt : null;
-  const krxClose =
-    domesticQuote.extendedHours?.regularClose ??
-    domesticQuote.price ??
-    domesticQuote.prevClose ??
-    null;
-  const premiumRate =
-    impliedKrwPrice != null && krxClose != null && krxClose > 0
-      ? impliedKrwPrice / krxClose - 1
-      : null;
+  for (const proxy of candidates) {
+    const quote = await fetchQuote(proxy.proxyCode, proxy.name);
+    if (!quote.price || quote.changeRate == null) continue;
+    const currency = quote.currency?.toUpperCase();
+    const fxToKrw =
+      currency === "KRW"
+        ? 1
+        : currency === "USD"
+          ? usdKrw
+          : currency === "EUR" && eurUsd != null && usdKrw != null
+            ? eurUsd * usdKrw
+            : null;
+    const impliedKrwPrice =
+      fxToKrw != null ? (quote.price * fxToKrw) / proxy.sharesPerReceipt : null;
+    const krxClose =
+      domesticQuote.extendedHours?.regularClose ??
+      domesticQuote.price ??
+      domesticQuote.prevClose ??
+      null;
+    const premiumRate =
+      impliedKrwPrice != null && krxClose != null && krxClose > 0
+        ? impliedKrwPrice / krxClose - 1
+        : null;
 
-  return {
-    baseCode: meta.code,
-    proxyCode: proxy.proxyCode,
-    name: proxy.name,
-    exchange: proxy.exchange,
-    sharesPerReceipt: proxy.sharesPerReceipt,
-    price: quote.price,
-    changeRate: quote.changeRate,
-    currency: quote.currency,
-    fxToKrw,
-    usdKrw,
-    eurUsd,
-    impliedKrwPrice,
-    krxClose,
-    premiumRate,
-    marketState: quote.marketState,
-    priceTime: quote.priceTime,
-    fetchedAt: quote.fetchedAt,
-  };
+    const ext = quote.extendedHours;
+    const proxyHist = await fetchHistorical(proxy.proxyCode, 5).catch(() => []);
+    const recentCloses =
+      proxyHist.length > 0
+        ? proxyHist.map((h) => h.close)
+        : quote.price > 0
+          ? [quote.price]
+          : [];
+    const changeRate = resolveOvernightProxyRate({
+      sessionRate: quote.changeRate,
+      extendedRate: ext?.changeRate,
+      extendedActive: !!ext?.active,
+      recentCloses,
+      sessionOpen: quote.open ?? proxyHist[0]?.open ?? null,
+      listingReferencePrice: proxy.listingReferencePrice ?? null,
+      lastPrice: ext?.active && ext.price > 0 ? ext.price : quote.price,
+    });
+
+    return {
+      baseCode: meta.code,
+      proxyCode: proxy.proxyCode,
+      name: proxy.name,
+      exchange: proxy.exchange,
+      sharesPerReceipt: proxy.sharesPerReceipt,
+      proxyKind: proxy.proxyKind,
+      price: quote.price,
+      changeRate,
+      currency: quote.currency,
+      fxToKrw,
+      usdKrw,
+      eurUsd,
+      impliedKrwPrice,
+      krxClose,
+      premiumRate,
+      marketState: quote.marketState,
+      priceTime: quote.priceTime,
+      fetchedAt: quote.fetchedAt,
+    };
+  }
+  return null;
 }
 
 function indicatorStatus(

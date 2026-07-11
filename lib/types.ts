@@ -86,11 +86,13 @@ export interface SymbolMeta {
 export interface OverseasNightIndicator {
   // 국내 종목 코드 (예: 005930.KS)
   baseCode: string;
-  // 해외 대체 티커 (예: SMSN.IL)
+  // 해외 대체 티커 (예: SMSN.IL / SKHY)
   proxyCode: string;
   name: string;
   exchange: string;
   sharesPerReceipt: number;
+  /** ADR(나스닥) vs GDR(런던·프랑크푸르트) — 칩·전달 라벨용 */
+  proxyKind?: "adr" | "gdr";
   price: number;
   changeRate: number;
   currency?: string;
@@ -196,6 +198,9 @@ export interface FlowData {
   foreignNet5d?: number | null;
   institutionNet5d?: number | null;
   individualNet5d?: number | null;
+  /** 연속 순매수(+)/순매도(-) 일수. 예: +3 = 외인 3일 연속 순매수 */
+  foreignStreak?: number | null;
+  institutionStreak?: number | null;
   // 데이터 출처 — UI 표시용.
   //   "kis"             : KIS inquire-investor (KRX 원본, 토스와 정합 · 실시간)
   //   "naver"           : 네이버 dealTrendInfos (일별 누적; bizdate 가 오늘이 아니면 마감 기준)
@@ -531,17 +536,17 @@ export interface Predictions {
     factors: string[];
   } | null;
 
-  /** ChronoPulse — 가산 알파 레이어 (baseDrift 위에 얹음) */
+  /** 다요인 예측 알파 (UI 표기: 예측) */
   chronoPulse?: {
     name: string;
     subtitle: string;
-    /** ChronoPulse 알파 일간 drift (수급·뉴스 등) */
+    /** 알파 일간 drift (수급·뉴스 등) */
     driftDaily: number;
     structuralDaily?: number;
     lag0Daily?: number;
     /** 통계 베이스 일간 drift */
     baseDaily?: number;
-    /** ChronoPulse 알파 (= driftDaily) */
+    /** 알파 (= driftDaily) */
     alphaDaily?: number;
     /** 베이스 + 알파 */
     totalDaily?: number;
@@ -932,8 +937,8 @@ export interface MarketIndicator {
 
 export interface DashboardSnapshot {
   generatedAt: number;
-  // lite — 시세·지표만 (Phase A). full 또는 생략 — 예측·수급·뉴스 포함 (Phase B).
-  phase?: "lite" | "full";
+  // lite — 시세만. core — history 기반 예측·RSI·수급(빠른 경로). full — 뉴스·공시 알파 보강.
+  phase?: "lite" | "core" | "full";
   primaries: StockSnapshot[]; // 관심 종목 카드
   indicators: MarketIndicator[]; // 시장 신호 패널
   marketMood: {

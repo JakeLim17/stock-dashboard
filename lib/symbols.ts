@@ -202,8 +202,8 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // ─── 2026-07-10 SK하이닉스 ADR — 나스닥 직상장 (NASDAQ: SKHY) ─────────────
   // 史상 최대 외국기업 미국 상장 ($26.5B, 공모가 $149). ADR 10주 = 원주(000660.KS) 1주.
   // 구 무보증 OTC ADR HXSCL 은 Yahoo 티커 소멸 — SKHY 가 공식 상장 심볼.
-  // 상장 직후라 Yahoo 일별 히스토리 누적 전 (validRanges 1d/5d) — 예측 모델은
-  // 표본 축적까지 dataQuality thin-history 게이트가 자동으로 완화 처리.
+  // 상장 직후 Yahoo quote meta 불완전 → chart 일봉으로 가격·히스토리 폴백.
+  // thin-history 는 단기(≤5일) 밴드 유지, 장기·목표가만 보류.
   { code: "SKHY", name: "SK하이닉스 ADR", kind: "us-stock", sector: "글로벌반도체", isSectorLeader: true, sectorLeaderLabel: "HBM 대장 (ADR)", currency: "USD" },
   // AI 데이터센터 인프라 (전력·냉각·서버)
   { code: "VRT", name: "버티브", kind: "us-stock", sector: "글로벌AI인프라", isSectorLeader: true, sectorLeaderLabel: "데이터센터 전력·냉각 대장", currency: "USD" },
@@ -715,11 +715,15 @@ export function resolveThemes(): ResolvedTheme[] {
 
 type OverseasNightProxy = Pick<
   OverseasNightIndicator,
-  "baseCode" | "proxyCode" | "name" | "exchange" | "sharesPerReceipt"
->;
+  "baseCode" | "proxyCode" | "name" | "exchange" | "sharesPerReceipt" | "proxyKind"
+> & {
+  /** 공모가 등 — 상장 직후 Yahoo 시가→종가 되돌림 대신 급등 기준 */
+  listingReferencePrice?: number;
+};
 
 // 해외장에서 거래되는 국내 개별주 대체 지표.
 // 삼성전기처럼 확인 가능한 GDR/DR 티커가 없는 종목은 매핑하지 않는다.
+// 000660: SKHY ADR 우선 (나스닥 세션) — HY9H.F GDR은 폴백.
 export const OVERSEAS_NIGHT_PROXIES: OverseasNightProxy[] = [
   {
     baseCode: "005930.KS",
@@ -727,13 +731,29 @@ export const OVERSEAS_NIGHT_PROXIES: OverseasNightProxy[] = [
     name: "삼성전자 GDR",
     exchange: "London IOB",
     sharesPerReceipt: 25,
+    proxyKind: "gdr",
   },
+  {
+    baseCode: "000660.KS",
+    proxyCode: "SKHY",
+    name: "SK하이닉스 ADR",
+    exchange: "NASDAQ",
+    // 1 ADR = 원주 0.1주 (ADR 10주 = 원주 1주). implied = price×fx÷sharesPerReceipt
+    sharesPerReceipt: 0.1,
+    proxyKind: "adr",
+    listingReferencePrice: 149, // 2026-07-10 공모가 USD
+  },
+];
+
+/** 1차 프록시 실패 시 사용 (하이닉스 GDR 등) */
+export const OVERSEAS_NIGHT_FALLBACKS: OverseasNightProxy[] = [
   {
     baseCode: "000660.KS",
     proxyCode: "HY9H.F",
     name: "SK하이닉스 GDR",
     exchange: "Frankfurt",
     sharesPerReceipt: 1,
+    proxyKind: "gdr",
   },
 ];
 
@@ -741,6 +761,12 @@ export function getOverseasNightProxy(
   code: string
 ): OverseasNightProxy | null {
   return OVERSEAS_NIGHT_PROXIES.find((p) => p.baseCode === code) ?? null;
+}
+
+export function getOverseasNightFallback(
+  code: string
+): OverseasNightProxy | null {
+  return OVERSEAS_NIGHT_FALLBACKS.find((p) => p.baseCode === code) ?? null;
 }
 
 // 한국 종목 코드를 6자리 숫자로 변환 (KIS API 호환). 예: 005930.KS -> 005930

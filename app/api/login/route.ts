@@ -139,30 +139,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(back, { status: 303 });
   }
 
-  // brute-force 방어. 정답 비번이어도 카운트는 증가 — 무차별 시도 vs 정상 사용 구분이 어렵고,
-  // 정상 사용자는 30일 cookie 라 로그인 자체가 매우 드물어 영향 거의 없음.
-  const ip = getClientIp(req);
-  const rl = await checkRateLimitMulti("login", ip, LOGIN_RATE_WINDOWS);
-  if (!rl.ok) {
-    const retryAfter = String(rl.retryAfterSec);
-    if (json) {
-      return NextResponse.json(
-        { ok: false, error: "잠시 후 다시 시도해 주세요" },
-        { status: 429, headers: { "Retry-After": retryAfter } }
-      );
-    }
-    const back = req.nextUrl.clone();
-    back.pathname = "/login";
-    back.search = "";
-    back.searchParams.set("error", "잠시 후 다시 시도해 주세요");
-    if (nextPath !== "/") back.searchParams.set("next", nextPath);
-    return NextResponse.redirect(back, {
-      status: 303,
-      headers: { "Retry-After": retryAfter },
-    });
-  }
-
+  // brute-force 방어: 틀린 비밀번호일 때만 카운트.
+  // (예전: 성공 시도도 카운트 → 오타 몇 번 후 정답도 429 로 막혀 "로그인 안 됨"처럼 보임)
   if (body.password !== pass) {
+    const ip = getClientIp(req);
+    const rl = await checkRateLimitMulti("login", ip, LOGIN_RATE_WINDOWS);
+    if (!rl.ok) {
+      const retryAfter = String(rl.retryAfterSec);
+      if (json) {
+        return NextResponse.json(
+          { ok: false, error: "잠시 후 다시 시도해 주세요" },
+          { status: 429, headers: { "Retry-After": retryAfter } }
+        );
+      }
+      const back = req.nextUrl.clone();
+      back.pathname = "/login";
+      back.search = "";
+      back.searchParams.set("error", "잠시 후 다시 시도해 주세요");
+      if (nextPath !== "/") back.searchParams.set("next", nextPath);
+      return NextResponse.redirect(back, {
+        status: 303,
+        headers: { "Retry-After": retryAfter },
+      });
+    }
     if (json) {
       return NextResponse.json(
         { ok: false, error: "비밀번호가 틀렸습니다" },

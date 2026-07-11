@@ -9,6 +9,8 @@ export function mockFlow(code: string): FlowData {
   const r2 = pseudo(seedBase * 29 + 7);
   const r3 = pseudo(seedBase * 41 + 11);
   const r4 = pseudo(seedBase * 53 + 13);
+  const r5 = pseudo(seedBase * 67 + 19);
+  const r6 = pseudo(seedBase * 71 + 23);
 
   // 단위: 원. 대략 -500억 ~ +500억 범위
   const scale = 5e10;
@@ -16,6 +18,15 @@ export function mockFlow(code: string): FlowData {
   const institutionNet = Math.round((r2 - 0.5) * scale);
   const foreignNet5d = Math.round((r3 - 0.5) * scale * 3);
   const institutionNet5d = Math.round((r4 - 0.5) * scale * 3);
+  // 방향 로직용 연속일 — 당일 부호와 맞춤 (1~4일)
+  const foreignStreak =
+    foreignNet === 0
+      ? 0
+      : Math.sign(foreignNet) * (1 + Math.floor(r5 * 4));
+  const institutionStreak =
+    institutionNet === 0
+      ? 0
+      : Math.sign(institutionNet) * (1 + Math.floor(r6 * 4));
   // 실제 시장과 비슷하게 개인은 외인+기관의 반대 흐름으로 근사.
   return {
     foreignNet,
@@ -24,6 +35,8 @@ export function mockFlow(code: string): FlowData {
     foreignNet5d,
     institutionNet5d,
     individualNet5d: -(foreignNet5d + institutionNet5d),
+    foreignStreak,
+    institutionStreak,
     source: "mock",
   };
 }

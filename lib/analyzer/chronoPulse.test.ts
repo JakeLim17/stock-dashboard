@@ -102,7 +102,7 @@ function bearishSnap(): StockSnapshot {
 }
 
 describe("ChronoPulse", () => {
-  it("알고리즘 이름·부제 노출", () => {
+  it("알고리즘 이름은 UI용 「예측」", () => {
     const r = computeChronoPulse({
       quote: bearishSnap().quote,
       flow: bearishSnap().flow,
@@ -117,7 +117,44 @@ describe("ChronoPulse", () => {
       todayChangeRate: -0.038,
     });
     assert.equal(r.name, CHRONO_PULSE_NAME);
-    assert.ok(r.subtitle.length > 0);
+    assert.equal(r.name, "예측");
+    assert.equal(r.subtitle, "");
+  });
+
+  it("SKHY·원주 — 상장·ADR 호재 요인", () => {
+    const listingDate = Date.UTC(2026, 6, 10) - 9 * 3600_000; // 2026-07-10 KST
+    const r = computeChronoPulse({
+      quote: bearishSnap().quote,
+      flow: { foreignNet: 0, institutionNet: 0, individualNet: 0 },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: {
+        level: "low",
+        score: 0,
+        drivers: [],
+        matchCount: 0,
+      },
+      meta: {
+        code: "SKHY",
+        name: "SK하이닉스 ADR",
+        kind: "us-stock",
+        sector: "글로벌반도체",
+      },
+      events: [
+        {
+          kind: "earnings",
+          symbolCode: "SKHY",
+          label: "SKHY 나스닥 ADR 상장",
+          date: listingDate,
+          importance: "high",
+          detail: "NASDAQ 직상장 · ipo",
+        },
+      ],
+    });
+    const listing = r.factors.find((f) => f.id === "listing-adr");
+    assert.ok(listing, "상장·ADR 호재 요인 필요");
+    assert.ok(listing!.bps > 0, `bps=${listing!.bps}`);
+    assert.match(listing!.label, /상장|ADR/);
   });
 
   it("하락 모멘텀·악재·외국인 순매도 → 음의 drift", () => {
@@ -138,7 +175,7 @@ describe("ChronoPulse", () => {
       newsRisk: snap.analysis.externalRisk,
     });
     assert.ok(r.driftDaily < 0, `expected negative drift, got ${r.driftDaily}`);
-    const supply = r.factors.find((f) => f.id === "supply");
+    const supply = r.factors.find((f) => f.id.startsWith("supply"));
     assert.ok(supply && supply.bps < 0, "수급 요인 음수");
     const news = r.factors.find((f) => f.id === "news-risk");
     assert.ok(news && news.bps < 0, "뉴스 리스크 음수");
@@ -163,6 +200,151 @@ describe("ChronoPulse", () => {
       lag0Daily: daily.lag0Daily,
     });
     assert.ok(month < 0);
+  });
+
+  it("SKHY ADR +15% → 000660 단기 overnight 알파 유의미 증가", () => {
+    const base = computeChronoPulse({
+      meta: bearishSnap().meta,
+      quote: bearishSnap().quote,
+      flow: { foreignNet: null, institutionNet: null, source: "kis-unavailable" },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+      overseasNightRate: 0,
+      overseasNightKind: "adr",
+    });
+    const surge = computeChronoPulse({
+      meta: bearishSnap().meta,
+      quote: bearishSnap().quote,
+      flow: { foreignNet: null, institutionNet: null, source: "kis-unavailable" },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+      overseasNightRate: 0.15,
+      overseasNightKind: "adr",
+    });
+    const overnight = surge.factors.find((f) => f.id === "overnight");
+    assert.ok(overnight, "overnight 요인 필요");
+    assert.equal(overnight!.bps, 200); // 15%×40% → 캡 200bps
+    assert.match(overnight!.label, /^ADR 야간 \+2\.0% 반영$/);
+    assert.ok(
+      surge.lag0Daily > base.lag0Daily + 0.01,
+      `ADR 급등 시 lag0 증가: base=${base.lag0Daily} surge=${surge.lag0Daily}`
+    );
+    // 1거래일 horizon에 단기 집중
+    const d1 = chronoPulseDriftForHorizon(surge.driftDaily, 1, {
+      structuralDaily: surge.structuralDaily,
+      lag0Daily: surge.lag0Daily,
+    });
+    const d10 = chronoPulseDriftForHorizon(surge.driftDaily, 10, {
+      structuralDaily: surge.structuralDaily,
+      lag0Daily: surge.lag0Daily,
+    });
+    assert.ok(d1 > d10 * 0.5 || surge.lag0Daily > 0.01, "단기(1~2일) 가중");
+  });
+
+  it("000660 상장 구간 — ADR 급등 시 overnight·listing 동방향·1개월 완만", () => {
+    const listingDate = Date.UTC(2026, 6, 10);
+    const resolvedRate = 168 / 149 - 1; // 공모 대비 급등
+    const r = computeChronoPulse({
+      meta: {
+        code: "000660.KS",
+        name: "SK하이닉스",
+        kind: "kr-stock",
+        sector: "반도체",
+      },
+      quote: bearishSnap().quote,
+      flow: {
+        foreignNet: -300_000_000_000,
+        institutionNet: -50_000_000_000,
+        foreignNet5d: -600_000_000_000,
+        foreignStreak: -4,
+        source: "kis",
+      },
+      buyScore: 40,
+      heatScore: 81,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+      events: [
+        {
+          kind: "earnings",
+          symbolCode: "000660.KS",
+          label: "SK하이닉스 미국 ADR 상장",
+          date: listingDate,
+          importance: "high",
+          detail: "ADR 상장",
+        },
+      ],
+      overseasNightRate: resolvedRate,
+      overseasNightKind: "adr",
+    });
+    const overnight = r.factors.find((f) => f.id === "overnight");
+    const listing = r.factors.find((f) => f.id === "listing-adr");
+    assert.ok(overnight && overnight.bps > 0, "ADR 야간 양수");
+    assert.ok(listing && listing.bps > 0, "상장 호재 양수");
+    const d1 = chronoPulseDriftForHorizon(r.driftDaily, 1, {
+      structuralDaily: r.structuralDaily,
+      lag0Daily: r.lag0Daily,
+    });
+    const d22 = chronoPulseDriftForHorizon(r.driftDaily, 22, {
+      structuralDaily: r.structuralDaily,
+      lag0Daily: r.lag0Daily,
+    });
+    assert.ok(d1 > 0, `1일 상방 expected, got ${d1}`);
+    assert.ok(d22 > -0.055, `1개월 −5.5% 초과 하방 금지, got ${d22}`);
+    // 예측 center 환산 — SKHY +12% 이상이면 1일 center > 현재가
+    const price = 2_180_000;
+    assert.ok(
+      price * Math.exp(d1) > price,
+      "000660 1일 center > 현재가"
+    );
+  });
+
+  it("외인 연속매수·5일 누적 칩", () => {
+    const r = computeChronoPulse({
+      meta: bearishSnap().meta,
+      quote: bearishSnap().quote,
+      flow: {
+        foreignNet: 50_000_000_000,
+        institutionNet: 10_000_000_000,
+        foreignNet5d: 250_000_000_000,
+        institutionNet5d: 50_000_000_000,
+        foreignStreak: 4,
+        institutionStreak: 3,
+        source: "kis",
+      },
+      buyScore: 55,
+      heatScore: 45,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+    });
+    const f5 = r.factors.find((f) => f.id === "supply-f5");
+    const streak = r.factors.find((f) => f.id === "supply-fstreak");
+    const iStreak = r.factors.find((f) => f.id === "supply-istreak");
+    assert.ok(f5 && f5.bps > 0, "외인 5일 순매수");
+    assert.ok(streak && /외인 연속매수 4일/.test(streak.label));
+    assert.ok(iStreak && /기관 연속매수 3일/.test(iStreak.label));
+  });
+
+  it("해외 종목은 수급 칩 스킵", () => {
+    const r = computeChronoPulse({
+      meta: {
+        code: "NVDA",
+        name: "엔비디아",
+        kind: "us-stock",
+        sector: "글로벌반도체",
+      },
+      quote: { ...bearishSnap().quote, code: "NVDA", name: "엔비디아" },
+      flow: {
+        foreignNet: 100_000_000_000,
+        institutionNet: 50_000_000_000,
+        foreignNet5d: 500_000_000_000,
+        foreignStreak: 5,
+        source: "mock",
+      },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+    });
+    assert.ok(!r.factors.some((f) => f.id.startsWith("supply")));
   });
 
   it("호재 뉴스가 있으면 구조 drift가 양수로 커진다", () => {

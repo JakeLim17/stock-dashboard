@@ -8,6 +8,7 @@ import type {
   ProgramTradeData,
   Quote,
   ShortBalanceData,
+  AskingPriceData,
 } from "../types";
 import {
   fetchKrFlow,
@@ -18,6 +19,7 @@ import {
   fetchKrQuote,
   fetchKrShortBalance,
   fetchUsQuote,
+  fetchKrAskingPrice,
 } from "./kis";
 import type { HistoricalPoint } from "./yahoo";
 import {
@@ -40,6 +42,8 @@ const SHORT_TTL_MS = 5 * 60_000;
 const LEADERS_TTL_MS = 30_000;
 // 분봉은 새 minute boundary 가 의미 있어 30s 캐시. 클라이언트 폴링은 별도로 1m 단위.
 const INTRADAY_CANDLES_TTL_MS = 30_000;
+/** 호가 — 단기 시그널용. 장중 12s 수준 */
+const ASKING_TTL_MS = 12_000;
 
 interface Entry<T> {
   data: T;
@@ -82,6 +86,10 @@ declare global {
   var __kisCandleFlight:
     | Map<string, Promise<HistoricalPoint[] | null>>
     | undefined;
+  // eslint-disable-next-line no-var
+  var __kisAskingCache: Map<string, Entry<AskingPriceData | null>> | undefined;
+  // eslint-disable-next-line no-var
+  var __kisAskingFlight: Map<string, Promise<AskingPriceData | null>> | undefined;
 }
 
 function getQuoteCache(): Map<string, Entry<Quote | null>> {
@@ -330,6 +338,28 @@ export async function getIntradayCandlesCached(
   });
 }
 
+function getAskingCache(): Map<string, Entry<AskingPriceData | null>> {
+  if (!global.__kisAskingCache) global.__kisAskingCache = new Map();
+  return global.__kisAskingCache;
+}
+function getAskingFlight(): Map<string, Promise<AskingPriceData | null>> {
+  if (!global.__kisAskingFlight) global.__kisAskingFlight = new Map();
+  return global.__kisAskingFlight;
+}
+
+/** 10호가 — 예측 알파용. KIS 키 없으면 null. TTL 12s */
+export async function getKrAskingPriceCached(
+  code: string
+): Promise<AskingPriceData | null> {
+  return getOrFetchHard({
+    cache: getAskingCache(),
+    flight: getAskingFlight(),
+    key: code,
+    ttlMs: ASKING_TTL_MS,
+    fetch: () => fetchKrAskingPrice(code).catch(() => null),
+  });
+}
+
 // 강제 갱신 — 사용자 새로고침 버튼 등에서 호출.
 export function invalidateKisExtraCache(code?: string): void {
   if (code) {
@@ -347,6 +377,8 @@ export function invalidateKisExtraCache(code?: string): void {
     getShortFlight().delete(code);
     getCandleCache().delete(code);
     getCandleFlight().delete(code);
+    getAskingCache().delete(code);
+    getAskingFlight().delete(code);
   } else {
     getQuoteCache().clear();
     getQuoteFlight().clear();
@@ -362,6 +394,8 @@ export function invalidateKisExtraCache(code?: string): void {
     getLeadersFlight().clear();
     getCandleCache().clear();
     getCandleFlight().clear();
+    getAskingCache().clear();
+    getAskingFlight().clear();
   }
 }
 

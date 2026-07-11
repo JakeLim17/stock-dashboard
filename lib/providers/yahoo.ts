@@ -23,6 +23,17 @@ function yfFetchOpts(): { fetchOptions: { signal: AbortSignal } } {
   return { fetchOptions: { signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS) } };
 }
 
+/** 신규상장(SKHY 등) meta 불완전 — 스키마 검증 끄고 quotes/필드 사용 */
+function yfFetchOptsRelaxed(): {
+  fetchOptions: { signal: AbortSignal };
+  validateResult: false;
+} {
+  return {
+    fetchOptions: { signal: AbortSignal.timeout(YAHOO_TIMEOUT_MS) },
+    validateResult: false,
+  };
+}
+
 // quote는 union 타입을 돌려줘서 직접 narrowing이 까다롭다.
 // → 결과를 record로 받고 안전한 num/str helper로 꺼내쓴다.
 type RawRecord = Record<string, unknown>;
@@ -37,18 +48,50 @@ export interface HistoricalPoint {
 }
 
 export async function fetchQuote(code: string, name: string): Promise<Quote> {
-  const raw = (await yahooFinance.quote(code, {}, yfFetchOpts())) as unknown as
-    | RawRecord
-    | RawRecord[]
-    | undefined;
+  const raw = (await yahooFinance.quote(
+    code,
+    {},
+    yfFetchOptsRelaxed()
+  )) as unknown as RawRecord | RawRecord[] | undefined;
   const q: RawRecord = Array.isArray(raw) ? (raw[0] ?? {}) : (raw ?? {});
 
-  const price = num(q.regularMarketPrice) ?? 0;
-  const prev = num(q.regularMarketPreviousClose) ?? price;
-  const abs = num(q.regularMarketChange) ?? price - prev;
+  let price = num(q.regularMarketPrice) ?? 0;
+  let prev = num(q.regularMarketPreviousClose) ?? price;
+  let abs = num(q.regularMarketChange) ?? (price > 0 ? price - prev : 0);
   const rate = num(q.regularMarketChangePercent);
   // Yahoo는 changePercent를 % 단위 (1.23 = 1.23%)로 줌. 우리는 0.0123 형식 사용.
-  const changeRate = rate != null ? rate / 100 : prev ? abs / prev : 0;
+  let changeRate = rate != null ? rate / 100 : prev ? abs / prev : 0;
+
+  let volume = num(q.regularMarketVolume);
+  let high = num(q.regularMarketDayHigh);
+  let low = num(q.regularMarketDayLow);
+  let open = num(q.regularMarketOpen);
+  let currency = str(q.currency);
+
+  // 신규상장: quote 에 가격 필드가 비어 있어도 chart 일봉에는 종가가 있는 경우가 많음 (SKHY).
+  // Yahoo v7 quote 가 빈 객체·0을 줘도 chart 폴백으로 카드를 채운다.
+  if (!(price > 0)) {
+    const bar = await fetchLatestChartBar(code);
+    if (bar && bar.close > 0) {
+      price = bar.close;
+      open = open ?? bar.open;
+      high = high ?? bar.high;
+      low = low ?? bar.low;
+      volume = volume ?? bar.volume;
+      if (!(prev > 0)) {
+        // 전일 종가 없으면 시가를 기준으로 등락 산출 (상장 첫날)
+        prev = bar.open > 0 ? bar.open : price;
+      }
+      abs = price - prev;
+      changeRate = prev > 0 ? abs / prev : 0;
+      if (!currency) currency = "USD";
+    }
+  }
+
+  // price=0 을 성공으로 넘기면 카드에 $0.00 · "불러오기 실패" 로 굳는다 — 실패로 올려 재시도·에러 배너.
+  if (!(price > 0)) {
+    throw new Error(`${code}: Yahoo 시세 없음 (quote·chart 모두 실패)`);
+  }
 
   // regularMarketTime은 라이브러리가 보통 Date 객체로 변환해서 줌. 안전하게 둘 다 처리.
   const priceTime = toEpochMs(q.regularMarketTime);
@@ -63,12 +106,12 @@ export async function fetchQuote(code: string, name: string): Promise<Quote> {
     prevClose: prev,
     changeAbs: abs,
     changeRate,
-    volume: num(q.regularMarketVolume),
-    high: num(q.regularMarketDayHigh),
-    low: num(q.regularMarketDayLow),
-    open: num(q.regularMarketOpen),
+    volume,
+    high,
+    low,
+    open,
     marketCap: num(q.marketCap),
-    currency: str(q.currency),
+    currency,
     valuation: {
       per: num(q.trailingPE),
       forwardPer: num(q.forwardPE),
@@ -175,44 +218,106 @@ export async function fetchQuotesBatch(
   );
 }
 
+/** chart 응답에서 일봉 배열 정규화 — 스키마 미완(신규상장)이어도 quotes 만 있으면 OK */
+function mapChartQuotes(list: RawRecord[]): HistoricalPoint[] {
+  return list
+    .filter((q) => num(q.close) != null && (num(q.close) as number) > 0)
+    .map((q) => {
+      const close = num(q.close) ?? 0;
+      const ds = q.date as Date | string | number;
+      const date = ds instanceof Date ? ds.getTime() : new Date(ds).getTime();
+      return {
+        date,
+        open: num(q.open) ?? close,
+        high: num(q.high) ?? close,
+        low: num(q.low) ?? close,
+        close,
+        volume: num(q.volume) ?? 0,
+      };
+    });
+}
+
+/** 최신 1일봉 — quote 가격 폴백·상장 첫날 시드용.
+ *  구간을 짧게→길게 재시도 (신규상장 validRanges·주말 공백 흡수). */
+async function fetchLatestChartBar(
+  code: string
+): Promise<HistoricalPoint | null> {
+  for (const lookback of [10, 30, 90]) {
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - lookback);
+      const raw = (await yahooFinance.chart(
+        code,
+        { period1: start, period2: end, interval: "1d" },
+        yfFetchOptsRelaxed()
+      )) as unknown as { quotes?: Array<RawRecord> };
+      const points = mapChartQuotes(raw?.quotes ?? []);
+      if (points.length > 0) return points[points.length - 1]!;
+    } catch {
+      // 다음 lookback 시도
+    }
+  }
+  return null;
+}
+
 export async function fetchHistorical(
   code: string,
   days = 90
 ): Promise<HistoricalPoint[]> {
   const end = new Date();
-  const start = new Date();
-  start.setDate(end.getDate() - days);
+  // 신규상장은 validRanges 가 1d/5d 뿐인 경우가 있어 요청 구간을 넉넉히 잡되
+  // 최소 14일은 확보해 상장 직후 1~수 봉을 놓치지 않는다.
+  const lookbacks = Array.from(
+    new Set([Math.max(days, 14), 30, 90, Math.max(days, 14)])
+  );
 
-  try {
-    const raw = (await yahooFinance.chart(
-      code,
-      {
-        period1: start,
-        period2: end,
-        interval: "1d",
-      },
-      yfFetchOpts()
-    )) as unknown as { quotes?: Array<RawRecord> };
+  for (const lookback of lookbacks) {
+    try {
+      const start = new Date();
+      start.setDate(end.getDate() - lookback);
+      const raw = (await yahooFinance.chart(
+        code,
+        {
+          period1: start,
+          period2: end,
+          interval: "1d",
+        },
+        // 신규상장 meta 불완전 → 스키마 검증 끄고 quotes 사용 (SKHY 실측)
+        yfFetchOptsRelaxed()
+      )) as unknown as { quotes?: Array<RawRecord> };
 
-    const list = raw?.quotes ?? [];
-    return list
-      .filter((q) => num(q.close) != null)
-      .map((q) => {
-        const close = num(q.close) ?? 0;
-        const ds = q.date as Date | string | number;
-        const date = ds instanceof Date ? ds.getTime() : new Date(ds).getTime();
-        return {
-          date,
-          open: num(q.open) ?? close,
-          high: num(q.high) ?? close,
-          low: num(q.low) ?? close,
-          close,
-          volume: num(q.volume) ?? 0,
-        };
-      });
-  } catch {
-    return [];
+      const points = mapChartQuotes(raw?.quotes ?? []);
+      if (points.length > 0) return points.slice(-days);
+    } catch {
+      // 다음 lookback
+    }
   }
+  return [];
+}
+
+/** quote OHLC 로 1봉 시드 — history 가 비었을 때 카드·예측이 0일로 굳지 않게 */
+export function seedHistoryFromQuote(quote: {
+  price: number;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  volume?: number | null;
+  priceTime?: number | null;
+  fetchedAt: number;
+}): HistoricalPoint[] {
+  if (!(quote.price > 0)) return [];
+  const close = quote.price;
+  return [
+    {
+      date: quote.priceTime ?? quote.fetchedAt,
+      open: quote.open && quote.open > 0 ? quote.open : close,
+      high: quote.high && quote.high > 0 ? quote.high : close,
+      low: quote.low && quote.low > 0 ? quote.low : close,
+      close,
+      volume: quote.volume && quote.volume > 0 ? quote.volume : 0,
+    },
+  ];
 }
 
 // 단순 SMA

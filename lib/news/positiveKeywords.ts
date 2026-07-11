@@ -277,6 +277,92 @@ export const POSITIVE_KEYWORDS: OpportunityKeyword[] = [
   { pattern: /\b(gain|gains|gained|gaining)\b/i, weight: 2, category: "실적호조", label: "gain" },
   { pattern: /\b(rise|rises|rose|rising)\b/i, weight: 1, category: "실적호조", label: "rise" },
   { pattern: /\b(stock\s+split|dividend\s+(hike|increase|raise|boost))\b/i, weight: 3, category: "정책호재", label: "dividend hike" },
+
+  // ── Round 5: 공시·자사주·AI/HBM·수주 호재 보강 ──────────
+  {
+    pattern: /(자사주\s*매입|자기주식\s*취득|자사주\s*소각)/i,
+    weight: 4,
+    category: "정책호재",
+    label: "자사주 매입",
+  },
+  {
+    pattern: /(무상증자)/i,
+    weight: 3,
+    category: "정책호재",
+    label: "무상증자",
+  },
+  {
+    pattern: /(배당.*(증액|확대|인상)|특별\s*배당)/i,
+    weight: 3,
+    category: "정책호재",
+    label: "배당 확대",
+  },
+  {
+    pattern: /(HBM|고대역폭).*(수주|공급|확대|점유)/i,
+    weight: 4,
+    category: "신제품/기술",
+    label: "HBM 호재",
+  },
+  {
+    pattern: /(AI\s*서버|데이터센터).*(수요|수주|급증)/i,
+    weight: 4,
+    category: "수주/계약",
+    label: "AI 수요",
+  },
+  {
+    pattern: /(실적\s*잠정).*(호조|상회|서프라이즈)/i,
+    weight: 4,
+    category: "실적호조",
+    label: "잠정 호조",
+  },
+  {
+    pattern: /(대규모\s*수주|조\s*단위\s*수주)/i,
+    weight: 5,
+    category: "수주/계약",
+    label: "조단위 수주",
+  },
+  {
+    pattern: /(신용등급).*(상향|상향\s*조정)/i,
+    weight: 3,
+    category: "정책호재",
+    label: "신용 상향",
+  },
+  {
+    pattern: /\b(buyback|share\s+repurchase)\b/i,
+    weight: 4,
+    category: "정책호재",
+    label: "buyback",
+  },
+  {
+    pattern: /\b(HBM|high.?bandwidth).*(win|supply|ramp)\b/i,
+    weight: 4,
+    category: "신제품/기술",
+    label: "HBM win",
+  },
+  {
+    pattern: /\b(AI\s+(demand|capex|server)|datacenter\s+demand)\b/i,
+    weight: 4,
+    category: "수주/계약",
+    label: "AI demand",
+  },
+  {
+    pattern: /\b(beat(s)?\s+estimates?|above\s+consensus|topped\s+estimates)\b/i,
+    weight: 4,
+    category: "실적호조",
+    label: "beat estimates",
+  },
+  {
+    pattern: /\b(raised\s+dividend|special\s+dividend)\b/i,
+    weight: 3,
+    category: "정책호재",
+    label: "dividend raise",
+  },
+  {
+    pattern: /\b(mega.?deal|multi-?billion\s+(contract|order))\b/i,
+    weight: 5,
+    category: "수주/계약",
+    label: "mega deal",
+  },
 ];
 
 // 헤드라인 1개에서 매칭된 키워드 전부 반환. 같은 라벨 dedupe.

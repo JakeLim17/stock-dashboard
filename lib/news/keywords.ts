@@ -104,6 +104,26 @@ export const RISK_KEYWORDS: RiskKeyword[] = [
   { pattern: /\b(verdict|ruled\s+against)\b/i, weight: 3, category: "정책", label: "verdict" },
   { pattern: /\bcrisis\b/i, weight: 4, category: "경기", label: "crisis" },
   { pattern: /\bpanic\b/i, weight: 4, category: "경기", label: "panic" },
+
+  // ── Round 5: 공시·수급·신용·AI/반도체 악재 보강 ──────────
+  { pattern: /(유상증자|전환사채\s*발행|CB\s*발행)/i, weight: 4, category: "실적", label: "유상·CB" },
+  { pattern: /(무상감자|감자\s*결정)/i, weight: 4, category: "실적", label: "감자" },
+  { pattern: /(횡령|배임)/i, weight: 5, category: "정책", label: "횡령·배임" },
+  { pattern: /(거래정지|관리종목|상장폐지\s*우려)/i, weight: 5, category: "정책", label: "거래정지" },
+  { pattern: /(신용등급).*(하향|강등)/i, weight: 4, category: "경기", label: "신용 하향" },
+  { pattern: /(대규모\s*감원|구조조정\s*발표)/i, weight: 4, category: "기술이슈", label: "대규모 감원" },
+  { pattern: /(수주\s*취소|계약\s*해지|공급\s*중단)/i, weight: 4, category: "실적", label: "수주 취소" },
+  { pattern: /(재고\s*증가|재고\s*부담|ASP\s*하락)/i, weight: 3, category: "실적", label: "재고·ASP" },
+  { pattern: /(HBM|고대역폭).*(지연|차질|실패)/i, weight: 4, category: "기술이슈", label: "HBM 차질" },
+  { pattern: /(중국\s*반도체).*(보조금\s*축소|규제\s*강화)/i, weight: 3, category: "제재", label: "중국 반도체" },
+  { pattern: /\b(dilution|secondary\s+offering|follow-on)\b/i, weight: 4, category: "실적", label: "dilution" },
+  { pattern: /\b(short\s+seller|shorts?\s+attack)\b/i, weight: 4, category: "실적", label: "short attack" },
+  { pattern: /\b(credit\s+downgrade|junk\s+status)\b/i, weight: 4, category: "경기", label: "credit downgrade" },
+  { pattern: /\b(halt(ed)?\s+trading|trading\s+halt)\b/i, weight: 5, category: "정책", label: "trading halt" },
+  { pattern: /\b(fraud|embezzlement)\b/i, weight: 5, category: "정책", label: "fraud" },
+  { pattern: /\b(inventory\s+glut|ASP\s+decline)\b/i, weight: 3, category: "실적", label: "inventory glut" },
+  { pattern: /\b(cut(s|ting)?\s+capex|capex\s+cut)\b/i, weight: 3, category: "실적", label: "capex cut" },
+  { pattern: /\b(miss(es)?\s+estimates?|below\s+consensus)\b/i, weight: 4, category: "실적", label: "miss estimates" },
 ];
 
 // 헤드라인이 "악재 반전(해소/회복)" 표현을 담고 있는지 — 외부 노출도 함께 사용.
