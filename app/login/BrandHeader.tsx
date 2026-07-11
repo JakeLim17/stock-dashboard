@@ -24,7 +24,7 @@ export function BrandHeader() {
             </div>
           </div>
           <h1 className="text-xl font-semibold tracking-tight">
-            Ticker
+            TickerDay
           </h1>
         </div>
 

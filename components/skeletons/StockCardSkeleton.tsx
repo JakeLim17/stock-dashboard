@@ -80,6 +80,36 @@ function SingleCardSkeleton({ index }: { index: number }) {
   );
 }
 
+// 관심종목 추가 직후 데이터 도착 전까지 보여주는 단일 placeholder 카드.
+// 종목명은 바로 보여주고, 나머지는 스켈레톤 + "불러오는 중" 안내로 채운다.
+// (FairValueMiniChart 로딩 스켈레톤과 같은 톤 — 은은한 pulse + 짧은 한국어 안내)
+export function PendingStockCard({ name }: { name: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-sm">
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Loader2 className="h-3 w-3 text-accent animate-spin" aria-hidden />
+        <span>종목 데이터를 불러오는 중이에요…</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="space-y-1.5">
+          <p className="text-sm font-semibold">{name}</p>
+          <Skeleton className="h-3 w-16 rounded" />
+        </div>
+        <Skeleton className="h-6 w-14 rounded-full" />
+      </div>
+      <div className="flex items-end gap-2">
+        <Skeleton className="h-7 w-28 rounded" />
+        <Skeleton className="h-4 w-16 rounded" />
+      </div>
+      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+        <Skeleton className="h-8 rounded" />
+        <Skeleton className="h-8 rounded" />
+        <Skeleton className="h-8 rounded" />
+      </div>
+    </div>
+  );
+}
+
 // StockCard grid — watchlist 개수만큼 카드 자리를 미리 잡아둔다.
 // 기본 6개 (모바일/태블릿/데스크탑 1·2·3-col 어디서나 자연스러움).
 export function StockCardSkeleton({ count = 6 }: { count?: number }) {

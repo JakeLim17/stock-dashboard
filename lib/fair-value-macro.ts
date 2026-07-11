@@ -91,17 +91,22 @@ function calendarCatalystBps(
   return Math.min(bps, maxBps);
 }
 
-/** 애널리스트 컨센서스 목표가 — 장기 시계에서 드리프트 하한 보강 */
+/** 애널리스트 컨센서스 목표가 — 장기 시계 mean-reversion (양방향) */
 function consensusAnchorBps(
   snap: StockSnapshot,
   horizon: MacroFairValueHorizon
 ): number {
   const upside = snap.consensus?.upsidePercent;
-  if (upside == null || upside <= 0.005) return 0;
+  if (upside == null || Math.abs(upside) < 0.005) return 0;
   const share =
-    horizon === "month" ? 0.42 : horizon === "week" ? 0.22 : 0;
+    horizon === "month" ? 0.28 : horizon === "week" ? 0.15 : 0;
   if (share <= 0) return 0;
-  return Math.round(upside * share * 10_000);
+  // 국내 목표가는 현재가 대비 +40~85%까지 만성적으로 부풀어 있어 (하향 리포트 회피 관행)
+  // 무상한 반영 시 이 항 하나가 매크로 예산(월 ±9%)을 통째로 포화시켰다.
+  // 입력 upside ±30% 클램프 + 팩터 자체 상한(월 ±2.5% · 주 ±1.2%)으로 억제.
+  const shrunk = Math.max(-0.3, Math.min(0.3, upside));
+  const cap = horizon === "month" ? 250 : 120;
+  return Math.max(-cap, Math.min(cap, Math.round(shrunk * share * 10_000)));
 }
 
 function pushFactor(
@@ -212,20 +217,18 @@ export function computeMacroFairValueAdjustment(
     rate += pushFactor(factors, "반도체 냉각", 12);
   }
 
-  // ── 지정학·관세 뉴스 리스크 ─────────────────────────────
+  // ── 지정학·관세 뉴스 리스크 (실제 리스크만 — "뉴스 안정 +0.1%" 더미 제거) ─
   const risk = a.externalRisk;
   if (risk.level === "high") rate += pushFactor(factors, "지정학·이벤트", -70);
   else if (risk.level === "medium") rate += pushFactor(factors, "외부 리스크", -35);
-  else if (risk.level === "low" && risk.score <= 5)
-    rate += pushFactor(factors, "뉴스 안정", 8);
 
   // ── 호재 뉴스 ─────────────────────────────────────────
   const opp = a.externalOpportunity;
-  const newsMult = isLongHorizon ? 1.5 : 1;
+  const newsMult = isLongHorizon ? 1.2 : 0.85;
   if (opp?.level === "high")
-    rate += pushFactor(factors, "호재 뉴스", Math.round(50 * newsMult));
+    rate += pushFactor(factors, "호재 뉴스", Math.round(35 * newsMult));
   else if (opp?.level === "medium")
-    rate += pushFactor(factors, "호재 뉴스", Math.round(25 * newsMult));
+    rate += pushFactor(factors, "호재 뉴스", Math.round(16 * newsMult));
 
   // ── 다가올 캘린더 호재 (ADR·실적·커스텀) ───────────────
   const catalystBps = calendarCatalystBps(
@@ -250,11 +253,11 @@ export function computeMacroFairValueAdjustment(
   }
 
   // ── 심리 — 매수우위·과열 (단기 과열 페널티는 내일만) ───
-  const sentimentBps = Math.round(((a.buyScore - 50) / 50) * 25);
+  const sentimentBps = Math.round(((a.buyScore - 50) / 50) * 18);
   rate += pushFactor(factors, "매수 심리", sentimentBps);
   if (!isLongHorizon && a.heatScore >= 75)
-    rate += pushFactor(factors, "단기 과열", -30);
-  else if (a.heatScore <= 35) rate += pushFactor(factors, "과열 완화", 15);
+    rate += pushFactor(factors, "단기 과열", -28);
+  else if (a.heatScore <= 35) rate += pushFactor(factors, "과열 완화", 12);
   else if (
     isLongHorizon &&
     a.heatScore >= 75 &&

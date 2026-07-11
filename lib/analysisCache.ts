@@ -53,7 +53,13 @@ export function getAnalysisCache(
   now = Date.now()
 ): CachedAnalysisEntry | null {
   const mem = memCache().get(symbol);
-  if (mem && isAnalysisCacheFresh(mem.cachedAt, now)) return mem;
+  if (mem && isAnalysisCacheFresh(mem.cachedAt, now)) {
+    if (mem.predictions && !mem.predictions.chronoPulse) {
+      memCache().delete(symbol);
+    } else {
+      return mem;
+    }
+  }
 
   try {
     const row = getDb()
@@ -66,6 +72,8 @@ export function getAnalysisCache(
       analysis: AnalysisResult;
       predictions: Predictions | null;
     };
+    // ChronoPulse 도입 전·불완전 캐시는 예측 재계산 강제
+    if (parsed.predictions && !parsed.predictions.chronoPulse) return null;
     const entry: CachedAnalysisEntry = {
       symbol,
       analysis: parsed.analysis,

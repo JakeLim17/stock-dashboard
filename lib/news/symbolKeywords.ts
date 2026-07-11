@@ -16,6 +16,9 @@ export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   { kw: "Samsung Electronics", code: "005930.KS" },
   { kw: "SK하이닉스", code: "000660.KS" },
   { kw: "SK Hynix", code: "000660.KS" },
+  // 헤드라인이 "하이닉스"만 쓰는 경우가 많음 (SK 접두 생략)
+  { kw: "하이닉스", code: "000660.KS" },
+  { kw: "Hynix", code: "000660.KS" },
   { kw: "hynix", code: "000660.KS" },
   { kw: "SK스퀘어", code: "402340.KS" },
   { kw: "SK Square", code: "402340.KS" },

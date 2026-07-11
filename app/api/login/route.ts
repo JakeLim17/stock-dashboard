@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  getDashboardPass,
+  isAuthBypassEnabled,
+} from "@/lib/authGate";
 import { checkRateLimitMulti, getClientIp } from "@/lib/rateLimit";
 
 // 미들웨어와 동일한 Edge Runtime 으로 실행해 cold start 를 줄이고
@@ -108,16 +112,31 @@ function safeNext(value: string | undefined | null): string {
 }
 
 export async function POST(req: NextRequest) {
-  const pass = process.env.DASHBOARD_PASS;
+  const pass = getDashboardPass();
   const body = await parseBody(req);
   const json = wantsJson(req);
   const nextPath = safeNext(body.next ?? req.nextUrl.searchParams.get("next"));
 
-  // 보호 비활성 환경 (env 미설정) — 그냥 통과 (rate-limit 도 적용하지 않음)
-  if (!pass) {
+  // 명시적 개발 우회 (AUTH_DISABLED=1) — rate-limit 생략.
+  if (isAuthBypassEnabled()) {
     return json
-      ? NextResponse.json({ ok: true, protected: false })
+      ? NextResponse.json({ ok: true, protected: false, bypass: true })
       : NextResponse.redirect(new URL(nextPath, req.url), { status: 303 });
+  }
+
+  // PASS 미설정 + 우회 없음 → 로그인 거부 (대시보드 자동 개방 금지).
+  if (!pass) {
+    if (json) {
+      return NextResponse.json(
+        { ok: false, error: "비밀번호가 설정되지 않았습니다 (DASHBOARD_PASS)" },
+        { status: 503 }
+      );
+    }
+    const back = req.nextUrl.clone();
+    back.pathname = "/login";
+    back.search = "";
+    back.searchParams.set("error", "비밀번호가 설정되지 않았습니다");
+    return NextResponse.redirect(back, { status: 303 });
   }
 
   // brute-force 방어. 정답 비번이어도 카운트는 증가 — 무차별 시도 vs 정상 사용 구분이 어렵고,

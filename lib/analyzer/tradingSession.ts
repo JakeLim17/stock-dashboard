@@ -85,6 +85,18 @@ function usPhase(minutesOfDay: number, weekday: number): TradingSessionPhase {
   return eveningLeg || morningLeg ? "us-regular" : "us-overnight";
 }
 
+/** 한국 정규장(평일 09:00~15:30 KST) — KIS 시세 TTL·폴링 분기용 */
+export function isKrRegularSession(now = new Date()): boolean {
+  const p = kstParts(now);
+  return krPhase(p.minutesOfDay, p.weekday) === "kr-regular";
+}
+
+/** 미국 정규장(KST 22:30~익일 05:00, 평일 세션) — KIS 해외 시세 TTL 분기용 */
+export function isUsRegularSession(now = new Date()): boolean {
+  const p = kstParts(now);
+  return usPhase(p.minutesOfDay, p.weekday) === "us-regular";
+}
+
 /** 1일 horizon — KST 거래 세션 기준 라벨·σ 스케일. "1일 후(명일)" 혼동 방지. */
 export function getOneDayHorizonContext(
   meta?: SymbolMeta | null,

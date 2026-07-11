@@ -159,12 +159,27 @@ async function refreshOneSymbol(
     ? computeIntradayMetrics(intradayBars)
     : null;
 
+  const emptyRisk = {
+    level: "low" as const,
+    score: 0,
+    drivers: [],
+    matchCount: 0,
+  };
+  const emptyOpp = {
+    level: "low" as const,
+    score: 0,
+    drivers: [],
+    matchCount: 0,
+  };
+
   const analysisRaw = analyze({
     quote,
     tech,
     flow,
     consensus: bundle.consensus,
     valuation: bundle.valuation,
+    externalRisk: emptyRisk,
+    externalOpportunity: emptyOpp,
     context: {
       semiHeat: null,
       nasdaqRate: 0,
@@ -210,6 +225,10 @@ async function refreshOneSymbol(
     todayChangeRate: quote.changeRate,
     momentumActive: !!analysis.verdict.momentumOverride,
     nowMs: ctx.cachedAt,
+    flow,
+    externalRisk: emptyRisk,
+    externalOpportunity: emptyOpp,
+    consensusUpside: bundle.consensus?.upsidePercent ?? null,
   });
   const predictions = applyThinHistoryPredictionGate(rawPredictions, dataQuality);
 

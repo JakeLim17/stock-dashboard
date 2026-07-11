@@ -705,13 +705,68 @@ export async function fetchWatchlistSnapshots(
         flow,
       });
       const cachedAnalysis = getAnalysisCache(meta.code);
+      const eventsForVolatility: EventItem[] = [
+        ...upcomingEventsMerged,
+        ...getMacroEventsCached(),
+      ];
 
       let analysis: AnalysisResult;
       let predictions: Predictions | null;
 
+      const buildPredictions = (a: AnalysisResult): Predictions | null => {
+        let pred: Predictions | null = predict({
+          quote,
+          history: hist,
+          nasdaqHistory,
+          fxHistory,
+          ixicHistory,
+          kospiHistory,
+          soxHistory,
+          dxyHistory,
+          us10yHistory,
+          vix,
+          us10y,
+          meta,
+          buyScore: a.buyScore,
+          heatScore: a.heatScore,
+          overseasNight,
+          intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
+          events: eventsForVolatility,
+          todayChangeRate: quote.changeRate,
+          momentumActive: !!a.verdict.momentumOverride,
+          newsRisk: externalRisk,
+          flow,
+          externalRisk,
+          externalOpportunity,
+          consensusUpside: consensus?.upsidePercent ?? null,
+          marketContext: context ?? undefined,
+        });
+        pred = applyThinHistoryPredictionGate(pred, dataQuality);
+        if (pred?.targets) {
+          const REDUCE_ACTIONS = new Set(["REDUCE", "TRIM", "AVOID"]);
+          if (REDUCE_ACTIONS.has(a.verdict.action)) {
+            const t = pred.targets;
+            if (
+              t.entry > 0 &&
+              (t.takeProfit1 >= t.entry * 1.03 ||
+                t.takeProfit2 >= t.entry * 1.03)
+            ) {
+              pred = { ...pred, targets: { ...t, suppressed: true } };
+            }
+          }
+        }
+        return pred;
+      };
+
       if (cachedAnalysis) {
-        analysis = cachedAnalysis.analysis;
-        predictions = cachedAnalysis.predictions;
+        // 규칙 분석은 캐시 재사용하되, 뉴스·ChronoPulse 예측은 항상 최신으로.
+        // (캐시가 호재/악재를 1시간 굳혀 전 종목 "뉴스 안정 +0.1%"·flat 곡선이 나오던 버그)
+        analysis = {
+          ...cachedAnalysis.analysis,
+          externalRisk,
+          externalOpportunity,
+        };
+        predictions = buildPredictions(analysis);
       } else {
         const analysisRaw = analyze({
           quote,
@@ -747,46 +802,7 @@ export async function fetchWatchlistSnapshots(
           ].slice(0, 3);
           analysis.reasons = analysis.shortTerm.reasons;
         }
-        const eventsForVolatility: EventItem[] = [
-          ...upcomingEventsMerged,
-          ...getMacroEventsCached(),
-        ];
-        predictions = predict({
-          quote,
-          history: hist,
-          nasdaqHistory,
-          fxHistory,
-          ixicHistory,
-          kospiHistory,
-          soxHistory,
-          dxyHistory,
-          us10yHistory,
-          vix,
-          us10y,
-          meta,
-          buyScore: analysis.buyScore,
-          heatScore: analysis.heatScore,
-          overseasNight,
-          intradayDailyVol: intradayMetrics?.parkinsonDaily ?? null,
-          events: eventsForVolatility,
-          todayChangeRate: quote.changeRate,
-          momentumActive: !!analysis.verdict.momentumOverride,
-          newsRisk: externalRisk,
-        });
-        predictions = applyThinHistoryPredictionGate(predictions, dataQuality);
-        if (predictions?.targets) {
-          const REDUCE_ACTIONS = new Set(["REDUCE", "TRIM", "AVOID"]);
-          if (REDUCE_ACTIONS.has(analysis.verdict.action)) {
-            const t = predictions.targets;
-            if (
-              t.entry > 0 &&
-              (t.takeProfit1 >= t.entry * 1.03 ||
-                t.takeProfit2 >= t.entry * 1.03)
-            ) {
-              predictions.targets = { ...t, suppressed: true };
-            }
-          }
-        }
+        predictions = buildPredictions(analysis);
         saveAnalysis(meta.code, quote.fetchedAt, analysis);
       }
 
@@ -912,7 +928,9 @@ async function buildSnapshotLiteCore(
   };
 }
 
-const LITE_SNAPSHOT_TTL_MS = 40_000;
+// 정규장 폴링(15s)보다 짧게 — 폴링마다 새 시세를 받을 수 있게.
+// 예전 40s 는 폴링을 줄여도 서버 캐시가 병목이었음.
+const LITE_SNAPSHOT_TTL_MS = 12_000;
 type LiteSnapshotCache = { data: DashboardSnapshot; at: number };
 const liteSnapshotCache = new Map<string, LiteSnapshotCache>();
 const liteSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();

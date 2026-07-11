@@ -12,10 +12,9 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 // → aria-busy 만 사용하고 disabled 는 걸지 않는다. 두 번째 클릭은 어차피
 //   navigation 으로 페이지가 바뀌어 거의 발생하지 않으며, 발생해도 같은 POST 라 무해.
 //
-// 추가: 클릭 즉시 풀스크린 LoadingScreen 오버레이를 띄워 단계 메시지·카운트다운·progress bar 가
-// POST + redirect 진행 동안에도 보이게 한다. 새 페이지(/) 진입 후 page.tsx 의 Suspense fallback
-// 도 LoadingScreen 이라 자연스럽게 이어진다 (디자인 동일 → 사용자에게 연속처럼 보임,
-// 카운트는 새 mount 로 재시작되지만 단계 메시지는 즉시 흘러간다).
+// 클릭 즉시 LoadingScreen 을 띄우되, form 이 실제 제출 가능할 때만.
+// (비번 비어 있으면 HTML5 required 가 submit 을 막는데, 예전엔 onClick 만으로
+//  오버레이가 떠서 "로그인 없이 대시보드 로딩"처럼 보이며 영원히 멈춤.)
 export function LoginSubmitButton() {
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,7 +22,15 @@ export function LoginSubmitButton() {
     <>
       <button
         type="submit"
-        onClick={() => setSubmitting(true)}
+        onClick={(e) => {
+          const form = e.currentTarget.form;
+          if (!form) return;
+          // required / pattern 등 브라우저 검증 실패 시 submit 안 됨 → 오버레이 금지
+          if (!form.checkValidity()) return;
+          const pwd = new FormData(form).get("password");
+          if (typeof pwd !== "string" || pwd.trim().length === 0) return;
+          setSubmitting(true);
+        }}
         aria-busy={submitting}
         className="group relative w-full h-11 inline-flex items-center justify-center gap-2 rounded-lg overflow-hidden font-medium text-white transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] touch-manipulation shadow-[0_0_24px_-8px_rgba(77,141,255,0.55)] hover:shadow-[0_0_32px_-6px_rgba(77,141,255,0.85)]"
       >
@@ -73,7 +80,7 @@ export function LoginSubmitButton() {
           role="status"
           aria-live="polite"
         >
-          <LoadingScreen />
+          <LoadingScreen stuckAfterSec={45} />
           <style>{`
             @keyframes fadeInOverlay {
               from { opacity: 0; }

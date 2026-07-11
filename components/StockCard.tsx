@@ -22,10 +22,12 @@ import { VerdictHint } from "./VerdictHint";
 import { VerdictReasonLine } from "./VerdictReasonLine";
 import { VerdictReasonBullets } from "./VerdictReasonBullets";
 import { FairValueMiniChart } from "./FairValueMiniChart";
+import { HelpTooltip } from "./HelpTooltip";
 import {
   buildMultiHorizonFairValue,
   buildPredictionCompactLine,
 } from "@/lib/prediction-display";
+import { formatChronoPulseBps } from "@/lib/analyzer/chronoPulse";
 import { FAIR_VALUE_BACKTEST_META } from "@/lib/fair-value";
 import { SIGNAL_LABEL } from "@/lib/signal-labels";
 import { dnLabel } from "./EventCalendar";
@@ -387,14 +389,35 @@ function FairValueSection({
       ? primary.macroFactors
           .filter((f) => Math.abs(f.bps) >= 1)
           .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps))
-          .slice(0, 3)
+          .slice(0, 2)
       : [];
+
+  const chronoPulse = snap.predictions?.chronoPulse;
+  const topChronoFactors =
+    chronoPulse?.factors
+      .filter((f) => Math.abs(f.bps) >= 1)
+      .slice(0, 4) ?? [];
 
   return (
     <div className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
-          가격 추정 그래프 · ~1개월
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+            {chronoPulse ? (
+              <>
+                <span className="text-accent font-medium">{chronoPulse.name}</span>
+                <span className="mx-1 opacity-50">·</span>
+                {chronoPulse.subtitle}
+              </>
+            ) : (
+              "가격 추정 그래프 · ~1개월"
+            )}
+          </div>
+            <HelpTooltip
+              content="베이스는 통계(모멘텀·평균회귀·√t 밴드), ChronoPulse는 수급·뉴스·미장 가산 알파입니다. 점선은 합산 경로, 음영은 변동 밴드예요."
+              label="예측 그래프 안내"
+              side="bottom"
+            />
         </div>
         {primary?.ready && (
           <span className="text-[10px] text-muted-foreground tabular">
@@ -423,8 +446,34 @@ function FairValueSection({
         </div>
       )}
 
-      {(topMacro.length > 0 || snap.predictions?.newsVolatility) && (
+      {(topChronoFactors.length > 0 ||
+        (chronoPulse?.baseDaily != null &&
+          Math.abs(chronoPulse.baseDaily) >= 0.0001) ||
+        topMacro.length > 0 ||
+        snap.predictions?.newsVolatility) && (
         <div className="flex flex-wrap gap-1 pt-0.5">
+          {chronoPulse?.baseDaily != null &&
+            Math.abs(chronoPulse.baseDaily) >= 0.0001 && (
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded tabular bg-muted text-muted-foreground"
+                title="통계 베이스(모멘텀·평균회귀)"
+              >
+                통계 베이스{" "}
+                {chronoPulse.baseDaily >= 0 ? "+" : ""}
+                {(chronoPulse.baseDaily * 100).toFixed(2)}%
+              </span>
+            )}
+          {topChronoFactors.map((f) => (
+            <span
+              key={`cp-${f.id}-${f.label}`}
+              className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
+                f.bps >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall"
+              }`}
+              title={`ChronoPulse 알파 · ${f.label}`}
+            >
+              {f.label} {formatChronoPulseBps(f.bps)}
+            </span>
+          ))}
           {topMacro.map((f) => (
             <span
               key={f.label}
@@ -452,11 +501,17 @@ function FairValueSection({
         </div>
       )}
       {readyList.some((h) => h.id === "tomorrow") && (
-        <div className="text-[10px] text-muted-foreground/60">
-          앱장 기준 백테스트 오차 시가{" "}
-          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
-          · 종가{" "}
-          {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+          <span>
+            앱장 기준 백테스트 오차(참고·삼성전자) 시가{" "}
+            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextOpen.mape * 100).toFixed(1)}%
+            · 종가{" "}
+            {(FAIR_VALUE_BACKTEST_META.ahCloseToNextClose.mape * 100).toFixed(1)}%
+          </span>
+          <HelpTooltip
+            content="삼성전자+GDR 92영업일 백테스트 MAPE입니다. 종목별 수치가 아니라 모델 전반 참고용이에요."
+            label="백테스트 오차 안내"
+          />
         </div>
       )}
     </div>

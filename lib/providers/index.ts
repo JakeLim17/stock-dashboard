@@ -7,15 +7,18 @@ import {
 } from "./yahoo";
 import { fetchNaverQuote, fetchNaverFlow, isKrStock } from "./naver";
 import {
-  fetchKrQuote,
   fetchKrHistorical,
-  fetchKrFlow,
-  fetchKrIndex,
-  fetchUsQuote,
   fetchUsHistorical,
   kisEnabled,
   yahooIndexToKisCode,
 } from "./kis";
+import {
+  getKrFlowCached,
+  getKrIndexCached,
+  getKrQuoteCached,
+  getUsQuoteCached,
+  invalidateKisExtraCache,
+} from "./kisExtraCache";
 import { mockFlow } from "./mock";
 import type { FlowData, Quote } from "../types";
 
@@ -41,6 +44,10 @@ import type { FlowData, Quote } from "../types";
 //     (StockDetailPanel "호가" 탭 활성 시에만 폴링 — 옵트인)
 //   - 시장순위: app/api/leaders → fetchKrMarketLeaders (30s 캐시)
 //   - 프로그램매매·공매도: kisExtraCache (snapshot 빌드 시)
+//
+// KIS 시세·수급은 kisExtraCache 로 세션별 TTL+SWR+in-flight 공유:
+//   시세 장중 8s / 장후 45s (+ SWR 20s) · 수급 5분.
+//   KR lite 시세는 네이버 1순위라 보통 KIS 시세 TTL과 무관(폴백·지수·해외만 영향).
 
 function isUsTicker(code: string): boolean {
   // KIS 해외시세는 NYSE/NASDAQ/AMEX 등 미국 종목만 다룬다.
@@ -53,7 +60,7 @@ async function fetchQuote(code: string, name: string): Promise<Quote> {
   // 한국 지수(^KS11, ^KQ11, ^KS200) — KIS inquire-index-price 우선 → Yahoo 폴백.
   // 지수는 실시간성이 중요하고 KIS 토큰 1회로 KOSPI/KOSDAQ 동시 갱신 가능.
   if (kisEnabled() && yahooIndexToKisCode(code) != null) {
-    const kisIdx = await fetchKrIndex(code, name);
+    const kisIdx = await getKrIndexCached(code, name);
     if (kisIdx) {
       // IndexQuote → Quote 변환. 지수는 거래량 외 valuation/marketCap 없음.
       const prevClose = kisIdx.value - kisIdx.changeAbs;
@@ -82,7 +89,7 @@ async function fetchQuote(code: string, name: string): Promise<Quote> {
     const naver = await fetchNaverQuote(code, name);
     if (naver) return naver;
     if (kisEnabled()) {
-      const kis = await fetchKrQuote(code, name);
+      const kis = await getKrQuoteCached(code, name);
       if (kis) return kis;
     }
     return fetchYahooQuote(code, name);
@@ -93,7 +100,7 @@ async function fetchQuote(code: string, name: string): Promise<Quote> {
   // 종종 수 분 stale 응답을 준다. 화면에 "5분 전" 으로 굳어 보이는 원인.
   // KIS 키가 없거나 비ASCII 티커(인덱스/환율)는 자연스럽게 Yahoo 로 떨어진다.
   if (kisEnabled() && isUsTicker(code)) {
-    const kis = await fetchUsQuote(code, name).catch(() => null);
+    const kis = await getUsQuoteCached(code, name).catch(() => null);
     if (kis && kis.price > 0) return kis;
   }
   return fetchYahooQuote(code, name);
@@ -188,9 +195,9 @@ export async function fetchFlowOrMock(
     return { flow: m, source: "mock" };
   }
 
-  // 1순위: KIS 실시간 (FHKST01010900) — 토스/KRX 와 정합.
+  // 1순위: KIS 실시간 (FHKST01010900) — 토스/KRX 와 정합. 5분 캐시.
   if (kisEnabled()) {
-    const kisFlow = await fetchKrFlow(code);
+    const kisFlow = await getKrFlowCached(code);
     if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
       return { flow: kisFlow, source: "kis" };
     }
@@ -237,3 +244,4 @@ export async function fetchFlowOrMock(
 }
 
 export { kisEnabled };
+export { invalidateKisExtraCache };

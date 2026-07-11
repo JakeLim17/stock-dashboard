@@ -130,8 +130,47 @@ describe("computeMacroFairValueAdjustment horizon", () => {
     const tomorrow = computeMacroFairValueAdjustment(snap, {
       horizon: "tomorrow",
     });
-    assert.ok(tomorrow.rate > 0);
     assert.ok(tomorrow.factors.some((f) => f.label === "일정 호재"));
+    const catalyst = tomorrow.factors.find((f) => f.label === "일정 호재");
+    assert.ok(catalyst && catalyst.bps > 0);
+  });
+
+  it("컨센 하방(목표가 < 현재가)이면 월간 컨센 팩터가 음수", () => {
+    const snap = baseSnap();
+    snap.upcomingEvents = [];
+    snap.analysis.externalOpportunity = {
+      level: "low",
+      score: 5,
+      drivers: [],
+      matchCount: 0,
+    };
+    snap.consensus = {
+      ...snap.consensus!,
+      targetMean: 2_400_000,
+      upsidePercent: -0.13,
+    };
+    const month = computeMacroFairValueAdjustment(snap, { horizon: "month" });
+    const consensusFactor = month.factors.find((f) => f.label === "컨센 목표");
+    assert.ok(consensusFactor, "컨센 목표 팩터 존재");
+    assert.ok(
+      consensusFactor!.bps < 0,
+      `하방 컨센은 음수 bps여야 함, got ${consensusFactor!.bps}`
+    );
+  });
+
+  it("부풀린 컨센 upside(+80%)도 월간 ±2.5% 상한으로 억제", () => {
+    const snap = baseSnap();
+    snap.consensus = {
+      ...snap.consensus!,
+      upsidePercent: 0.8,
+    };
+    const month = computeMacroFairValueAdjustment(snap, { horizon: "month" });
+    const consensusFactor = month.factors.find((f) => f.label === "컨센 목표");
+    assert.ok(consensusFactor);
+    assert.ok(
+      consensusFactor!.bps <= 250,
+      `월간 컨센 상한 250bps 초과: ${consensusFactor!.bps}`
+    );
   });
 
   it("SK스퀘어는 하이닉스 ADR 일정 호재를 장기에 반영", () => {

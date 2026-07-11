@@ -18,6 +18,7 @@ import {
   type StockDetailPanelHandle,
 } from "./StockDetailPanel";
 import { MobileDetailSheet } from "./MobileDetailSheet";
+import { PendingStockCard } from "./skeletons/StockCardSkeleton";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { ThemeGroupView } from "./ThemeGroupView";
 import { ThemeToggle } from "./ThemeToggle";
@@ -32,7 +33,15 @@ import {
   Search,
   Plus,
   X,
+  Bookmark,
 } from "lucide-react";
+import { HelpTooltip } from "./HelpTooltip";
+import {
+  loadDefaultWatchlist,
+  primaryWatchCodes,
+  saveDefaultWatchlist,
+  hasSavedDefaultWatchlist,
+} from "@/lib/watchlist-default";
 
 async function logout() {
   try {
@@ -43,8 +52,9 @@ async function logout() {
   window.location.replace("/login");
 }
 
-// ─── 폴링 주기 (2026-06 Vercel 절감 2차) ─────────────────────────
-// 정규장 30s + CDN 캐시 45s → 대부분 엣지 히트. WS 실시간가로 체감 보완.
+// ─── 폴링 주기 ──────────────────────────────────────────────────
+// 정규장 15s — KIS 장중 시세 TTL(8s)보다 길게, 체감은 살림. WS(KR)로 보완.
+// 예전 30s 는 캐시를 8s로 줄여도 UI가 30s마다만 갱신돼 체감이 느렸음.
 // env 로 override 가능 (NEXT_PUBLIC_POLL_INTERVAL_*).
 function envInt(key: string, fallback: number): number {
   if (typeof process === "undefined") return fallback;
@@ -54,7 +64,7 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 30_000);
+const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
 const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 90_000);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
@@ -64,23 +74,14 @@ const OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OFF_HOURS_MS",
   600_000
 );
-const KIS_REGULAR_REFRESH_MS = envInt(
-  "NEXT_PUBLIC_POLL_INTERVAL_KIS_REGULAR_MS",
-  25_000
-);
-const KIS_EXTENDED_REFRESH_MS = envInt(
-  "NEXT_PUBLIC_POLL_INTERVAL_KIS_EXTENDED_MS",
-  60_000
-);
-const KIS_OFF_HOURS_REFRESH_MS = envInt(
-  "NEXT_PUBLIC_POLL_INTERVAL_KIS_OFF_HOURS_MS",
-  300_000
-);
 /** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
 const FULL_SNAPSHOT_MIN_MS = envInt(
   "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
   900_000
 );
+/** 클라이언트 fetch 하드 타임아웃 — 서버 hang 시 UI 무한 대기 방지 */
+const LITE_FETCH_TIMEOUT_MS = 25_000;
+const FULL_FETCH_TIMEOUT_MS = 60_000;
 const COMMIT_DEBOUNCE_MS = 250; // 연속 칩 토글 시 마지막 변경만 fetch
 const STORAGE_KEY = "watchlist.codes.v1";
 const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";
@@ -101,6 +102,8 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   // 1) 정규장 OPEN인 종목이 하나라도 있으면 가장 빠른 간격
   // 2) 없으면 시간외(프리/애프터/한국 시간외 단일가)가 활성인지 확인
   // 3) 그것마저 없으면 완전 비장중
+  // ※ KIS 수급(flow.source=kis)이 있어도 폴링을 더 빠르게 하지 않음.
+  //   수급은 서버 5분 캐시 · 시세는 세션별 TTL(장중 8s)+SWR / WS·lite 로 충분.
   const isRegular = snapshot.primaries.some(
     (p) => (p.quote.marketState ?? "").toUpperCase() === "REGULAR"
   );
@@ -114,25 +117,23 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   const isOverseasNightOpen = snapshot.primaries.some(
     (p) => (p.overseasNight?.marketState ?? "").toUpperCase() === "REGULAR"
   );
-  const hasRealFlow = snapshot.primaries.some((p) => p.flow.source === "kis");
 
-  if (hasRealFlow) {
-    if (isRegular) return KIS_REGULAR_REFRESH_MS;
-    if (isExtended || isQuoteExtended) return KIS_EXTENDED_REFRESH_MS;
-    return KIS_OFF_HOURS_REFRESH_MS;
-  }
   if (isRegular) return REGULAR_REFRESH_MS;
   if (isExtended || isQuoteExtended) return EXTENDED_REFRESH_MS;
   if (isOverseasNightOpen) return OVERSEAS_NIGHT_REFRESH_MS;
   return OFF_HOURS_REFRESH_MS;
 }
 
-/** lite 응답은 시세·지표만 갱신 — 분석·예측·뉴스는 full 스냅샷 유지 */
+/** lite 응답은 시세·지표만 갱신 — 분석·예측·뉴스는 full 스냅샷 유지.
+ *  prev 에 없던 신규 종목(방금 추가된 카드)은 lite 항목(시세 + "분석 중" placeholder)을
+ *  그대로 append — 추가 직후 카드가 가격부터 즉시 채워지도록. */
 function mergeLiteIntoSnapshot(
   prev: DashboardSnapshot,
   lite: DashboardSnapshot
 ): DashboardSnapshot {
   const quoteByCode = new Map(lite.primaries.map((p) => [p.meta.code, p.quote]));
+  const prevCodes = new Set(prev.primaries.map((p) => p.meta.code));
+  const appended = lite.primaries.filter((p) => !prevCodes.has(p.meta.code));
   return {
     ...prev,
     generatedAt: lite.generatedAt,
@@ -141,10 +142,13 @@ function mergeLiteIntoSnapshot(
     macroEvents: lite.macroEvents,
     kisActive: lite.kisActive,
     errors: { ...prev.errors, ...lite.errors },
-    primaries: prev.primaries.map((p) => {
-      const q = quoteByCode.get(p.meta.code);
-      return q ? { ...p, quote: q } : p;
-    }),
+    primaries: [
+      ...prev.primaries.map((p) => {
+        const q = quoteByCode.get(p.meta.code);
+        return q ? { ...p, quote: q } : p;
+      }),
+      ...appended,
+    ],
   };
 }
 
@@ -165,18 +169,31 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [useOverseasNight, setUseOverseasNight] = useState(false);
+  const [watchLoading, setWatchLoading] = useState(false);
+  const [defaultSavedHint, setDefaultSavedHint] = useState(false);
   // 모바일(lg 미만)에서 카드 탭 시 띄우는 상세 sheet 모달 open 여부.
   // 데스크탑에서도 setSheetOpen(true) 자체는 호출되지만, MobileDetailSheet 컴포넌트가
   // `lg:hidden` 으로 자기 자신을 가리므로 화면엔 영향 없음.
   const [sheetOpen, setSheetOpen] = useState(false);
+  // 방금 추가돼 아직 full 분석이 도착하지 않은 종목 코드 — 카드별 "분석 중" 표시용.
+  const [pendingCodes, setPendingCodes] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [showNews, setShowNews] = useState(initial.phase !== "lite");
+  /** full 실패·타임아웃 후에도 "분석 중" 스피너를 무한히 돌리지 않음 */
+  const [analysisGaveUp, setAnalysisGaveUp] = useState(false);
+  const [fullRetryNonce, setFullRetryNonce] = useState(0);
   const [, setTick] = useState(0); // "n초 전" 표시 강제 갱신
-  const abortRef = useRef<AbortController | null>(null);
+  /** lite/full 분리 — lite 폴링이 full 분석을 abort 하지 않도록 */
+  const liteAbortRef = useRef<AbortController | null>(null);
+  const fullAbortRef = useRef<AbortController | null>(null);
+  const fullRetryCountRef = useRef(0);
   const lastQueryRef = useRef<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootedRef = useRef(false);
   const fullFetchStartedRef = useRef(false);
   const watchCodesRef = useRef(watchCodes);
+  const pendingCodesRef = useRef<ReadonlySet<string>>(pendingCodes);
   const overseasNightRef = useRef(useOverseasNight);
   // 선택 종목이 잠깐 응답에서 빠질 때(API 갱신 사이) 마지막 본 데이터를 유지하는 안정화 ref.
   // origin/main 의 안정화 변경을 살림. (PredictionHero 는 카드에 흡수되어 제거됨.)
@@ -192,11 +209,26 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     watchCodesRef.current = watchCodes;
   }, [watchCodes]);
   useEffect(() => {
+    pendingCodesRef.current = pendingCodes;
+  }, [pendingCodes]);
+  useEffect(() => {
     overseasNightRef.current = useOverseasNight;
   }, [useOverseasNight]);
   const refreshMs = resolveRefreshMs(snap);
-  const analysisPending = snap.phase === "lite";
+  const analysisPending = snap.phase === "lite" && !analysisGaveUp;
   const isMobile = useIsMobile();
+
+  const scheduleFullRetry = useCallback(() => {
+    fullFetchStartedRef.current = false;
+    if (fullRetryCountRef.current >= 2) {
+      setAnalysisGaveUp(true);
+      setPendingCodes(new Set());
+      setShowNews(true);
+      return;
+    }
+    fullRetryCountRef.current += 1;
+    window.setTimeout(() => setFullRetryNonce((n) => n + 1), 2_500);
+  }, []);
 
   // refresh는 항상 같은 함수 인스턴스 (의존성 없음). codes 인자를 넘기지 않으면 최신 watchCodes 사용.
   // force=true 면 서버 in-memory 캐시(컨센서스/시장경보)도 비우고 새로 fetch — 사용자 새로고침 버튼 전용.
@@ -207,7 +239,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       codes?: string[],
       nightMode?: boolean,
       force = false,
-      silent = false
+      silent = false,
+      // "lite": 시세만 빠르게 / "full": 분석 포함 전체 / 생략(auto): 시간 기준 자동
+      mode?: "lite" | "full"
     ) => {
       const target = codes ?? watchCodesRef.current;
       const query = encodeURIComponent(target.join(","));
@@ -217,15 +251,28 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         force ||
         lastFullFetchAtRef.current === 0 ||
         now - lastFullFetchAtRef.current >= FULL_SNAPSHOT_MIN_MS;
-      const useLite = !force && !needsFull;
+      const useLite =
+        mode === "lite" ? true : mode === "full" ? false : !force && !needsFull;
       const requestKey = `${query}:${includeNight ? "night" : "regular"}:${
         force ? "force" : useLite ? "lite" : "full"
       }`;
       lastQueryRef.current = requestKey;
 
-      if (abortRef.current) abortRef.current.abort();
+      // lite는 full을 끊지 않음 — 분석 중에도 시세 폴링 가능
+      if (useLite) {
+        if (liteAbortRef.current) liteAbortRef.current.abort();
+      } else {
+        if (fullAbortRef.current) fullAbortRef.current.abort();
+      }
       const ctrl = new AbortController();
-      abortRef.current = ctrl;
+      if (useLite) liteAbortRef.current = ctrl;
+      else fullAbortRef.current = ctrl;
+      const timeoutMs = useLite ? LITE_FETCH_TIMEOUT_MS : FULL_FETCH_TIMEOUT_MS;
+      let timedOut = false;
+      const timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        ctrl.abort();
+      }, timeoutMs);
 
       if (!silent) setRefreshing(true);
       setError(null);
@@ -246,29 +293,80 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             setSnap((prev) => mergeLiteIntoSnapshot(prev, j));
           } else {
             lastFullFetchAtRef.current = Date.now();
+            fullRetryCountRef.current = 0;
+            setAnalysisGaveUp(false);
             setSnap(j);
+            // full 분석 도착 — 방금 추가된 종목의 "분석 중" 상태 해제.
+            const arrived = new Set(j.primaries.map((p) => p.meta.code));
+            // 요청했는데 응답에 빠진 신규 종목 → 롤백 + 한국어 안내.
+            const failed = target.filter(
+              (c) => pendingCodesRef.current.has(c) && !arrived.has(c)
+            );
+            if (pendingCodesRef.current.size > 0) {
+              setPendingCodes((prev) => {
+                const next = new Set(
+                  [...prev].filter((c) => !arrived.has(c) && !failed.includes(c))
+                );
+                return next.size === prev.size ? prev : next;
+              });
+            }
+            if (failed.length > 0 && failed.length < target.length) {
+              const names = failed
+                .map((c) => CANDIDATE_BY_CODE.get(c)?.name ?? c)
+                .join(", ");
+              setWatchCodes((prev) =>
+                normalizeWatchCodes(prev.filter((c) => !failed.includes(c)))
+              );
+              setError(
+                `${names} 종목 데이터를 불러오지 못해 관심 종목에서 제외했어요. 잠시 후 다시 추가해주세요.`
+              );
+            }
           }
         }
       } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (e instanceof DOMException && e.name === "AbortError") {
+          if (timedOut) {
+            setError(
+              useLite
+                ? `시세 요청이 ${Math.round(timeoutMs / 1000)}초를 넘겨 중단됐어요. 새로고침 해 주세요.`
+                : `분석·뉴스 요청이 ${Math.round(timeoutMs / 1000)}초를 넘겨 중단됐어요. 시세는 유지되며, 잠시 후 자동으로 다시 시도합니다.`
+            );
+            if (!useLite) scheduleFullRetry();
+            setShowNews(true);
+          } else if (!useLite) {
+            // 다른 full 요청에 의해 중단 — Phase B 재진입 허용
+            fullFetchStartedRef.current = false;
+          }
+          return;
+        }
         setError(toFriendlyErrorMessage(e));
+        if (!useLite) scheduleFullRetry();
+        setShowNews(true);
       } finally {
-        if (abortRef.current === ctrl) {
-          abortRef.current = null;
+        clearTimeout(timeoutTimer);
+        const slot = useLite ? liteAbortRef : fullAbortRef;
+        if (slot.current === ctrl) {
+          slot.current = null;
           if (!silent) setRefreshing(false);
+          setWatchLoading(false);
         }
       }
     },
-    []
+    [scheduleFullRetry]
   );
 
   // Phase B — lite 도착 직후 full snapshot 백그라운드 fetch (UI 블로킹 없음).
   useEffect(() => {
-    if (snap.phase !== "lite") return;
+    if (snap.phase !== "lite") {
+      fullRetryCountRef.current = 0;
+      setAnalysisGaveUp(false);
+      return;
+    }
+    if (analysisGaveUp) return;
     if (fullFetchStartedRef.current) return;
     fullFetchStartedRef.current = true;
-    void refresh(undefined, undefined, false, true);
-  }, [snap.phase, refresh]);
+    void refresh(undefined, undefined, false, true, "full");
+  }, [snap.phase, refresh, fullRetryNonce, analysisGaveUp]);
 
   // full snapshot 도착 후 뉴스 패널 defer — 카드·시세 우선, 글로벌 뉴스는 idle/2s 후.
   useEffect(() => {
@@ -304,22 +402,53 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     void refresh(undefined, next);
   }, [refresh]);
 
-  // 관심종목 변경을 한 번에 모아서 처리: 칩은 즉시 업데이트, fetch는 debounce
+  // 관심종목 변경을 한 번에 모아서 처리 (Optimistic UI):
+  //   - 삭제만: 카드가 즉시 사라지고 끝 — 무거운 스냅샷 재조회 없음 (다음 폴링에서 자연 갱신)
+  //   - 추가: placeholder 카드가 즉시 나타나고, lite(시세 1~3초) → full(분석·예측) 순으로
+  //     백그라운드에서 채워진다. 실패 시 full 응답 시점에 롤백 + 한국어 안내.
   const commitWatch = useCallback(
     (nextCodes: string[]) => {
       const normalized = normalizeWatchCodes(nextCodes);
+      const prevCodes = watchCodesRef.current;
+      const added = normalized.filter((c) => !prevCodes.includes(c));
+      watchCodesRef.current = normalized;
       setWatchCodes(normalized);
       // 선택된 종목이 사라졌을 때만 첫 종목으로 보정 (차트 깜빡임 최소화)
       setSelected((prev) =>
         normalized.includes(prev) ? prev : normalized[0] ?? ""
       );
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        void refresh(normalized);
+      if (added.length === 0) {
+        // 삭제만 — UI는 이미 반영 완료. fetch 불필요.
+        setWatchLoading(false);
+        return;
+      }
+      setWatchLoading(true);
+      setPendingCodes((prev) => new Set([...prev, ...added]));
+      debounceRef.current = setTimeout(async () => {
+        // 1) lite — 시세만 빠르게 받아 새 카드부터 채움 (silent: 전역 spinner 없음)
+        await refresh(normalized, undefined, false, true, "lite");
+        setWatchLoading(false);
+        // 2) full — 분석·예측·컨센서스를 백그라운드로 채움
+        void refresh(normalized, undefined, false, true, "full");
       }, COMMIT_DEBOUNCE_MS);
     },
     [refresh]
   );
+
+  const restoreDefaultWatch = useCallback(() => {
+    const saved = loadDefaultWatchlist();
+    const codes = saved?.length
+      ? normalizeWatchCodes(saved)
+      : normalizeWatchCodes(primaryWatchCodes());
+    commitWatch(codes);
+  }, [commitWatch]);
+
+  const saveCurrentAsDefault = useCallback(() => {
+    saveDefaultWatchlist(watchCodesRef.current);
+    setDefaultSavedHint(true);
+    window.setTimeout(() => setDefaultSavedHint(false), 2500);
+  }, []);
 
   // 추천 패널의 "관심종목 추가" 핸들러 — 이미 있거나 가득 차면 무시.
   const handleAddFromRecommendation = useCallback(
@@ -335,11 +464,14 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (abortRef.current) abortRef.current.abort();
+      liteAbortRef.current?.abort();
+      fullAbortRef.current?.abort();
     };
   }, []);
 
   // 저장된 관심종목 불러오기 (마운트 1회만)
+  // DashboardShell 이 이미 localStorage symbols + night 로 lite 를 받았으므로,
+  // 코드가 같을 때는 night UI 상태만 맞추고 재 fetch 하지 않는다.
   useEffect(() => {
     if (bootedRef.current) return;
     bootedRef.current = true;
@@ -358,7 +490,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       const normalized = Array.isArray(parsed)
         ? normalizeWatchCodes(parsed as string[])
         : current;
-      if (normalized.join(",") !== current.join(",") || savedNight) {
+      // 관심종목이 Shell 최초 lite 와 다를 때만 재조회.
+      // (night 플래그만 달라도 Shell 이 이미 night=1 로 받았으면 skip)
+      if (normalized.join(",") !== current.join(",")) {
         setWatchCodes(normalized);
         setSelected((prev) =>
           normalized.includes(prev) ? prev : normalized[0] ?? ""
@@ -388,8 +522,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     const start = () => {
       if (timer) return;
       timer = setInterval(() => {
-        if (abortRef.current) return;
-        void refresh();
+        // lite만 진행 중이면 폴링 skip — full 분석은 끊지 않음(별도 슬롯)
+        if (liteAbortRef.current) return;
+        void refresh(undefined, undefined, false, true, "lite");
       }, refreshMs);
     };
     const stop = () => {
@@ -401,7 +536,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         // 다시 활성화되면 60s 이상 지났을 때만 즉시 갱신 (CDN·함수 호출 절약)
         const stale =
           Date.now() - lastFullFetchAtRef.current >= Math.min(refreshMs, 60_000);
-        if (!abortRef.current && stale) void refresh(undefined, undefined, false, true);
+        if (!liteAbortRef.current && !fullAbortRef.current && stale)
+          void refresh(undefined, undefined, false, true);
         start();
       } else {
         stop();
@@ -443,6 +579,12 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
   const visiblePrimaries = snap.primaries.filter((p) =>
     watchCodes.includes(p.meta.code)
   );
+  // 방금 추가돼 아직 스냅샷에 데이터가 없는 종목 — 즉시 placeholder 카드로 표시.
+  const snapCodes = new Set(snap.primaries.map((p) => p.meta.code));
+  const placeholderSymbols = watchCodes
+    .filter((c) => !snapCodes.has(c))
+    .map((c) => CANDIDATE_BY_CODE.get(c))
+    .filter((s): s is NonNullable<typeof s> => !!s);
 
   // KIS WebSocket 실시간 구독 — 카드 가격/거래량 즉시 갱신.
   // - feature flag NEXT_PUBLIC_REALTIME_ENABLED=true 일 때만 SSE 연결, 그 외엔 noop.
@@ -525,10 +667,10 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">
-            Ticker
+            TickerDay
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            룰 기반 판단 보조
+            관심종목·시세 한눈에
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -573,12 +715,23 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       {/* 요약 바 */}
       <SummaryBar snapshot={snap} lastUpdatedLabel={lastUpdated} />
 
-      {/* 관심종목 한 줄 도구바 + 확장형 검색 — 종목 선택을 먼저 한 뒤 아래 결과를 보는 자연 순서 */}
-      <section className="space-y-3">
+      {/* 관심종목 — 칩·액션 정렬 (모바일 wrap) */}
+      <section className="space-y-3 rounded-xl border border-border/80 bg-card/40 p-3 md:p-4">
         <div className="flex items-center flex-wrap gap-2">
-          <span className="text-xs uppercase tracking-wider text-muted-foreground mr-1">
+          <span className="text-xs uppercase tracking-wider text-muted-foreground mr-1 shrink-0">
             관심 종목
           </span>
+          <HelpTooltip
+            content="칩을 누르면 목록에서 제거됩니다. 종목 추가로 후보에서 골라 넣을 수 있어요."
+            label="관심종목 안내"
+          />
+          {watchLoading && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              종목 데이터를 불러오는 중…
+            </span>
+          )}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:flex-1 min-w-0">
           {selectedSymbols.length === 0 ? (
             <span className="text-xs text-muted-foreground">없음</span>
           ) : (
@@ -596,6 +749,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               </button>
             ))
           )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
           <button
             type="button"
             onClick={() => setSearchOpen((o) => !o)}
@@ -608,12 +763,34 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             <Plus className="h-3 w-3" />
             종목 추가
           </button>
+          <HelpTooltip
+            content="검색해서 관심종목에 추가합니다. 최대 6개까지 담을 수 있어요."
+            label="종목 추가 안내"
+            side="bottom"
+          />
           <button
             type="button"
-            onClick={() => commitWatch(PRIMARY_SYMBOLS.map((s) => s.code))}
-            className="text-xs px-2.5 py-1 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted transition-colors"
+            onClick={restoreDefaultWatch}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted transition-colors"
           >
             기본 복구
+          </button>
+          <HelpTooltip
+            content={
+              hasSavedDefaultWatchlist()
+                ? "저장해 둔 기본 관심종목 목록으로 되돌립니다."
+                : "저장된 기본값이 없어요. 삼성전자·SK하이닉스·삼성전기로 복구합니다. 「기본값 저장」으로 내 목록을 고정할 수 있어요."
+            }
+            label="기본 복구 안내"
+            side="bottom"
+          />
+          <button
+            type="button"
+            onClick={saveCurrentAsDefault}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted transition-colors"
+          >
+            <Bookmark className="h-3 w-3" />
+            기본값 저장
           </button>
           <button
             type="button"
@@ -623,15 +800,23 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
                 ? "bg-accent/15 border-accent/40 text-accent"
                 : "bg-card border-border text-muted-foreground hover:bg-muted"
             }`}
-            title="삼성전자 GDR, SK하이닉스 GDR 같은 해외 개별 야간 지표를 예측에 반영"
           >
             <MoonStar className="h-3 w-3" />
             해외 야간 {useOverseasNight ? "ON" : "OFF"}
           </button>
-          <span className="ml-auto text-xs text-muted-foreground tabular">
+          <HelpTooltip
+            content="미국·유럽 야간·프리마켓 GDR·ADR 프록시 시세를 반영해 국내 종목 예측에 가중합니다. 삼성전자·SK하이닉스 등 GDR 연동 종목에 유효해요."
+            label="해외 야간 안내"
+            side="bottom"
+          />
+          <span className="text-xs text-muted-foreground tabular">
             {watchCodes.length}/{MAX_WATCH}
           </span>
+          </div>
         </div>
+        {defaultSavedHint && (
+          <p className="text-[11px] text-up">현재 목록을 기본값으로 저장했어요.</p>
+        )}
 
         {/* 확장형 검색 패널 */}
         {searchOpen && (
@@ -743,7 +928,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
               }}
               krwRate={krwRate}
               kisActive={snap.kisActive}
-              analysisPending={analysisPending}
+              analysisPending={analysisPending || pendingCodes.has(p.meta.code)}
               marketSemiHeat={snap.marketMood.semiHeat}
               priceOverride={realtimeFresh(p.meta.code)}
               tradeOverride={realtimeTradeFresh(p.meta.code)}
@@ -753,9 +938,21 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
             />
           </div>
         ))}
-        {visiblePrimaries.length === 0 && (
+        {/* 추가 직후 데이터 도착 전 placeholder 카드 — 종목명 + 로딩 안내 즉시 표시 */}
+        {placeholderSymbols.map((s, i) => (
+          <div
+            key={`pending-${s.code}`}
+            className="card-fade-in"
+            style={{ animationDelay: `${(visiblePrimaries.length + i) * 60}ms` }}
+          >
+            <PendingStockCard name={s.name} />
+          </div>
+        ))}
+        {visiblePrimaries.length === 0 && placeholderSymbols.length === 0 && (
           <div className="md:col-span-2 lg:col-span-3 text-center py-12 text-sm text-muted-foreground border border-dashed border-border rounded-xl">
-            선택한 관심종목 데이터를 불러오는 중입니다.
+            {watchLoading
+              ? "종목 데이터를 불러오는 중…"
+              : "선택한 관심종목 데이터를 불러오는 중입니다."}
           </div>
         )}
       </div>
@@ -798,7 +995,9 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
         />
       ) : (
         <div className="rounded-2xl border border-border bg-card px-5 py-8 text-center text-sm text-muted-foreground">
-          뉴스 수집 중…
+          {error
+            ? "뉴스·분석을 아직 못 가져왔어요. 위 안내를 확인하거나 새로고침 해 주세요."
+            : "뉴스 수집 중…"}
         </div>
       )}
 

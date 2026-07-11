@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { AlertCircle, KeyRound, ShieldCheck } from "lucide-react";
+import { getDashboardPass, isAuthBypassEnabled } from "@/lib/authGate";
 import { LoginSubmitButton } from "./LoginForm";
 import { AuroraBg } from "./AuroraBg";
 import { BrandHeader } from "./BrandHeader";
@@ -11,14 +12,16 @@ interface PageProps {
 // 모바일 호환성 100% 를 위해 일반 form POST 방식 사용.
 // JS 가 필요 없고, /api/login 이 직접 Set-Cookie + 303 redirect 로 응답한다.
 // 비번이 틀리면 /login?error=... 로 다시 redirect 되며 메시지를 표시한다.
-//
-// 디자인은 다크 트레이딩 터미널 + 미니멀 프리미엄 톤.
-// 배경(AuroraBg) · 헤더(BrandHeader)는 별도 컴포넌트로 분리했지만,
-// form 자체와 input/hidden/submit 버튼 contract 는 절대 그대로 유지한다.
 export default async function LoginPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const next = sp.next ?? "/";
-  const error = sp.error ?? null;
+  const passConfigured = Boolean(getDashboardPass());
+  const bypass = isAuthBypassEnabled();
+  const error =
+    sp.error ??
+    (!passConfigured && !bypass
+      ? "비밀번호가 설정되지 않았습니다 (DASHBOARD_PASS)"
+      : null);
 
   const action = `/api/login?next=${encodeURIComponent(next)}`;
 
@@ -62,8 +65,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
                 type="password"
                 name="password"
                 required
+                disabled={!passConfigured && !bypass}
                 placeholder="••••••••"
-                className="w-full h-11 pl-9 pr-3 rounded-lg border border-border/70 bg-background/60 text-base placeholder:text-muted-foreground/50 transition-[box-shadow,border-color,background-color] duration-200 focus:outline-none focus:border-accent/60 focus:bg-background/90 focus:ring-2 focus:ring-accent/30 focus:shadow-[0_0_22px_-6px_var(--accent)]"
+                className="w-full h-11 pl-9 pr-3 rounded-lg border border-border/70 bg-background/60 text-base placeholder:text-muted-foreground/50 transition-[box-shadow,border-color,background-color] duration-200 focus:outline-none focus:border-accent/60 focus:bg-background/90 focus:ring-2 focus:ring-accent/30 focus:shadow-[0_0_22px_-6px_var(--accent)] disabled:opacity-50"
                 autoComplete="current-password"
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -73,12 +77,10 @@ export default async function LoginPage({ searchParams }: PageProps) {
             </div>
           </label>
 
-          {/* next 경로를 hidden input 으로도 동봉 (query 와 동일 효과, 안전망) */}
           <input type="hidden" name="next" value={next} />
 
           <LoginSubmitButton />
 
-          {/* 하단 캡션 — 신뢰감 한 줄 */}
           <div className="flex items-center justify-center gap-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80">
             <ShieldCheck className="h-3 w-3" />
             <span>256-bit encrypted</span>
@@ -86,8 +88,6 @@ export default async function LoginPage({ searchParams }: PageProps) {
             <span>30일 자동 로그인</span>
           </div>
 
-          {/* SameSite=Strict 쿠키 정책 안내 — 외부 링크에서 첫 진입한 사용자가
-              로그인으로 리다이렉트된 이유를 짧게 설명. 보안 정책 안내라 강조 아님. */}
           <p className="text-[11px] leading-relaxed text-center text-muted-foreground/70 pt-1">
             외부 링크(검색결과·메신저)에서 처음 접속하셨다면 보안 정책상 한 번
             로그인 후 정상 진입됩니다.

@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  getDashboardPass,
+  isAuthBypassEnabled,
+} from "@/lib/authGate";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 // 쿠키 기반 로그인 게이트 + IP 기반 일반 API rate-limit.
-// env DASHBOARD_PASS 가 설정돼 있을 때만 로그인 게이트 활성화.
-// 비어 있으면 로그인 검증은 통과 (로컬 개발 편의). API rate-limit 은 항상 적용.
+// 기본: DASHBOARD_PASS 필수. AUTH_DISABLED=1 일 때만 무비번 통과 (개발 명시 우회).
+// API rate-limit 은 항상 적용.
 //
 // 동작 흐름
 //  1. /login, /api/login, /api/realtime/stream(SSE), 정적 자원: 게이트 면제
 //  2. /api/* 일부 데이터 엔드포인트: IP 별 분당 120회 제한 (초과 시 429)
-//  3. 쿠키 dashboard_token 이 SHA-256(PASS + COOKIE_VERSION) 과 일치하면 통과
-//  4. 아니면 /login?next=원래경로 로 리다이렉트
+//  3. AUTH_DISABLED=1 → 통과 / PASS 없으면 API 503·페이지는 /login
+//  4. 쿠키 dashboard_token 이 SHA-256(PASS + COOKIE_VERSION) 과 일치하면 통과
+//  5. 아니면 /login?next=원래경로 로 리다이렉트
 //
 // 쿠키 versioning: PASS 가 바뀌면 자동으로 기존 토큰이 무효화된다.
 
@@ -96,9 +101,24 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 3) 로그인 게이트 (DASHBOARD_PASS 미설정이면 면제).
-  const pass = process.env.DASHBOARD_PASS;
-  if (!pass) return NextResponse.next();
+  // 3) 로그인 게이트.
+  //    AUTH_DISABLED=1 → 개발용 명시 우회.
+  //    PASS 미설정 + 우회 없음 → 차단 (예전처럼 자동 통과하지 않음).
+  if (isAuthBypassEnabled()) return NextResponse.next();
+
+  const pass = getDashboardPass();
+  if (!pass) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { ok: false, error: "인증이 설정되지 않았습니다 (DASHBOARD_PASS)" },
+        { status: 503 }
+      );
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("error", "비밀번호가 설정되지 않았습니다");
+    return NextResponse.redirect(url);
+  }
 
   const token = req.cookies.get(COOKIE_NAME)?.value;
   if (token) {

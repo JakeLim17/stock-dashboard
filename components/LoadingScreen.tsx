@@ -14,13 +14,19 @@ const STAGES = LOADING_STAGES_FULL;
 
 const STAGE_INTERVAL_MS = 1400;
 // 콜드 스타트(스냅샷 6종목) 실측 ~20s까지 가는 경우가 있어 경과 초를 함께 표시.
+const DEFAULT_STUCK_AFTER_SEC = 45;
 
 // 로그인 직후 메인 페이지로 들어올 때 즉시 보이는 풀스크린 로딩.
 // app/loading.tsx 가 RSC 트리에서 이 컴포넌트를 렌더한다.
 //
 // 데이터가 도착하면 Next.js가 자동으로 page.tsx 컨텐츠로 교체하므로
 // 카운트다운/단계 메시지가 끝까지 가지 않아도 자연스럽게 사라진다.
-export function LoadingScreen() {
+// stuckAfterSec 지나면 재시도 안내 — 무한 "마무리 중..." 착각 방지.
+export function LoadingScreen({
+  stuckAfterSec = DEFAULT_STUCK_AFTER_SEC,
+}: {
+  stuckAfterSec?: number;
+} = {}) {
   const [stage, setStage] = useState(0);
   const [elapsed, setElapsed] = useState(0);
 
@@ -37,7 +43,10 @@ export function LoadingScreen() {
     };
   }, []);
 
-  const message = STAGES[stage];
+  const stuck = elapsed >= stuckAfterSec;
+  const message = stuck
+    ? "응답이 너무 오래 걸려요"
+    : STAGES[stage];
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-background text-foreground">
@@ -45,15 +54,16 @@ export function LoadingScreen() {
         <div className="flex items-center justify-center gap-2 text-muted-foreground">
           <Activity className="h-4 w-4 text-accent" />
           <span className="text-xs uppercase tracking-wider">
-            Ticker
+            TickerDay
           </span>
         </div>
 
         <div className="flex flex-col items-center gap-5 py-6">
-          <Loader2 className="h-10 w-10 animate-spin text-accent" />
-          {/* 단계 메시지 — fade-in을 위해 key를 stage로 줘서 매 변경마다 리마운트 */}
+          {!stuck && (
+            <Loader2 className="h-10 w-10 animate-spin text-accent" />
+          )}
           <p
-            key={stage}
+            key={stuck ? "stuck" : stage}
             className="text-base font-medium animate-[fadeIn_0.3s_ease-out]"
           >
             {message}
@@ -63,9 +73,20 @@ export function LoadingScreen() {
               <span className="font-semibold text-foreground mr-1">{elapsed}</span>초 경과
             </span>
             <span className="opacity-70">
-              {LOADING_WAIT_HINT}
+              {stuck ? "네트워크·서버를 확인해 주세요" : LOADING_WAIT_HINT}
             </span>
           </div>
+          {stuck && (
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.reload();
+              }}
+              className="mt-1 inline-flex items-center justify-center h-10 px-4 rounded-lg bg-accent text-white text-sm font-medium hover:opacity-90"
+            >
+              새로고침
+            </button>
+          )}
         </div>
 
         {/* 진행 막대 — 단계별 채워짐 (시각적 보조) */}
@@ -73,13 +94,17 @@ export function LoadingScreen() {
           <div
             className="h-full bg-accent transition-all duration-500 ease-out"
             style={{
-              width: `${Math.min(((stage + 1) / STAGES.length) * 100, 95)}%`,
+              width: stuck
+                ? "100%"
+                : `${Math.min(((stage + 1) / STAGES.length) * 100, 95)}%`,
             }}
           />
         </div>
 
         <p className="text-[11px] text-muted-foreground opacity-70">
-          {LOADING_FOOTER_FULL}
+          {stuck
+            ? "계속되면 로그인 화면으로 돌아가 다시 시도해 주세요."
+            : LOADING_FOOTER_FULL}
         </p>
       </div>
 

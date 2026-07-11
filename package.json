@@ -1,12 +1,13 @@
 {
   "name": "stock-dashboard",
   "version": "0.1.0",
+  "description": "TickerDay — 관심종목·시세 한눈에",
   "private": true,
   "scripts": {
     "dev": "next dev -p 9700",
     "build": "next build",
     "start": "next start -p 9700",
-    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/analyzer/tradingSession.test.ts lib/fair-value.test.ts lib/fair-value-macro.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts lib/group-catalyst-spillover.test.ts lib/schedule-dedup.test.ts lib/symbol-groups.test.ts lib/news/newsVolatility.test.ts",
+    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/analyzer/tradingSession.test.ts lib/analyzer/chronoPulse.test.ts lib/analyzer/baseDrift.test.ts lib/fair-value.test.ts lib/fair-value-macro.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts lib/group-catalyst-spillover.test.ts lib/schedule-dedup.test.ts lib/symbol-groups.test.ts lib/news/newsVolatility.test.ts lib/providers/kisCachePolicy.test.ts",
     "backtest:fair-value": "npx --yes tsx scripts/backtest-fair-value.ts"
   },
   "dependencies": {

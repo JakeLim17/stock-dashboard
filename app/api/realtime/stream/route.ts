@@ -18,10 +18,15 @@ import { getApprovalKey, kisApprovalEnabled } from "@/lib/providers/kisApproval"
 // 두 모드 모두 클라이언트 SSE 이벤트 스키마는 동일 — `hooks/useRealtime.ts` 변경 불필요.
 // ─────────────────────────────────────────────────────────────────────
 
+import {
+  getDashboardPass,
+  isAuthBypassEnabled,
+} from "@/lib/authGate";
+
 // ─── 쿠키 인증 ───────────────────────────────────────────────────────
 // middleware 가 /api/realtime/stream 을 PUBLIC_PATHS 로 통과시키므로
 // (EventSource 가 307 리다이렉트를 못 따름) 라우트 내부에서 동일한 SHA-256 검증.
-// 보호 비활성 환경(DASHBOARD_PASS 미설정)이면 통과.
+// AUTH_DISABLED=1 일 때만 무비번 통과.
 const AUTH_COOKIE_VERSION = "v1";
 const AUTH_COOKIE_RE = /(?:^|;\s*)dashboard_token=([^;]+)/;
 
@@ -34,8 +39,9 @@ async function sha256Hex(input: string): Promise<string> {
 }
 
 async function isAuthorized(req: Request): Promise<boolean> {
-  const pass = process.env.DASHBOARD_PASS;
-  if (!pass) return true;
+  if (isAuthBypassEnabled()) return true;
+  const pass = getDashboardPass();
+  if (!pass) return false;
   const cookieHeader = req.headers.get("cookie") ?? "";
   const m = cookieHeader.match(AUTH_COOKIE_RE);
   if (!m) return false;

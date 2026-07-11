@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "이용약관 — Ticker",
-  description: "Ticker(룰 기반 판단 보조) 서비스의 이용약관",
+  title: "이용약관 — TickerDay",
+  description: "TickerDay(관심종목·시세 한눈에) 서비스의 이용약관",
   robots: { index: false, follow: false },
 };
 
@@ -36,7 +36,7 @@ export default function TermsPage() {
         </h2>
         <p>
           본 약관은 운영자(이하 “회사”)가 제공하는 룰 기반 판단 보조 도구
-          “Ticker”(이하 “서비스”)의 이용 조건과 책임 범위를 정함을 목적으로 합니다.
+          “TickerDay”(이하 “서비스”)의 이용 조건과 책임 범위를 정함을 목적으로 합니다.
           서비스는 공개된 시세·지수·뉴스 등을 정해진 규칙에 따라 가공한
           <strong className="text-foreground"> 정보 제공용 도구</strong>이며,
           금융상품의 매매를 알선하거나 투자자문업·투자권유를 수행하지 않습니다.

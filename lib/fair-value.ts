@@ -258,7 +258,7 @@ export function blendFairValuePrice(input: FairValueInput): {
     };
   }
 
-  if (driftCenter > 0) {
+  if (driftCenter > 0 && live > 0) {
     const cfg = w.noGdr;
     const price = driftCenter * cfg.drift + live * cfg.live;
     return {
@@ -397,18 +397,10 @@ function driftCenterForHorizon(
   return anchorPrice;
 }
 
-function applyConsensusBlend(
-  price: number,
-  snap: StockSnapshot,
-  horizonId: FairValueHorizonId,
-  decimals = 0
-): number {
-  const target = snap.consensus?.targetMean;
-  if (target == null || target <= price) return price;
-  const weight = horizonId === "month" ? 0.3 : horizonId === "week" ? 0.18 : 0;
-  if (weight <= 0) return price;
-  return roundPrice(price * (1 - weight) + target * weight, decimals);
-}
+// 컨센서스 목표가 반영은 fair-value-macro 의 "컨센 목표" 팩터(횡단 상한·UI 칩 노출)
+// 한 채널로만 한다. 기존엔 여기서 targetMean 을 가격에 22%(월)/12%(주) 직접 혼합해
+// 이중 반영됐고, 국내 목표가가 현재가 대비 +40~85% 부풀어 있어 전 종목 1개월
+// 추정이 +14~29% "무조건 우상향"으로 나오던 주범이었다 (2026-07-11 편향 분석).
 
 export function buildFairValueEstimateForHorizon(
   snap: StockSnapshot,
@@ -508,12 +500,7 @@ export function buildFairValueEstimateForHorizon(
             undefined,
             priceDecimals
           ).price;
-    const closePrice = applyConsensusBlend(
-      applyMacroPrice(closeBase, macro.rate, priceDecimals),
-      snap,
-      horizonId,
-      priceDecimals
-    );
+    const closePrice = applyMacroPrice(closeBase, macro.rate, priceDecimals);
     const closeLeg: FairValueLeg = {
       price: closePrice,
       baseBlendedPrice: closeBase,

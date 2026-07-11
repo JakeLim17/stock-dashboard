@@ -8,6 +8,7 @@ import {
 import { invalidateConsensusCache } from "@/lib/providers/consensusCache";
 import { invalidateMarketAlertCache } from "@/lib/providers/marketAlertCache";
 import { invalidateEventCalendarCache } from "@/lib/providers/eventCalendar";
+import { invalidateKisExtraCache } from "@/lib/providers/kisExtraCache";
 import {
   NO_STORE,
   SNAPSHOT_FULL_CACHE,
@@ -42,12 +43,14 @@ export async function GET(req: Request) {
           invalidateConsensusCache(code);
           invalidateMarketAlertCache(code);
           invalidateEventCalendarCache(code);
+          invalidateKisExtraCache(code);
         }
       } else {
         invalidateConsensusCache();
         invalidateMarketAlertCache();
         // 매크로 이벤트 캐시(global)도 비워 새 발표 일정이 즉시 반영되게 함.
         invalidateEventCalendarCache();
+        invalidateKisExtraCache();
       }
       // 스냅샷 + 시장지표 soft TTL 캐시도 함께 비움 — refresh 의도와 일치.
       invalidateSnapshotCache();

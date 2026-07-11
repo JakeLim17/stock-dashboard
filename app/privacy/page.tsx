@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "개인정보 처리방침 — Ticker",
-  description: "Ticker 서비스의 개인정보 처리방침",
+  title: "개인정보 처리방침 — TickerDay",
+  description: "TickerDay 서비스의 개인정보 처리방침",
   robots: { index: false, follow: false },
 };
 

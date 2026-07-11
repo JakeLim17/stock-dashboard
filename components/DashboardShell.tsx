@@ -11,9 +11,14 @@ import { toFriendlyErrorMessage } from "@/lib/utils";
 //   2) Phase A: /api/snapshot?lite=1 — 시세·지표만 (~1~3초) → DashboardClient 교체
 //   3) Phase B: DashboardClient 가 full snapshot 을 백그라운드 fetch 후 merge
 //   4) 이후 폴링·갱신은 DashboardClient 가 기존대로 담당
+//
+// lite fetch 가 hang 되면 skelton 이 영원히 "카드 표시 준비 중"에 머무르므로
+// 클라이언트 AbortSignal 타임아웃으로 끊고 재시도 안내를 띄운다.
 
 const STORAGE_KEY = "watchlist.codes.v1";
 const NIGHT_STORAGE_KEY = "watchlist.overseasNight.v1";
+/** Phase A(lite) 클라이언트 하드 타임아웃 — 서버 hang / 네트워크 멈춤 대비 */
+const LITE_FETCH_TIMEOUT_MS = 25_000;
 
 function readSavedSymbolsParam(): string {
   if (typeof window === "undefined") return "";
@@ -53,11 +58,17 @@ function buildSnapshotUrl(lite: boolean): string {
 export function DashboardShell() {
   const [snap, setSnap] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
     const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, LITE_FETCH_TIMEOUT_MS);
     (async () => {
       try {
         const r = await fetch(buildSnapshotUrl(true), {
@@ -66,19 +77,32 @@ export function DashboardShell() {
         });
         if (!r.ok) throw new Error(`서버 오류 ${r.status}`);
         const j = (await r.json()) as DashboardSnapshot;
-        if (mountedRef.current) setSnap(j);
+        if (mountedRef.current) {
+          setError(null);
+          setSnap(j);
+        }
       } catch (e) {
-        if ((e as { name?: string })?.name === "AbortError") return;
+        if ((e as { name?: string })?.name === "AbortError") {
+          if (mountedRef.current && timedOut) {
+            setError(
+              `첫 시세 로딩이 ${Math.round(LITE_FETCH_TIMEOUT_MS / 1000)}초를 넘겨 중단됐어요.`
+            );
+          }
+          return;
+        }
         if (mountedRef.current) {
           setError(toFriendlyErrorMessage(e));
         }
+      } finally {
+        clearTimeout(timer);
       }
     })();
     return () => {
       mountedRef.current = false;
+      clearTimeout(timer);
       ctrl.abort();
     };
-  }, []);
+  }, [retryKey]);
 
   if (snap) return <DashboardClient initial={snap} />;
 
@@ -88,9 +112,19 @@ export function DashboardShell() {
       {error && (
         <div
           role="alert"
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-lg border border-down/40 bg-down/10 px-4 py-2 text-sm text-down shadow-lg"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-md rounded-lg border border-down/40 bg-down/10 px-4 py-3 text-sm text-down shadow-lg space-y-2"
         >
-          첫 로딩 실패 — {error} 새로고침 해 주세요.
+          <p>첫 로딩 실패 — {error}</p>
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:opacity-80"
+            onClick={() => {
+              setError(null);
+              setRetryKey((k) => k + 1);
+            }}
+          >
+            다시 시도
+          </button>
         </div>
       )}
     </>

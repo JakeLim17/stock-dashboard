@@ -379,7 +379,9 @@ export interface AnalysisResult {
 export interface PriceRange {
   horizonLabel: string; // "1일", "1주" 등
   horizonDays: number;
-  center: number; // 중심 예상 가격
+  center: number; // 중심 예상 가격 (베이스 + ChronoPulse 알파)
+  /** 통계 베이스만 적용한 중심가 — UI에서 베이스 vs 레이어 구분용 */
+  baseCenter?: number;
   low: number; // -1σ
   high: number; // +1σ
   confidence: number; // 0.68 (1σ) | 0.95 (2σ)
@@ -527,6 +529,23 @@ export interface Predictions {
     score: number;
     label: "high" | "medium" | "low";
     factors: string[];
+  } | null;
+
+  /** ChronoPulse — 가산 알파 레이어 (baseDrift 위에 얹음) */
+  chronoPulse?: {
+    name: string;
+    subtitle: string;
+    /** ChronoPulse 알파 일간 drift (수급·뉴스 등) */
+    driftDaily: number;
+    structuralDaily?: number;
+    lag0Daily?: number;
+    /** 통계 베이스 일간 drift */
+    baseDaily?: number;
+    /** ChronoPulse 알파 (= driftDaily) */
+    alphaDaily?: number;
+    /** 베이스 + 알파 */
+    totalDaily?: number;
+    factors: Array<{ id: string; label: string; bps: number }>;
   } | null;
 }
 

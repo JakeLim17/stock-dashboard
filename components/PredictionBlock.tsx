@@ -10,6 +10,8 @@ import {
   estimateAtrPct,
   takeProfit2SourceLabel,
 } from "@/lib/prediction-display";
+import { formatChronoPulseBps } from "@/lib/analyzer/chronoPulse";
+import { HelpTooltip } from "./HelpTooltip";
 import {
   currencyOf,
   fmtNumber,
@@ -75,6 +77,9 @@ export function PredictionBlock({
   const tp2SourceLabel = takeProfit2SourceLabel(
     p?.targets?.takeProfit2Source
   );
+  const chronoPulse = p?.chronoPulse;
+  const topFactors =
+    chronoPulse?.factors.filter((f) => Math.abs(f.bps) >= 1).slice(0, 5) ?? [];
 
   // 데이터 부족·변동 구간 없음 — 카드가 비대해지지 않게 (얇은 히스토리는 안내만).
   const hasAny =
@@ -115,11 +120,22 @@ export function PredictionBlock({
           사용자가 카드의 손절/목표1과 컨센서스 목표가가 다른 시계임을 한눈에 인지하도록. */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex flex-col gap-1">
-          <div className="text-xs text-muted-foreground tracking-wide uppercase">
-            가격 변동 추정 · 단기
+          <div className="flex items-center gap-1 text-xs text-muted-foreground tracking-wide uppercase">
+            {chronoPulse ? (
+              <>
+                <span className="text-accent font-medium">{chronoPulse.name}</span>
+                <span className="opacity-60">· 단기 밴드</span>
+              </>
+            ) : (
+              "가격 변동 추정 · 단기"
+            )}
+            <HelpTooltip
+              content="베이스는 통계 경로, ChronoPulse 칩은 수급·뉴스 가산 알파입니다. 막대는 √t 변동 참고 구간이에요."
+              label="예측 밴드 안내"
+            />
           </div>
           <div className="text-[10px] text-muted-foreground/70 leading-snug">
-            (통계적 변동 참고 구간 — 방향 예측 아님)
+            (통계적 변동 참고 구간 — 방향은 요인 칩 참고)
           </div>
           <DataQualityBadge dq={dq} />
         </div>
@@ -164,6 +180,44 @@ export function PredictionBlock({
           )}
         </div>
       </div>
+
+      {chronoPulse && (
+        <div className="flex flex-wrap gap-1">
+          <span className="text-[9px] text-muted-foreground w-full tabular">
+            베이스{" "}
+            {((chronoPulse.baseDaily ?? 0) * 100).toFixed(2)}%
+            {" · "}
+            알파{" "}
+            {((chronoPulse.alphaDaily ?? chronoPulse.driftDaily) * 100).toFixed(2)}%
+            {" · "}
+            합계{" "}
+            {(
+              (chronoPulse.totalDaily ??
+                (chronoPulse.baseDaily ?? 0) + chronoPulse.driftDaily) *
+              100
+            ).toFixed(2)}
+            %
+          </span>
+          {(chronoPulse.baseDaily != null &&
+            Math.abs(chronoPulse.baseDaily) >= 0.0001) && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded tabular bg-muted text-muted-foreground">
+              통계 베이스{" "}
+              {chronoPulse.baseDaily >= 0 ? "+" : ""}
+              {(chronoPulse.baseDaily * 100).toFixed(2)}%
+            </span>
+          )}
+          {topFactors.map((f) => (
+            <span
+              key={`${f.id}-${f.label}`}
+              className={`text-[9px] px-1.5 py-0.5 rounded tabular ${
+                f.bps >= 0 ? "bg-rise/10 text-rise" : "bg-fall/10 text-fall"
+              }`}
+            >
+              {f.label} {formatChronoPulseBps(f.bps)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {compactLine && (
         <p className="text-[11px] tabular text-muted-foreground leading-snug">

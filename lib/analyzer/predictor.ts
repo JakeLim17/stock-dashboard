@@ -16,15 +16,22 @@ import type {
 import { ewmaVolatility, tDistQuantile } from "./statHelpers";
 import { computeEventInflation } from "./eventVolatility";
 import { estimateBeta, lastReturn, type MacroBetaResult } from "./macroBeta";
-import { usMarketDrift } from "./marketDrift";
 import { computeNewsVolatility } from "../news/newsVolatility";
 import { computeVixGate } from "./vixGate";
-import { computeSectorLeading } from "./sectorLeading";
 import { computeMacroFactors } from "./macroFactors";
 import {
   formatRangeHorizonLabel,
   getOneDayHorizonContext,
 } from "./tradingSession";
+import {
+  chronoPulseDriftForHorizon,
+  computeChronoPulse,
+} from "./chronoPulse";
+import {
+  baseDriftForHorizon,
+  computeBaseDriftDaily,
+} from "./baseDrift";
+import type { FlowData } from "../types";
 
 // 변동성 모델 상수 — Predictions.volatilityModel 메타로도 함께 노출되어
 // UI hint 라벨("EWMA λ=0.94 · t(df=5) 95%")에 사용된다.
@@ -314,6 +321,12 @@ export interface PredictorInput {
   nowMs?: number;
   /** 뉴스 리스크 평가 — 지정학·관세·제재 주도면 σ 확대 (newsVolatility.ts) */
   newsRisk?: NewsRiskAssessment | null;
+  /** ChronoPulse — 수급·리스크·컨센 등 */
+  flow?: FlowData;
+  externalRisk?: NewsRiskAssessment;
+  externalOpportunity?: import("../types").OpportunityAssessment;
+  consensusUpside?: number | null;
+  marketContext?: import("../types").StockSnapshot["marketContext"];
 }
 
 // 매크로 베타 회귀 결과를 한 번에 계산. 헬퍼는 표본 부족 시 null 반환.
@@ -366,6 +379,11 @@ export function predict(input: PredictorInput): Predictions {
     momentumActive,
     nowMs,
     newsRisk,
+    flow,
+    externalRisk,
+    externalOpportunity,
+    consensusUpside,
+    marketContext,
   } = input;
 
   const now = nowMs ?? Date.now();
@@ -449,62 +467,104 @@ export function predict(input: PredictorInput): Predictions {
     ? (ixicHistory ?? []).slice(0, -1)
     : ixicHistory;
 
-  // ─ Round3 B: 섹터 리딩 (SOX lag-1 → 한국 반도체주) ───────────
-  // 한국 반도체 종목에만 적용. 데이터 부족·비반도체 종목은 null.
+  // ─ Round3 B: 섹터 리딩 (SOX lag-1 → 한국 반도체주) — ChronoPulse 내부에서 사용 ──
   // (US 반도체주의 경우 위 슬라이스로 SOX lastReturn 의 look-ahead 를 차단.)
-  const sectorLeading = computeSectorLeading(meta, history, soxHistForLag);
+  void soxHistForLag;
 
-  // ─ Round3 B: 매크로 팩터 (DXY/US10Y 휴리스틱) ────────────────
-  // 종목 sector 기반 카테고리 분류 → DXY/US10Y 추정 베타 + lag-0 drift.
+  // ─ Round3 B: 매크로 팩터 (DXY/US10Y 휴리스틱) — 시나리오용 ────────────────
   const dxyLast = lastReturn(dxyHistForLag);
   const us10yLast = lastReturn(us10yHistForLag);
   const macroFactors = computeMacroFactors(meta, dxyLast, us10yLast);
 
-  // ─ 미장(나스닥) lag drift — 회귀 β × 최근 IXIC 수익률 × R² 가중 ──
-  // 한국 종목은 간밤 미국장 변동이 오늘 장의 lag-0 신호. 미국 종목은
-  // look-ahead 방지 슬라이스(ixicHistForLag) 적용. 상한 ±0.8%.
-  const ixicDrift = usMarketDrift(
-    macroBetasRaw.ixic?.beta,
-    macroBetasRaw.ixic?.r2,
-    lastReturn(ixicHistForLag)
-  );
+  // ─ 베이스(통계) + ChronoPulse(가산 알파) ─────────────────────────
+  //   base  : 단기 모멘텀 수축 + 당일 평균회귀 — "지금가 ± 합리적 경로"
+  //   alpha : 수급·뉴스·미장·밸류 등 ChronoPulse — 종목별 차별 신호
+  //   center = price · exp(baseHorizon + alphaHorizon)
+  const chronoPulse = computeChronoPulse({
+    meta,
+    quote,
+    flow: flow ?? {
+      foreignNet: null,
+      institutionNet: null,
+      individualNet: null,
+      source: "mock",
+    },
+    buyScore,
+    heatScore,
+    externalRisk: externalRisk ?? {
+      level: "low",
+      score: 10,
+      drivers: [],
+      matchCount: 0,
+    },
+    externalOpportunity,
+    valuation: quote.valuation,
+    consensusUpside,
+    marketContext,
+    predictions: pickMacroBetaSummary(macroBetasRaw)
+      ? { macroBetas: pickMacroBetaSummary(macroBetasRaw)! }
+      : null,
+    history,
+    ixicHistory,
+    soxHistory,
+    dxyHistory,
+    us10yHistory,
+    todayChangeRate,
+    momentumActive,
+    newsRisk,
+    events,
+    overseasNightRate: overseasNight?.changeRate ?? null,
+    dxyLastReturn: dxyLast,
+    us10yLastReturn: us10yLast,
+  });
 
-  // 1일 drift 보정 — 섹터 리딩 + 매크로 팩터 + 미장(IXIC) 합산.
-  // 모멘텀 활성·당일 ±4%↑ 시 drift cap ±3%로 완화 (급등장에서 너무 보수적 방지).
-  const dailyDriftRaw =
-    (sectorLeading?.drift ?? 0) + macroFactors.drift + ixicDrift;
   const absToday =
     todayChangeRate != null && Number.isFinite(todayChangeRate)
       ? Math.abs(todayChangeRate)
       : 0;
   const driftCap =
     momentumActive || absToday >= 0.04 ? 0.03 : 0.02;
-  const dailyDrift = Math.max(-driftCap, Math.min(driftCap, dailyDriftRaw));
+  const alphaDaily = Math.max(
+    -driftCap,
+    Math.min(driftCap, chronoPulse.driftDaily)
+  );
+  const structuralDaily = Math.max(
+    -driftCap,
+    Math.min(driftCap, chronoPulse.structuralDaily)
+  );
+  const lag0Daily = Math.max(
+    -driftCap,
+    Math.min(driftCap, chronoPulse.lag0Daily)
+  );
+  const baseDaily = computeBaseDriftDaily(returns, todayChangeRate);
+  const totalDaily = Math.max(
+    -driftCap,
+    Math.min(driftCap, baseDaily + alphaDaily)
+  );
+  const chronoPulseCapped = {
+    ...chronoPulse,
+    driftDaily: alphaDaily,
+    structuralDaily,
+    lag0Daily,
+    baseDaily,
+    alphaDaily,
+    totalDaily,
+  };
 
   // VIX 게이팅 — risk-off 환경에서 SL·범위 폭 조정.
   const vixGate = computeVixGate(vix);
   const rangeSigmaMult = vixGate.rangeSigmaMult;
   const sigmaForRanges = adjustedSigma * rangeSigmaMult;
 
-  // A. 가격 범위 — 변동성 기반 (drift=0, 추세 가정 없음)
-  //    이전엔 center = price·exp(mean(returns)·Δt) 였지만, 우상향 종목은
-  //    drift>0 이라 중심값이 항상 위로 편향되어 사용자가 "예측이 다 +"라고
-  //    오해하기 쉬웠다. 추세는 시나리오(C)·ATR 목표(B)에서 충분히 다루므로
-  //    A는 순수 변동성 신뢰구간만 보여준다.
-  //
-  //    center = price (변동 없음 가정)
-  //    band   = price · exp(±tMult · σ_adj · √Δt)  → 95% 양측 신뢰구간 (t df=5)
-  //    σ_adj  = EWMA σ × 이벤트 부풀림 계수
-  // Round3 B: 1일·3일 center 에만 매크로 drift 를 보수적으로 가산.
-  // (1주·2주 horizon 은 단일 lag-0 신호의 영향이 희석되므로 적용 X.)
+  // A. 가격 범위 — 베이스(통계) + ChronoPulse 알파 + √t 밴드
   const ranges: PriceRange[] = [];
   if (price > 0 && returns.length >= 15) {
-    const horizons: { label: string; days: number; driftWeight: number }[] = [
-      { label: "1일", days: 1, driftWeight: 1.0 },
-      { label: "3일", days: 3, driftWeight: 0.6 },
-      { label: "1주", days: 5, driftWeight: 0 },
-      { label: "2주", days: 10, driftWeight: 0 },
-      { label: "1개월", days: 22, driftWeight: 0 },
+    const horizons: { label: string; days: number }[] = [
+      { label: "1일", days: 1 },
+      { label: "3일", days: 3 },
+      { label: "1주", days: 5 },
+      { label: "2주", days: 10 },
+      { label: "1개월", days: 22 },
     ];
     for (const h of horizons) {
       // 잔여 세션 반영 — 1일은 남은 세션 비율, 다일 horizon 도 같은 거래일이면
@@ -518,10 +578,17 @@ export function predict(input: PredictorInput): Predictions {
       const horizonSigma =
         sigmaForRanges * Math.sqrt(effectiveDays) * tailMultiplier;
       // drift 는 시간에 선형(σ 는 √t) — 1일 horizon 은 잔여 세션 비율만큼만 반영.
-      // (기존엔 장 마감 30분 전에도 하루치 drift 가 통째로 더해져 center 가 편향됐다.)
       const driftTimeScale =
         h.days === 1 ? Math.min(1, oneDayCtx.effectiveDays) : 1;
-      const drift = dailyDrift * h.driftWeight * driftTimeScale;
+      const baseH =
+        baseDriftForHorizon(baseDaily, h.days) * driftTimeScale;
+      const alphaH =
+        chronoPulseDriftForHorizon(alphaDaily, h.days, {
+          structuralDaily,
+          lag0Daily,
+        }) * driftTimeScale;
+      const drift = baseH + alphaH;
+      const baseCenter = price * Math.exp(baseH);
       const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);
       const high = center * Math.exp(horizonSigma);
@@ -533,6 +600,7 @@ export function predict(input: PredictorInput): Predictions {
         horizonLabel,
         horizonDays: h.days,
         center,
+        baseCenter,
         low,
         high,
         confidence: T_TWO_SIDED_CONFIDENCE,
@@ -821,6 +889,7 @@ export function predict(input: PredictorInput): Predictions {
       returns.length,
       intradayVolBoost
     ),
+    chronoPulse: chronoPulseCapped,
   };
 }
 

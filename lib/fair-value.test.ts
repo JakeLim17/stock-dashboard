@@ -238,6 +238,7 @@ describe("buildFairValueEstimate", () => {
       horizons,
       ranges: snap.predictions!.ranges,
       basePrice: snap.quote.price,
+      now: new Date("2026-06-17T12:00:00+09:00"),
     });
 
     // 오늘(0) ~ 1개월(22) 매 거래일
@@ -274,6 +275,56 @@ describe("buildFairValueEstimate", () => {
     const d5 = series.find((p) => p.sessionOffset === 5)!;
     const expected = (104_600 - 95_600) / 100_000;
     assert.ok(Math.abs(relWidth(d5) - expected) < 0.002);
+  });
+
+  it("컨센 목표가가 2배여도 1개월 추정은 매크로 상한(±9%) 안", () => {
+    // 회귀 방지 — 예전엔 applyConsensusBlend가 targetMean을 가격에 22% 직접
+    // 혼합해 1개월 추정이 +20~29%로 부풀었다 (전 종목 우상향 편향의 주범).
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        extendedHours: {
+          session: "kr-after",
+          price: 100_000,
+          changeAbs: 0,
+          changeRate: 0,
+          active: false,
+          regularClose: 100_000,
+        },
+        price: 100_000,
+        prevClose: 99_000,
+      })
+    );
+    snap.predictions!.ranges = [
+      { horizonDays: 1, horizonLabel: "1일", low: 98_000, high: 102_000, center: 100_000, confidence: 0.95 },
+      { horizonDays: 22, horizonLabel: "1개월", low: 91_000, high: 109_900, center: 100_000, confidence: 0.95 },
+    ];
+    snap.consensus = {
+      targetMean: 200_000,
+      targetMedian: 200_000,
+      targetHigh: 220_000,
+      targetLow: 180_000,
+      upsidePercent: 1.0,
+      analystCount: 10,
+      recommendationKey: "buy",
+      recommendationMean: 2.0,
+      strongBuy: 5,
+      buy: 5,
+      hold: 0,
+      sell: 0,
+      strongSell: 0,
+      source: "merged",
+      asOf: Date.now(),
+    };
+    const horizons = buildMultiHorizonFairValue(snap);
+    const month = horizons.find((h) => h.id === "month")!.estimate;
+    assert.equal(month.ready, true);
+    if (month.ready) {
+      assert.ok(
+        month.close.price <= 100_000 * 1.095,
+        `1개월 추정 ${month.close.price} 이 매크로 상한 초과`
+      );
+    }
   });
 
   it("VIX 공포 시 매크로 하향 보정", () => {
