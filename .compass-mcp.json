@@ -1,0 +1,9 @@
+{
+  "preferred_host": "cursor",
+  "default_tier": "low",
+  "cost_bias": "cheap",
+  "usage_alert_thresholds": {
+    "high_tier_today": 3,
+    "heavy_today": 8
+  }
+}
