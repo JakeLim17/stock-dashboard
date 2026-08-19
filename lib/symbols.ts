@@ -198,6 +198,15 @@ export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   { code: "LRCX", name: "램리서치", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "KLAC", name: "KLA", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
   { code: "INTC", name: "인텔", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+  // NAND 플래시 — Western Digital에서 2025 분사, NASDAQ: SNDK (Yahoo: Sandisk Corporation).
+  { code: "SNDK", name: "샌디스크", kind: "us-stock", sector: "글로벌반도체", currency: "USD" },
+
+  // ─── 2026-08-20 레버리지 ETF (Yahoo quote 실측) ──────────────────────────
+  // SOSX 티커는 Yahoo에 없음. SOXS = Direxion Daily Semiconductor Bear 3X.
+  // 오타 검색은 SEARCH_TICKER_ALIASES (SOSX → SOXS).
+  { code: "KORU", name: "코루(한국 3배)", kind: "us-stock", sector: "글로벌레버리지", currency: "USD" },
+  { code: "SOXL", name: "소엑셀(반도체 3배)", kind: "us-stock", sector: "글로벌레버리지", currency: "USD" },
+  { code: "SOXS", name: "소엑스(반도체 3배 인버스)", kind: "us-stock", sector: "글로벌레버리지", currency: "USD" },
 
   // ─── 2026-07-10 SK하이닉스 ADR — 나스닥 직상장 (NASDAQ: SKHY) ─────────────
   // 史상 최대 외국기업 미국 상장 ($26.5B, 공모가 $149). ADR 10주 = 원주(000660.KS) 1주.
@@ -292,7 +301,8 @@ export type ThemeTag =
   | "hbm_memory"
   | "ai_power_dc"
   // ── 2026-06 SpaceX IPO 신규 테마 ───────────────────────
-  | "us_space";
+  | "us_space"
+  | "us_leverage";
 
 export interface ThemeDefinition {
   id: ThemeTag;
@@ -528,6 +538,7 @@ export const THEMES: ThemeDefinition[] = [
       "LRCX",
       "KLAC",
       "INTC",
+      "SNDK",
       "SKHY",
     ],
   },
@@ -625,6 +636,13 @@ export const THEMES: ThemeDefinition[] = [
     emoji: "🚀",
     description: "재사용 발사체·스타링크·스타십 — 머스크 자회사",
     codes: ["SPCX"],
+  },
+  {
+    id: "us_leverage",
+    label: "美 레버리지 ETF",
+    emoji: "📈",
+    description: "한국·반도체 3배 롱/숏 ETF — SOSX는 없고 SOXS(인버스)로 등록",
+    codes: ["KORU", "SOXL", "SOXS"],
   },
 ];
 
@@ -790,9 +808,30 @@ export function isHoldingCompanyCode(code: string): boolean {
   return meta?.isHoldingCompany === true;
 }
 
+/** 검색·URL 오타 별칭 (대문자) → 카탈로그 코드. 관심종목 검색은 코드/이름 includes 와 동일. */
+export const SEARCH_TICKER_ALIASES: Record<string, string> = {
+  SOSX: "SOXS",
+};
+
+export function canonicalizeWatchCode(code: string): string {
+  return SEARCH_TICKER_ALIASES[code.toUpperCase()] ?? code;
+}
+
+export function symbolMatchesQuery(s: SymbolMeta, q: string): boolean {
+  const nq = q.trim().toLowerCase();
+  if (!nq) return true;
+  if (s.name.toLowerCase().includes(nq) || s.code.toLowerCase().includes(nq)) {
+    return true;
+  }
+  for (const [alias, code] of Object.entries(SEARCH_TICKER_ALIASES)) {
+    if (code === s.code && alias.toLowerCase().includes(nq)) return true;
+  }
+  return false;
+}
+
 export function resolveWatchSymbols(codes: string[]): SymbolMeta[] {
   const map = new Map(WATCHLIST_CANDIDATES.map((s) => [s.code, s]));
-  const uniq = Array.from(new Set(codes))
+  const uniq = Array.from(new Set(codes.map(canonicalizeWatchCode)))
     .map((c) => map.get(c))
     .filter((v): v is SymbolMeta => !!v)
     .slice(0, MAX_WATCH);

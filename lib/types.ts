@@ -55,7 +55,8 @@ export type SectorTag =
   | "글로벌에너지"       // XOM/CVX
   | "글로벌암호화폐"     // MSTR/COIN (BTC 노출)
   | "글로벌AI인프라"     // VRT/DELL (AI 데이터센터 전력·냉각·서버)
-  | "글로벌우주";        // SPCX (SpaceX) — 2026-06-12 IPO
+  | "글로벌우주"         // SPCX (SpaceX) — 2026-06-12 IPO
+  | "글로벌레버리지";    // KORU/SOXL/SOXS 3배 ETF
 
 export interface SymbolMeta {
   // 내부 표준 코드 (예: 005930.KS)

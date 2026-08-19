@@ -182,6 +182,19 @@ export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   { kw: "하이닉스 ADR", code: "SKHY" },
   { kw: "Hynix ADR", code: "SKHY" },
   { kw: "하이닉스 나스닥", code: "SKHY" },
+
+  // ── 2026-08-20 샌디스크·레버리지 ETF ─────────────────────
+  { kw: "샌디스크", code: "SNDK" },
+  { kw: "Sandisk", code: "SNDK" },
+  { kw: "SanDisk", code: "SNDK" },
+  { kw: "SNDK", code: "SNDK" },
+  { kw: "코루", code: "KORU" },
+  { kw: "KORU", code: "KORU" },
+  { kw: "소엑셀", code: "SOXL" },
+  { kw: "SOXL", code: "SOXL" },
+  { kw: "소엑스", code: "SOXS" },
+  { kw: "SOXS", code: "SOXS" },
+  { kw: "SOSX", code: "SOXS" },
 ];
 
 // reverse lookup: 종목 코드 → 매칭 키워드 배열.

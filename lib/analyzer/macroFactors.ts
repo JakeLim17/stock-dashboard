@@ -75,6 +75,7 @@ const US_GROWTH_SECTORS = new Set([
   "글로벌암호화폐",
   "글로벌EV",
   "중국ADR",
+  "글로벌레버리지",
 ]);
 
 const US_VALUE_SECTORS = new Set([

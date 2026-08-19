@@ -429,6 +429,10 @@ const US_TICKER_TO_KO: Record<string, string> = {
   CVX: "셰브론",
   MSTR: "마이크로스트래티지",
   COIN: "코인베이스",
+  SNDK: "샌디스크",
+  KORU: "코루",
+  SOXL: "소엑셀",
+  SOXS: "소엑스",
 };
 
 // 종목 코드별 한국어 사명 — 한국 종목용.
@@ -709,6 +713,16 @@ const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
   { kw: "하이닉스", code: "000660.KS" },
   { kw: "sk hynix", code: "000660.KS" },
   { kw: "skhy", code: "SKHY" },
+  { kw: "샌디스크", code: "SNDK" },
+  { kw: "sandisk", code: "SNDK" },
+  { kw: "sndk", code: "SNDK" },
+  { kw: "코루", code: "KORU" },
+  { kw: "koru", code: "KORU" },
+  { kw: "소엑셀", code: "SOXL" },
+  { kw: "soxl", code: "SOXL" },
+  { kw: "소엑스", code: "SOXS" },
+  { kw: "soxs", code: "SOXS" },
+  { kw: "sosx", code: "SOXS" },
   { kw: "삼성전기", code: "009150.KS" },
   { kw: "LG전자", code: "066570.KS" },
   { kw: "현대차", code: "005380.KS" },

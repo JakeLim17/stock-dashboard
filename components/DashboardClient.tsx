@@ -6,6 +6,8 @@ import {
   MAX_WATCH,
   PRIMARY_SYMBOLS,
   WATCHLIST_CANDIDATES,
+  canonicalizeWatchCode,
+  symbolMatchesQuery,
 } from "@/lib/symbols";
 import { SummaryBar } from "./SummaryBar";
 import { StockCard } from "./StockCard";
@@ -106,7 +108,7 @@ const CANDIDATE_CODES = new Set(WATCHLIST_CANDIDATES.map((s) => s.code));
 const CANDIDATE_BY_CODE = new Map(WATCHLIST_CANDIDATES.map((s) => [s.code, s]));
 
 function normalizeWatchCodes(input: string[]): string[] {
-  const normalized = Array.from(new Set(input))
+  const normalized = Array.from(new Set(input.map(canonicalizeWatchCode)))
     .filter((code) => CANDIDATE_CODES.has(code))
     .slice(0, MAX_WATCH);
   return normalized.length > 0
@@ -820,9 +822,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     return WATCHLIST_CANDIDATES.filter((s) => {
       if (selectedSet.has(s.code)) return false;
       if (!q) return true;
-      return (
-        s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)
-      );
+      return symbolMatchesQuery(s, q);
     });
   }, [search, watchCodes]);
 
