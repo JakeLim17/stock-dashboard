@@ -5,6 +5,7 @@ import {
 import {
   calendarDaysToSessionOffset,
   formatTradingSessionLabel,
+  isoDateInMarketTz,
 } from "./fair-value-trading-day";
 import type {
   OverseasNightIndicator,
@@ -446,11 +447,23 @@ export function buildFairValueEstimateForHorizon(
   }
 
   if (!settlement.ready && horizonId === "today") {
-    return {
-      ready: false,
-      pendingReason: "장 마감 후 오늘 종가 추정 공개",
-      settlementLabel: settlement.settlementLabel,
-    };
+    // 앱장 대기·야간에도 달력이 오늘이면 직전 확정가로 오늘 종가 추정을 연다.
+    // (예전엔 여기 pending → 스크럽 첫 점이 「내일」만 됨)
+    const fallback = quote.extendedHours?.price || quote.price;
+    if (fallback > 0) {
+      settlement = {
+        settlementPrice: fallback,
+        prevSettlement: quote.prevClose,
+        ready: true,
+        settlementLabel: settlement.settlementLabel || "현재가",
+      };
+    } else {
+      return {
+        ready: false,
+        pendingReason: "장 마감 후 오늘 종가 추정 공개",
+        settlementLabel: settlement.settlementLabel,
+      };
+    }
   }
 
   if (!settlement.ready) {
@@ -1161,14 +1174,23 @@ export function buildFairValueDailySeries(input: {
     return null;
   };
 
+  const clock = now ?? new Date();
+  const calendarTodayIso = isoDateInMarketTz(code, clock);
+  const tomorrowIso = formatTradingSessionLabel(code, 1, clock).isoDate;
+
   const out: FairValueDailyPoint[] = [];
   for (let d = 0; d <= maxOffset; d++) {
     const anchor = anchors.find((a) => a.offset === d);
     const price = anchor
       ? anchor.price
       : roundPrice(Math.exp(logPath[d] ?? baseLn), decimals);
-    const session = formatTradingSessionLabel(code, d, now);
+    const session = formatTradingSessionLabel(code, d, clock);
     const band = bandAt(d);
+    let horizonLabel = anchor?.label;
+    if (!horizonLabel) {
+      if (session.isoDate === calendarTodayIso) horizonLabel = "오늘";
+      else if (session.isoDate === tomorrowIso) horizonLabel = "내일";
+    }
     out.push({
       sessionOffset: d,
       isoDate: session.isoDate,
@@ -1177,7 +1199,7 @@ export function buildFairValueDailySeries(input: {
       low: band ? roundPrice(price * Math.exp(band.lnLow), decimals) : null,
       high: band ? roundPrice(price * Math.exp(band.lnHigh), decimals) : null,
       horizonId: anchor?.id,
-      horizonLabel: anchor?.label,
+      horizonLabel,
       openPrice: anchor?.openPrice ?? null,
     });
   }

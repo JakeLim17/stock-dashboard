@@ -720,4 +720,60 @@ describe("buildFairValueEstimate", () => {
       `day0→day1 상방 필요: ${d0.price} → ${d1.price}`
     );
   });
+
+  it("정규장 종가 이후 야간·다음날 장 전에도 오늘(KST) 예측점이 있다", () => {
+    const now = new Date("2026-08-20T03:19:00+09:00");
+    const snap = minimalSnap(
+      quote({
+        marketState: "CLOSED",
+        price: 100_000,
+        prevClose: 99_000,
+      })
+    );
+    snap.predictions!.ranges = [
+      {
+        horizonDays: 1,
+        horizonLabel: "1일",
+        low: 98_000,
+        high: 102_000,
+        center: 100_800,
+        confidence: 0.95,
+      },
+      {
+        horizonDays: 5,
+        horizonLabel: "1주",
+        low: 95_000,
+        high: 105_000,
+        center: 101_000,
+        confidence: 0.95,
+      },
+      {
+        horizonDays: 22,
+        horizonLabel: "1개월",
+        low: 90_000,
+        high: 112_000,
+        center: 102_000,
+        confidence: 0.95,
+      },
+    ];
+    const horizons = buildMultiHorizonFairValue(snap);
+    const todayH = horizons.find((h) => h.id === "today")!.estimate;
+    assert.equal(todayH.ready, true, "오늘 시계가 pending 이면 안 됨");
+
+    const series = buildFairValueDailySeries({
+      code: snap.meta.code,
+      horizons,
+      ranges: snap.predictions!.ranges,
+      basePrice: snap.quote.price,
+      now,
+    });
+    const d0 = series.find((p) => p.sessionOffset === 0);
+    const d1 = series.find((p) => p.sessionOffset === 1);
+    assert.ok(d0, "offset 0 오늘 점 없음");
+    assert.equal(d0!.isoDate, "2026-08-20");
+    assert.equal(d0!.horizonLabel, "오늘");
+    assert.equal(d1!.isoDate, "2026-08-21");
+    assert.equal(d1!.horizonLabel, "내일");
+    assert.ok(d0!.price > 0);
+  });
 });

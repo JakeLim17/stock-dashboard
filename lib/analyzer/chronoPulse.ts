@@ -619,6 +619,7 @@ export function computeChronoPulse(input: ChronoPulseInput): ChronoPulseResult {
     }
     const nightFut = computeNightFuturesPassThrough(
       {
+        k200: marketContext?.k200Rate,
         nq: marketContext?.nasdaqRate,
         es: marketContext?.esRate,
         ym: marketContext?.ymRate,

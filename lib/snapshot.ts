@@ -21,6 +21,7 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import { kisEnabled } from "./providers/kis";
+import { fetchKospi200NightRate } from "./providers/kospi200FuturesQuote";
 import { collectExtraAlphaFactors } from "./providers/extraAlpha";
 import {
   CORE_SNAPSHOT_TTL_MS,
@@ -141,6 +142,8 @@ export interface MarketContextSnapshot {
   soxRate: number;
   esRate: number;
   ymRate: number;
+  /** 코스피200 선물 야간 — 정규 종가 대비. 없으면 null(미국 선물 폴백) */
+  k200Rate: number | null;
 }
 
 // 매크로 히스토리 재사용 — watchlist 가 동일 심볼 90일치를 다시 fetch 하지 않도록.
@@ -192,6 +195,7 @@ const EMPTY_MARKET_CONTEXT: MarketContextSnapshot = {
   soxRate: 0,
   esRate: 0,
   ymRate: 0,
+  k200Rate: null,
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -260,7 +264,8 @@ function buildFxVolatility(
 function assembleMarketIndicatorsResult(
   indicatorResults: Awaited<ReturnType<typeof fetchYahooQuotesBatch>>,
   historyMap: Map<string, number[]>,
-  macroHistories: MarketIndicatorsResult["macroHistories"]
+  macroHistories: MarketIndicatorsResult["macroHistories"],
+  k200Rate: number | null = null
 ): MarketIndicatorsResult {
   const errors: Record<string, string> = {};
   const indicators: MarketIndicator[] = [];
@@ -324,6 +329,7 @@ function assembleMarketIndicatorsResult(
       soxRate: soxRate ?? 0,
       esRate: es?.changeRate ?? 0,
       ymRate: ym?.changeRate ?? 0,
+      k200Rate,
     },
     usdKrw: fx?.value ?? null,
     macroHistories,
@@ -334,13 +340,14 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   // 시세 batch + 모든 인디케이터 일별 close history(최근 90영업일)를 병렬로.
   // history는 (1) KRW=X 변동성 σ 계산, (2) Sparkline(-30), (3) watchlist 매크로 회귀에 재사용.
   const INDICATOR_HISTORY_DAYS = 90;
-  const [indicatorResults, historyResults] = await Promise.all([
+  const [indicatorResults, historyResults, k200Rate] = await Promise.all([
     fetchYahooQuotesBatch(MARKET_INDICATORS),
     Promise.all(
       MARKET_INDICATORS.map((meta) =>
         fetchHistorical(meta.code, INDICATOR_HISTORY_DAYS).catch(() => [])
       )
     ),
+    fetchKospi200NightRate().catch(() => null),
   ]);
   const historyMap = new Map<string, number[]>();
   const macroHistories: MarketIndicatorsResult["macroHistories"] = {};
@@ -361,7 +368,8 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   return assembleMarketIndicatorsResult(
     indicatorResults,
     historyMap,
-    macroHistories
+    macroHistories,
+    k200Rate
   );
 }
 
@@ -370,8 +378,16 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
  * 캐시에 쓰지 않음 — full/core 가 웜한 지표를 오염시키지 않게.
  */
 async function fetchMarketIndicatorsQuotesOnly(): Promise<MarketIndicatorsResult> {
-  const indicatorResults = await fetchYahooQuotesBatch(MARKET_INDICATORS);
-  return assembleMarketIndicatorsResult(indicatorResults, new Map(), {});
+  const [indicatorResults, k200Rate] = await Promise.all([
+    fetchYahooQuotesBatch(MARKET_INDICATORS),
+    fetchKospi200NightRate().catch(() => null),
+  ]);
+  return assembleMarketIndicatorsResult(
+    indicatorResults,
+    new Map(),
+    {},
+    k200Rate
+  );
 }
 
 // fetchMarketIndicators 의 외부 노출 진입점 — 5s soft TTL + in-flight dedup 적용.
@@ -993,6 +1009,7 @@ export async function fetchWatchlistSnapshots(
           soxRate: (context ?? EMPTY_MARKET_CONTEXT).soxRate,
           esRate: (context ?? EMPTY_MARKET_CONTEXT).esRate,
           ymRate: (context ?? EMPTY_MARKET_CONTEXT).ymRate,
+          k200Rate: (context ?? EMPTY_MARKET_CONTEXT).k200Rate,
         },
         analysisCachedAt: cachedAnalysis?.cachedAt ?? null,
       };

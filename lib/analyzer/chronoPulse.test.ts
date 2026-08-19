@@ -260,11 +260,12 @@ describe("ChronoPulse", () => {
         kospiRate: 0,
         fxRate: 0,
         semiHeat: 50,
+        k200Rate: 0.012,
       },
     });
     const chip = r.factors.find((f) => f.id === "night-fut");
     assert.ok(chip);
-    assert.match(chip!.label, /^야간 선물 \+/);
+    assert.match(chip!.label, /^야간 코스피200 선물 \+/);
     assert.ok(chip!.bps > 0 && chip!.bps <= 80);
   });
 

@@ -68,6 +68,43 @@ export function calendarDaysToSessionOffset(
   return Math.max(1, (target.getTime() - now.getTime()) / 86_400_000);
 }
 
+/** 종목 시장 TZ의 달력일 YYYY-MM-DD (주말 스킵 없음). */
+export function isoDateInMarketTz(
+  code: string,
+  at: Date | number = new Date()
+): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezoneFor(code),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(at));
+}
+
+/** 실제 봉 라벨 — 브라우저 로컬 TZ가 아니라 시장 TZ. */
+export function shortDayLabelInMarketTz(
+  code: string,
+  at: Date | number
+): string {
+  const iso = isoDateInMarketTz(code, at);
+  const parts = iso.split("-");
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  return `${month}/${day}`;
+}
+
+/**
+ * 마지막 실제 봉이 오늘 예측일보다 이전이면 예측을 한 칸 오른쪽으로.
+ * (offset 0을 전일 종가와 같은 x에 두면 오늘 점이 안 잡힘)
+ */
+export function forecastAxisShift(
+  lastActualIso: string | null | undefined,
+  firstForecastIso: string | null | undefined
+): number {
+  if (!lastActualIso || !firstForecastIso) return 0;
+  return lastActualIso < firstForecastIso ? 1 : 0;
+}
+
 /** 카드 표시용 — offset 0=오늘, 1=익일 … */
 export function formatTradingSessionLabel(
   code: string,

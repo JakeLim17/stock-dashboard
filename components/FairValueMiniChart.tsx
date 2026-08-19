@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import type { PriceRange } from "@/lib/types";
 import {
@@ -14,7 +15,12 @@ import {
   type FairValueHorizonItem,
   type PathFactor,
 } from "@/lib/fair-value";
-import { fmtNumber, fmtPercent } from "@/lib/utils";
+import {
+  forecastAxisShift,
+  isoDateInMarketTz,
+  shortDayLabelInMarketTz,
+} from "@/lib/fair-value-trading-day";
+import { changeColor, fmtNumber, fmtPercent } from "@/lib/utils";
 
 // 가격 추정 미니 그래프 — "오늘/내일/다음주/1개월" 텍스트 카드를 대체하는 인터랙티브 SVG.
 //
@@ -22,9 +28,9 @@ import { fmtNumber, fmtPercent } from "@/lib/utils";
 //     + 4개 시계 앵커(오늘/내일/다음주/1개월)에는 마커 표시
 //   - 일별 예측은 buildFairValueDailySeries 가 요인 기반 일별 경로 + √t 밴드로 파생
 //     (프론트 파생 계산 — API 응답·서버 비용 증가 없음)
-//   - 드래그(스크럽): 포인터를 누른 채 움직이면 일별 점을 하나씩 따라가고,
-//     손을 떼면(pointerup) 그 지점이 고정되어 아래 리드아웃에 날짜·가격이 남는다.
-//     터치·마우스 모두 pointer events 로 처리 (touch-none 으로 스크롤 간섭 차단).
+//   - 스크럽: 값은 차트 **위** 고정 요약에 두고, 손가락은 차트 **아래** 얇은
+//     슬라이더로 날짜만 고른다. 차트 위 드래그·데스크톱 호버도 같은 상단 라벨을 갱신.
+//     터치·마우스 모두 pointer events (touch-none 으로 스크롤 간섭 차단).
 //   - 실제 가격은 /api/history?range=1m (CardSparkline 과 같은 in-view 지연 로드).
 
 interface DailyPoint {
@@ -50,9 +56,28 @@ interface ChartPt {
   isAnchor?: boolean;
 }
 
-function fmtDayLabel(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+/** 슬라이더 눈금 — 오늘·내일·다음 주만 (데이터가 있는 날짜). 1개월은 빼 둔다. */
+const SLIDER_TICK_LABELS: Record<string, string> = {
+  오늘: "오늘",
+  내일: "내일",
+  "다음 주": "다음 주",
+  다음주: "다음 주",
+};
+
+function sliderTickLabel(horizonLabel?: string): string | null {
+  if (!horizonLabel) return null;
+  return SLIDER_TICK_LABELS[horizonLabel] ?? null;
+}
+
+/** key로 리마운트해 선택 날짜가 바뀔 때만 숫자가 짧게 깜빡이게 한다. */
+function ReadoutNum({
+  className,
+  children,
+}: {
+  className: string;
+  children: ReactNode;
+}) {
+  return <span className={className}>{children}</span>;
 }
 
 // 로딩 스켈레톤 — 실제 차트 형태(좌 실선·우 점선 + 밴드)를 흉내낸 가짜 곡선이
@@ -186,13 +211,19 @@ export function FairValueMiniChart({
   const [histLoading, setHistLoading] = useState(true);
   // 선택 점 인덱스 (allPts 기준). null 이면 기본 점(내일 예측) 표시.
   const [selIdx, setSelIdx] = useState<number | null>(null);
+  // 데스크톱 호버 미리보기 — 손을 떼면 고정 선택(selIdx)으로 돌아감
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const draggingRef = useRef(false);
+  const prevActiveIdxRef = useRef<number | null>(null);
+  const [readoutFlashKey, setReadoutFlashKey] = useState(0);
 
   // 종목 전환 시 상태 초기화
   useEffect(() => {
     setHist(null);
     setHistLoading(true);
     setSelIdx(null);
+    setHoverIdx(null);
+    prevActiveIdxRef.current = null;
   }, [code]);
 
   // 컨테이너 폭 추적
@@ -255,7 +286,7 @@ export function FairValueMiniChart({
       x: i,
       price: p.close,
       kind: "actual" as const,
-      label: fmtDayLabel(p.date),
+      label: shortDayLabelInMarketTz(code, p.date),
     }));
     // 히스토리가 없으면 현재가 1점으로 앵커 (예측 곡선만이라도 그린다)
     if (actualPts.length === 0 && currentPrice > 0) {
@@ -283,11 +314,23 @@ export function FairValueMiniChart({
       realizedVol,
       recentLogReturns,
     });
+    const lastActualIso =
+      hist && hist.length > 0
+        ? isoDateInMarketTz(code, hist[hist.length - 1]!.date)
+        : null;
+    const axisShift = forecastAxisShift(lastActualIso, daily[0]?.isoDate);
+    const predX = (sessionOffset: number) =>
+      anchor.x + sessionOffset + axisShift;
     const predPts: ChartPt[] = daily
-      // 가상 시작점(offset 0, 앵커 아님)은 현재가 복제라 스크럽·라인에서 제외
-      .filter((p) => p.sessionOffset > 0 || p.horizonId != null)
+      // 가상 시작점(offset 0, 오늘도 앵커·라벨 없음)은 현재가 복제라 제외
+      .filter(
+        (p) =>
+          p.sessionOffset > 0 ||
+          p.horizonId != null ||
+          p.horizonLabel === "오늘"
+      )
       .map((p) => ({
-        x: anchor.x + p.sessionOffset,
+        x: predX(p.sessionOffset),
         price: p.price,
         kind: "pred" as const,
         label: p.label,
@@ -295,7 +338,7 @@ export function FairValueMiniChart({
         openPrice: p.openPrice,
         low: p.low,
         high: p.high,
-        isAnchor: p.horizonId != null,
+        isAnchor: p.horizonId != null || p.horizonLabel === "오늘",
       }));
 
     // ── 예측 밴드 — 일별 low~high 를 부드러운 폴리곤으로 ──
@@ -303,8 +346,9 @@ export function FairValueMiniChart({
     if (predPts.some((p) => p.low != null && p.high != null)) {
       band.push({ x: anchor.x, low: anchor.price, high: anchor.price });
       for (const p of daily) {
-        if (p.sessionOffset <= 0 || p.low == null || p.high == null) continue;
-        band.push({ x: anchor.x + p.sessionOffset, low: p.low, high: p.high });
+        if (p.low == null || p.high == null) continue;
+        if (p.sessionOffset <= 0 && axisShift === 0) continue;
+        band.push({ x: predX(p.sessionOffset), low: p.low, high: p.high });
       }
     }
 
@@ -436,10 +480,8 @@ export function FairValueMiniChart({
   }, [hist, horizons, ranges, pathFactors, currentPrice, width, height, code]);
 
   // ── 스크럽 핸들러 ──
-  const pickNearest = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (!model || model.allPts.length === 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left;
+  const nearestIdx = (px: number): number | null => {
+    if (!model || model.allPts.length === 0) return null;
     let best = 0;
     let bestDist = Infinity;
     for (let i = 0; i < model.allPts.length; i++) {
@@ -449,36 +491,142 @@ export function FairValueMiniChart({
         best = i;
       }
     }
-    setSelIdx(best);
+    return best;
+  };
+
+  const idxFromEvent = (e: ReactPointerEvent<Element>): number | null => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return nearestIdx(e.clientX - rect.left);
+  };
+
+  const pinIdx = (idx: number | null) => {
+    if (idx == null) return;
+    setHoverIdx(null);
+    setSelIdx(idx);
   };
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    // 터치는 아래 슬라이더만 — 손가락이 숫자를 가리지 않게.
+    if (e.pointerType === "touch") return;
     draggingRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
-    pickNearest(e);
+    pinIdx(idxFromEvent(e));
   };
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (!draggingRef.current) return;
-    pickNearest(e);
+    const idx = idxFromEvent(e);
+    if (draggingRef.current) {
+      pinIdx(idx);
+      return;
+    }
+    // 데스크톱 호버 — 상단 고정 라벨만 미리보기 (핀은 클릭·슬라이더)
+    if (e.pointerType === "mouse") setHoverIdx(idx);
   };
   const onPointerUp = () => {
-    // 손을 떼면 마지막 지점이 그대로 고정된다 (selIdx 유지)
     draggingRef.current = false;
   };
+  const onPointerLeave = () => {
+    if (!draggingRef.current) setHoverIdx(null);
+  };
 
-  const sel =
+  const activeIdx =
     model && model.allPts.length > 0
-      ? model.allPts[
-          selIdx != null && selIdx < model.allPts.length
-            ? selIdx
-            : model.defaultIdx
-        ]
-      : null;
+      ? hoverIdx != null && hoverIdx < model.allPts.length
+        ? hoverIdx
+        : selIdx != null && selIdx < model.allPts.length
+          ? selIdx
+          : model.defaultIdx
+      : 0;
+  const sel =
+    model && model.allPts.length > 0 ? model.allPts[activeIdx] : null;
   const selDelta =
     sel && currentPrice > 0 ? sel.price / currentPrice - 1 : null;
+  const predDeltaClass =
+    sel?.kind === "pred"
+      ? selDelta == null || Math.abs(selDelta) < 0.0005
+        ? "text-muted-foreground"
+        : changeColor(selDelta)
+      : "";
+  const sliderMax = model ? Math.max(0, model.allPts.length - 1) : 0;
+  const sliderTicks = useMemo(() => {
+    if (!model || sliderMax <= 0) return [];
+    const seen = new Set<string>();
+    const ticks: { idx: number; label: string; pct: number }[] = [];
+    for (let i = 0; i < model.allPts.length; i++) {
+      const label = sliderTickLabel(model.allPts[i].horizonLabel);
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      ticks.push({ idx: i, label, pct: (i / sliderMax) * 100 });
+    }
+    return ticks;
+  }, [model, sliderMax]);
+
+  useEffect(() => {
+    if (!model) return;
+    const committed =
+      selIdx != null && selIdx < model.allPts.length ? selIdx : model.defaultIdx;
+    const prev = prevActiveIdxRef.current;
+    if (prev != null && prev !== committed) {
+      setReadoutFlashKey((k) => k + 1);
+    }
+    prevActiveIdxRef.current = committed;
+  }, [selIdx, model]);
 
   return (
     <div ref={containerRef} className="w-full">
+      {/* 고정 요약 — 손가락·커서가 가리지 않게 차트 위에 둠 */}
+      {!histLoading && sel && (
+        <div className="mb-1 min-h-[1.75rem]">
+          <div className="flex items-baseline justify-between gap-2 text-[11px] tabular">
+            <span className="min-w-0 truncate">
+              <span
+                className={`inline-block px-1 py-px mr-1 rounded text-[9px] font-medium ${
+                  sel.kind === "pred"
+                    ? "bg-accent/15 text-accent"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {sel.kind === "pred" ? "예측" : "실제"}
+              </span>
+              <span className="text-muted-foreground">
+                {sel.label}
+                {sel.horizonLabel ? ` · ${sel.horizonLabel}` : ""}
+              </span>
+            </span>
+            <ReadoutNum
+              key={readoutFlashKey}
+              className={`shrink-0 font-bold tabular leading-none ${
+                sel.kind === "pred"
+                  ? `text-lg ${predDeltaClass}`
+                  : "text-sm font-semibold text-foreground"
+              }${readoutFlashKey > 0 ? " fv-readout-flash" : ""}`}
+            >
+              {fmtNumber(sel.price, decimals)}
+              {selDelta != null && Math.abs(selDelta) >= 0.0005 && (
+                <span
+                  className={`ml-1.5 font-medium ${
+                    sel.kind === "pred"
+                      ? `text-sm ${predDeltaClass}`
+                      : "text-[11px] font-normal text-muted-foreground"
+                  }`}
+                >
+                  ({fmtPercent(selDelta, 1)})
+                </span>
+              )}
+            </ReadoutNum>
+          </div>
+          {sel.kind === "pred" && sel.low != null && sel.high != null && (
+            <div className="text-[10px] text-muted-foreground tabular text-right">
+              범위 {fmtNumber(sel.low, decimals)} ~ {fmtNumber(sel.high, decimals)}
+            </div>
+          )}
+          {sel.openPrice != null && (
+            <div className="text-[10px] text-muted-foreground tabular text-right">
+              시가 추정 {fmtNumber(sel.openPrice, decimals)}
+            </div>
+          )}
+        </div>
+      )}
+
       <div
         className="relative overflow-hidden rounded-md"
         style={{ height }}
@@ -494,11 +642,14 @@ export function FairValueMiniChart({
             width={width}
             height={height}
             viewBox={`0 0 ${width} ${height}`}
-            className="block touch-none select-none cursor-crosshair overflow-visible"
+            className="block select-none cursor-crosshair overflow-visible"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onPointerLeave={onPointerLeave}
+            role="img"
+            aria-label="실제·예측 가격 그래프. 아래 막대로 날짜를 고르거나, 마우스로 그래프를 가리켜 보세요"
           >
             {/* 예측 변동성 밴드 */}
             {model.bandPath && (
@@ -595,61 +746,103 @@ export function FairValueMiniChart({
         )}
       </div>
 
-      {/* 선택 지점 리드아웃 — 드래그로 갱신, 손 떼면 고정 (로딩 중엔 숨김) */}
-      {!histLoading && sel && (
-        <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] tabular">
-          <span className="min-w-0 truncate">
-            <span
-              className={`inline-block px-1 py-px mr-1 rounded text-[9px] font-medium ${
-                sel.kind === "pred"
-                  ? "bg-accent/15 text-accent"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {sel.kind === "pred" ? "예측" : "실제"}
-            </span>
-            <span className="text-muted-foreground">
-              {sel.label}
-              {sel.horizonLabel ? ` · ${sel.horizonLabel}` : ""}
-            </span>
-          </span>
-          <span
-            className={`shrink-0 font-bold tabular leading-none ${
-              sel.kind === "pred"
-                ? "text-lg text-up"
-                : "text-sm font-semibold text-foreground"
-            }`}
-          >
-            {fmtNumber(sel.price, decimals)}
-            {selDelta != null && Math.abs(selDelta) >= 0.0005 && (
-              <span
-                className={`ml-1.5 font-medium ${
-                  sel.kind === "pred"
-                    ? "text-sm text-up/80"
-                    : "text-[11px] font-normal text-muted-foreground"
-                }`}
-              >
-                ({fmtPercent(selDelta, 1)})
-              </span>
-            )}
-          </span>
-        </div>
-      )}
-      {!histLoading && sel?.kind === "pred" && sel.low != null && sel.high != null && (
-        <div className="text-[10px] text-muted-foreground tabular text-right">
-          범위 {fmtNumber(sel.low, decimals)} ~ {fmtNumber(sel.high, decimals)}
-        </div>
-      )}
-      {!histLoading && sel?.openPrice != null && (
-        <div className="text-[10px] text-muted-foreground tabular text-right">
-          시가 추정 {fmtNumber(sel.openPrice, decimals)}
+      {!histLoading && model && model.allPts.length > 1 && (
+        <div className="mt-1 px-0.5">
+          <input
+            type="range"
+            className="fv-scrub w-full"
+            min={0}
+            max={sliderMax}
+            step={1}
+            value={activeIdx}
+            aria-label="날짜 선택"
+            aria-valuetext={
+              sel
+                ? `${sel.kind === "pred" ? "예측" : "실제"} ${sel.label}${
+                    sel.horizonLabel ? ` ${sel.horizonLabel}` : ""
+                  } ${fmtNumber(sel.price, decimals)}`
+                : undefined
+            }
+            onChange={(e) => pinIdx(Number(e.target.value))}
+          />
+          {sliderTicks.length > 0 && (
+            <div className="relative h-3.5 mt-0.5" aria-hidden="true">
+              {sliderTicks.map((t) => (
+                <span
+                  key={`${t.label}-${t.idx}`}
+                  className="absolute top-0 text-[9px] leading-none text-muted-foreground whitespace-nowrap"
+                  style={{
+                    left: `${t.pct}%`,
+                    transform: "translateX(-50%)",
+                  }}
+                >
+                  {t.label}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {!histLoading && model?.hasPred && (
-        <div className="mt-1 text-[9px] text-muted-foreground/70">
-          실선 실제 · 점선 예측 — 그래프를 드래그해 날짜별 가격 확인
+        <div className="mt-0.5 text-[9px] text-muted-foreground/70">
+          실선 실제 · 점선 예측 — 아래 막대를 밀어 날짜를 고르세요 (마우스는 그래프 위도 가능)
         </div>
       )}
+      <style>{`
+        .fv-scrub {
+          -webkit-appearance: none;
+          appearance: none;
+          height: 28px;
+          background: transparent;
+          cursor: pointer;
+          touch-action: none;
+          margin: 0;
+        }
+        .fv-scrub:focus-visible {
+          outline: 2px solid var(--color-accent);
+          outline-offset: 2px;
+          border-radius: 6px;
+        }
+        .fv-scrub::-webkit-slider-runnable-track {
+          height: 6px;
+          border-radius: 999px;
+          background: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent);
+        }
+        .fv-scrub::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 16px;
+          margin-top: -5px;
+          border-radius: 999px;
+          background: var(--color-accent);
+          border: 2px solid var(--color-background);
+          box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-accent) 50%, transparent);
+        }
+        .fv-scrub::-moz-range-track {
+          height: 6px;
+          border-radius: 999px;
+          background: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent);
+        }
+        .fv-scrub::-moz-range-thumb {
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          background: var(--color-accent);
+          border: 2px solid var(--color-background);
+          box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-accent) 50%, transparent);
+        }
+        .fv-readout-flash {
+          animation: fv-readout-flash 0.22s ease-out;
+        }
+        @keyframes fv-readout-flash {
+          0%   { opacity: 0.28; }
+          100% { opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fv-readout-flash { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }

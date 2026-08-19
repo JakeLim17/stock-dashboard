@@ -745,10 +745,12 @@ export interface StockMarketContext {
   vix: number;
   kospiRate: number;
   soxRate: number;
-  /** ES=F 등락 — 야간 선물 대용 */
+  /** ES=F 등락 — 야간 선물 보조 */
   esRate?: number;
   /** YM=F 등락 */
   ymRate?: number;
+  /** 코스피200 선물 야간(정규 종가 대비) */
+  k200Rate?: number | null;
 }
 
 /** 종목별 데이터 충분성 — snapshot·추천 게이트 공통. */

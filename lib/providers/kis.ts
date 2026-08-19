@@ -18,6 +18,12 @@ import type {
 import { toKisCode } from "../symbols";
 import type { HistoricalPoint } from "./yahoo";
 import { computeNetStreak } from "../analyzer/flowStreak";
+import {
+  isKospi200NightWindow,
+  kospi200FrontMonth,
+  kospi200NightRateVsRegularClose,
+  lastCompletedFuturesSessionYmd,
+} from "../analyzer/kospi200Futures";
 import { isKisApiEnabled } from "./kisFlags";
 
 // 한국투자증권(KIS) Open API provider.
@@ -1837,6 +1843,78 @@ export async function fetchKrShortBalance(
     };
   } catch (e) {
     dbg("[short] throw:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+interface KisFuturesPriceResponse {
+  rt_cd?: string;
+  output1?: {
+    futs_prpr?: string;
+  };
+}
+
+interface KisFuturesMinuteResponse {
+  rt_cd?: string;
+  output2?: Array<{
+    stck_cntg_hour?: string;
+    futs_prpr?: string;
+  }>;
+}
+
+async function fetchKospi200FuturesLast(code: string): Promise<number | null> {
+  const json = await kisGet<KisFuturesPriceResponse>({
+    path: "/uapi/domestic-futureoption/v1/quotations/inquire-price",
+    trId: "FHMIF10000000",
+    query: {
+      FID_COND_MRKT_DIV_CODE: "F",
+      FID_INPUT_ISCD: code,
+    },
+  });
+  if (json.rt_cd && json.rt_cd !== "0") return null;
+  return n(json.output1?.futs_prpr);
+}
+
+async function fetchKospi200RegularClose(
+  code: string,
+  sessionYmd: string
+): Promise<number | null> {
+  const json = await kisGet<KisFuturesMinuteResponse>({
+    path: "/uapi/domestic-futureoption/v1/quotations/inquire-time-fuopchartprice",
+    trId: "FHKIF03020200",
+    query: {
+      FID_COND_MRKT_DIV_CODE: "F",
+      FID_INPUT_ISCD: code,
+      FID_HOUR_CLS_CODE: "60",
+      FID_PW_DATA_INCU_YN: "Y",
+      FID_FAKE_TICK_INCU_YN: "N",
+      FID_INPUT_DATE_1: sessionYmd,
+      FID_INPUT_HOUR_1: "154500",
+    },
+  });
+  if (json.rt_cd && json.rt_cd !== "0") return null;
+  const bars = json.output2 ?? [];
+  const closeBar =
+    bars.find((b) => (b.stck_cntg_hour ?? "") === "154500") ?? bars[0];
+  return n(closeBar?.futs_prpr);
+}
+
+/** KIS 코스피200 선물 야간 등락(정규 15:45 대비). OFF·실패 시 null. */
+export async function fetchKisKospi200FuturesNightRate(
+  now = new Date()
+): Promise<number | null> {
+  if (!kisEnabled()) return null;
+  if (!isKospi200NightWindow(now)) return null;
+  const front = kospi200FrontMonth(now);
+  const sessionYmd = lastCompletedFuturesSessionYmd(now);
+  try {
+    const last = await fetchKospi200FuturesLast(front.code);
+    if (last == null) return null;
+    const regular = await fetchKospi200RegularClose(front.code, sessionYmd);
+    if (regular == null) return null;
+    return kospi200NightRateVsRegularClose(last, regular);
+  } catch (e) {
+    dbg("[k200fut] throw:", e instanceof Error ? e.message : String(e));
     return null;
   }
 }

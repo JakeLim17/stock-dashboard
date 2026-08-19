@@ -135,4 +135,38 @@ describe("overnightPassThrough", () => {
       null
     );
   });
+
+  it("코스피200 선물이 있으면 칩 문구·NQ보다 우선", () => {
+    const k200 = computeNightFuturesPassThrough({
+      k200: 0.02,
+      nq: -0.01,
+      es: -0.008,
+      ym: -0.006,
+      fx: 0,
+    });
+    const usOnly = computeNightFuturesPassThrough({
+      nq: -0.04,
+      es: -0.03,
+      ym: -0.02,
+      fx: 0,
+    });
+    assert.ok(k200 && usOnly);
+    assert.match(k200!.label, /^야간 코스피200 선물 \+/);
+    assert.ok(k200!.bps > 0, "k200 +2% 가 약한 미국 약세를 이김");
+    assert.ok(usOnly!.bps < 0);
+    assert.ok(k200!.bps <= NIGHT_FUTURES_BPS_CAP);
+  });
+
+  it("야간 코스피200 +2% 는 캡 안 양수 칩", () => {
+    const f = computeNightFuturesPassThrough({
+      k200: 0.0198,
+      nq: -0.001,
+      es: 0,
+      ym: 0,
+      fx: -0.017,
+    });
+    assert.ok(f);
+    assert.match(f!.label, /^야간 코스피200 선물 \+/);
+    assert.ok(f!.bps > 20 && f!.bps <= NIGHT_FUTURES_BPS_CAP);
+  });
 });

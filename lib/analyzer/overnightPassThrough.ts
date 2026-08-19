@@ -216,15 +216,17 @@ export function estimateOvernightOpenBand(
 }
 
 /**
- * 야간 선물 대용 신호 (야선.gg 스크래핑 없이 Yahoo 공개 시세).
- * 코스피200 야간선물(Eurex)은 Yahoo에 없어 NQ/ES/YM + 달러원으로 갭 방향만 가늠.
- * 확정 시초가 아님. 개별 ADR/GDR 칩과 겹치면 가중을 줄인다.
+ * 야간 선물 신호. HTML 스크래핑 없음.
+ * 벤치(sonmul 갭 가이드): ① 코스피200 야간 vs 정규 종가 ② NQ·ES ③ 환율. SOX·ADR은 별도 칩.
+ * 확정 시초가 아님. ADR/GDR 칩과 겹치면 가중을 줄인다.
  */
 export const NIGHT_FUTURES_TRANSFER = 0.22;
 export const NIGHT_FUTURES_BPS_CAP = 80; // ±0.8%
 const NIGHT_FUTURES_MIN_ABS = 0.0025;
 
 export interface NightFuturesRates {
+  /** 코스피200 선물 야간 — 정규 15:45 종가 대비 (전일대비 아님) */
+  k200?: number | null;
   nq?: number | null;
   es?: number | null;
   ym?: number | null;
@@ -240,11 +242,19 @@ export function compositeNightFuturesRate(rates: NightFuturesRates): number | nu
     acc += r * w;
     wSum += w;
   };
-  add(rates.nq, 0.45);
-  add(rates.es, 0.3);
-  add(rates.ym, 0.15);
-  // 원화 급변은 외국인 수급 압력 — 선물 방향과 반대로 약한 보정
-  add(rates.fx != null ? -rates.fx * 0.35 : null, 0.1);
+  const hasK200 = rates.k200 != null && Number.isFinite(rates.k200);
+  if (hasK200) {
+    add(rates.k200, 0.7);
+    add(rates.nq, 0.1);
+    add(rates.es, 0.08);
+    add(rates.ym, 0.05);
+    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.07);
+  } else {
+    add(rates.nq, 0.45);
+    add(rates.es, 0.3);
+    add(rates.ym, 0.15);
+    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.1);
+  }
   if (wSum < 0.3) return null;
   return acc / wSum;
 }
@@ -266,9 +276,12 @@ export function computeNightFuturesPassThrough(
   if (Math.abs(bps) < 1) return null;
   const pct = bps / 100;
   const sign = pct >= 0 ? "+" : "";
+  const hasK200 = rates.k200 != null && Number.isFinite(rates.k200);
   return {
     id: "night-fut",
-    label: `야간 선물 ${sign}${pct.toFixed(1)}% 반영`,
+    label: hasK200
+      ? `야간 코스피200 선물 ${sign}${pct.toFixed(1)}%`
+      : `야간 선물 ${sign}${pct.toFixed(1)}% 반영`,
     bps,
   };
 }
