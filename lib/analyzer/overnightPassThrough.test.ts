@@ -9,6 +9,8 @@ import {
   formatSharesPerReceiptLabel,
   inferOvernightKind,
   resolveOvernightProxyRate,
+  computeNightFuturesPassThrough,
+  NIGHT_FUTURES_BPS_CAP,
 } from "./overnightPassThrough";
 
 describe("overnightPassThrough", () => {
@@ -113,5 +115,24 @@ describe("overnightPassThrough", () => {
       "ADR 10주=원주 1주"
     );
     assert.equal(formatSharesPerReceiptLabel(25, "gdr"), "25주 환산");
+  });
+
+  it("야간 선물 합성 — NQ/ES 동반 상승은 캡 안 소폭 반영", () => {
+    const f = computeNightFuturesPassThrough({
+      nq: 0.012,
+      es: 0.008,
+      ym: 0.006,
+      fx: 0,
+    });
+    assert.ok(f);
+    assert.match(f!.label, /^야간 선물 \+/);
+    assert.ok(f!.bps > 0 && f!.bps <= NIGHT_FUTURES_BPS_CAP);
+  });
+
+  it("야간 선물 소폭은 무시", () => {
+    assert.equal(
+      computeNightFuturesPassThrough({ nq: 0.001, es: 0.001 }),
+      null
+    );
   });
 });

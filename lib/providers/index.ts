@@ -23,21 +23,21 @@ import {
 import { mockFlow } from "./mock";
 import type { FlowData, Quote } from "../types";
 
-// 라우팅 정책 (2026-06 재정비) — "한 번 가져오면 끝나는 데이터"는 무료 소스(네이버/Yahoo)에 맡기고
-// KIS 토큰/문자 부담은 정말 실시간성이 필요한 곳에만 집중한다.
+// 라우팅 정책 (2026-06 재정비, 2026-07 KIS OFF 스위치)
+// KIS 토큰/문자 부담은 실시간성이 필요한 곳에만. OFF 시 토큰·REST 0회.
+//   OFF: KIS_ENABLED 미설정(기본) | KIS_DISABLED=1 | 키 없음 → isKisApiEnabled()
 //
-//   - 시세(fetchQuote)
+//   - 시세(fetchQuote) — KIS ON 일 때
 //       한국:   네이버 → KIS 폴백 → Yahoo
-//       해외:   KIS(us-stock) 1순위 → Yahoo 폴백  (Yahoo free API stale 응답 회피)
-//       한국 지수(^KS11/^KQ11/^KS200): KIS inquire-index-price 1순위 → Yahoo 폴백
-//       기타 지수/환율/선물: Yahoo
-//   - 일별(fetchHistorical) — 네이버에 공식 historical API 없음
-//       한국:   Yahoo → KIS 폴백
-//       해외:   Yahoo → KIS(us-stock) 폴백
-//       기타:  Yahoo
-//   - 수급(fetchFlowOrMock) — KIS inquire-investor 가 KRX 원본에 가장 가깝고 실시간
-//       한국:   KIS → 네이버 폴백 → mock
-//       해외:  mock (의미 없음)
+//       해외:   KIS(us-stock) 1순위 → Yahoo 폴백
+//       한국 지수: KIS → Yahoo
+//   - 시세 — KIS OFF 일 때
+//       한국:   네이버 → Yahoo / 해외·지수: Yahoo only
+//   - 일별(fetchHistorical)
+//       Yahoo 1순위 → (KIS ON 시) KIS 폴백
+//   - 수급(fetchFlowOrMock)
+//       KIS ON:  KIS → 네이버 → kis-unavailable
+//       KIS OFF: 네이버 → mock
 //
 // KIS 전담(다른 진입점에서 호출):
 //   - 분봉(1m/5m/15m): app/api/intraday-chart → fetchKrIntradayCandles
@@ -161,6 +161,7 @@ export {
 };
 export {
   fetchAllNews,
+  didNewsFetchFail,
   riskKeywords,
   fetchNewsForSymbol,
   fetchNewsForSymbols,
@@ -202,7 +203,8 @@ export async function fetchFlowOrMock(
     return { flow: m, source: "mock" };
   }
 
-  // 1순위: KIS 실시간 (FHKST01010900) — 토스/KRX 와 정합. 5분 캐시.
+  // 1순위: KIS 실시간 (FHKST01010900) — 토스/KRX 와 정합.
+  // 캐시: 장중 1h / 장후·휴장 24h + KV (kisExtraCache.getKrFlowCached).
   if (kisEnabled()) {
     const kisFlow = await getKrFlowCached(code);
     if (kisFlow && (kisFlow.foreignNet != null || kisFlow.institutionNet != null)) {
@@ -236,7 +238,13 @@ export async function fetchFlowOrMock(
     }
   }
 
-  // KIS·네이버 모두 실패 → 빈 표시.
+  // KIS OFF 이면 빈 칸 대신 mock (의도적으로 한투를 안 쓰는 설정).
+  if (!kisEnabled()) {
+    const m = mockFlow(code);
+    return { flow: m, source: "mock" };
+  }
+
+  // KIS ON 인데 KIS·네이버 모두 실패 → 빈 표시.
   return {
     flow: {
       foreignNet: null,

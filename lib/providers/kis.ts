@@ -18,11 +18,13 @@ import type {
 import { toKisCode } from "../symbols";
 import type { HistoricalPoint } from "./yahoo";
 import { computeNetStreak } from "../analyzer/flowStreak";
+import { isKisApiEnabled } from "./kisFlags";
 
 // 한국투자증권(KIS) Open API provider.
 // - 토큰: 메모리 캐싱 + 만료 5분 전 자동 갱신, 동시 호출 시 단일 in-flight 공유.
 // - 엔드포인트(7): 토큰 / 국내시세 / 국내일별 / 국내수급 / 해외시세 / 해외일별
 // - 응답 키는 KIS 공식 명세(stck_prpr 등)를 그대로 따른다.
+// - OFF: KIS_ENABLED 미설정(기본) 또는 KIS_DISABLED=1 또는 키 없음 → 토큰·REST 0회.
 
 // ────────────────────────────────────────────────────────────────────
 // 기본 설정
@@ -68,7 +70,7 @@ function getAppSecret(): string | null {
 }
 
 export function kisEnabled(): boolean {
-  return !!(getAppKey() && getAppSecret());
+  return isKisApiEnabled();
 }
 
 // 디버그 로그 — DEBUG_KIS=1 일 때만 활성화. 평소엔 조용히.
@@ -149,6 +151,23 @@ function getKvToken(): string | null {
 
 function isKvConfigured(): boolean {
   return !!(getKvUrl() && getKvToken());
+}
+
+/** 수급 등 cross-instance 캐시용 — kisExtraCache 에서 재사용. */
+export function kisKvConfigured(): boolean {
+  return isKvConfigured();
+}
+
+export async function kisKvGet(key: string): Promise<string | null> {
+  return kvGet(key);
+}
+
+export async function kisKvSet(
+  key: string,
+  value: string,
+  ttlSec: number
+): Promise<boolean> {
+  return kvSet(key, value, ttlSec);
 }
 
 async function kvGet(key: string): Promise<string | null> {
@@ -286,6 +305,9 @@ interface KisTokenResponse {
 }
 
 async function requestNewToken(reason: string): Promise<string> {
+  if (!kisEnabled()) {
+    throw new Error("KIS 비활성 (KIS_ENABLED≠1 / KIS_DISABLED / 키 없음)");
+  }
   const appkey = getAppKey();
   const appsecret = getAppSecret();
   if (!appkey || !appsecret) {
@@ -340,6 +362,9 @@ async function requestNewToken(reason: string): Promise<string> {
 }
 
 async function getToken(forceRefresh = false): Promise<string> {
+  if (!kisEnabled()) {
+    throw new Error("KIS 비활성 — 토큰 발급 스킵");
+  }
   await loadTokenFromStore();
   if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.token;
@@ -422,6 +447,9 @@ function releaseKisSlot(): void {
 }
 
 async function kisGet<T>(params: KisGetParams): Promise<T> {
+  if (!kisEnabled()) {
+    throw new Error("KIS 비활성 — REST 스킵");
+  }
   const appkey = getAppKey();
   const appsecret = getAppSecret();
   if (!appkey || !appsecret) {

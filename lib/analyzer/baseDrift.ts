@@ -43,7 +43,8 @@ export function computeBaseDriftDaily(
     if (Math.abs(mu5) < 0.001 && Math.abs(mu20) >= 0.0015) {
       daily = mu20 * 0.72;
     } else {
-      daily = mu5 * 0.85 + mu20 * 0.35;
+      // 가중치 합=1 — 예전 0.85+0.35=1.2 는 밴드를 비현실적으로 키움
+      daily = mu5 * 0.7 + mu20 * 0.3;
     }
   } else if (mu5 != null) {
     daily = mu5 * 0.9;

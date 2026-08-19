@@ -215,6 +215,64 @@ export function estimateOvernightOpenBand(
   };
 }
 
+/**
+ * 야간 선물 대용 신호 (야선.gg 스크래핑 없이 Yahoo 공개 시세).
+ * 코스피200 야간선물(Eurex)은 Yahoo에 없어 NQ/ES/YM + 달러원으로 갭 방향만 가늠.
+ * 확정 시초가 아님. 개별 ADR/GDR 칩과 겹치면 가중을 줄인다.
+ */
+export const NIGHT_FUTURES_TRANSFER = 0.22;
+export const NIGHT_FUTURES_BPS_CAP = 80; // ±0.8%
+const NIGHT_FUTURES_MIN_ABS = 0.0025;
+
+export interface NightFuturesRates {
+  nq?: number | null;
+  es?: number | null;
+  ym?: number | null;
+  /** KRW=X 등락 — 양수=원화 약세 */
+  fx?: number | null;
+}
+
+export function compositeNightFuturesRate(rates: NightFuturesRates): number | null {
+  let wSum = 0;
+  let acc = 0;
+  const add = (r: number | null | undefined, w: number) => {
+    if (r == null || !Number.isFinite(r)) return;
+    acc += r * w;
+    wSum += w;
+  };
+  add(rates.nq, 0.45);
+  add(rates.es, 0.3);
+  add(rates.ym, 0.15);
+  // 원화 급변은 외국인 수급 압력 — 선물 방향과 반대로 약한 보정
+  add(rates.fx != null ? -rates.fx * 0.35 : null, 0.1);
+  if (wSum < 0.3) return null;
+  return acc / wSum;
+}
+
+export function computeNightFuturesPassThrough(
+  rates: NightFuturesRates,
+  opts?: { hasStockOvernight?: boolean }
+): { id: "night-fut"; label: string; bps: number } | null {
+  const composite = compositeNightFuturesRate(rates);
+  if (composite == null) return null;
+  if (Math.abs(composite) < NIGHT_FUTURES_MIN_ABS) return null;
+
+  let rawBps = Math.round(composite * NIGHT_FUTURES_TRANSFER * 10_000);
+  if (opts?.hasStockOvernight) rawBps = Math.round(rawBps * 0.35);
+  const bps = Math.max(
+    -NIGHT_FUTURES_BPS_CAP,
+    Math.min(NIGHT_FUTURES_BPS_CAP, rawBps)
+  );
+  if (Math.abs(bps) < 1) return null;
+  const pct = bps / 100;
+  const sign = pct >= 0 ? "+" : "";
+  return {
+    id: "night-fut",
+    label: `야간 선물 ${sign}${pct.toFixed(1)}% 반영`,
+    bps,
+  };
+}
+
 /** sharesPerReceipt 표시 — ADR 0.1 → "ADR 10주=원주 1주" */
 export function formatSharesPerReceiptLabel(
   sharesPerReceipt: number,

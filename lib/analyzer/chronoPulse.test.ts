@@ -243,8 +243,33 @@ describe("ChronoPulse", () => {
     assert.ok(d1 > d10 * 0.5 || surge.lag0Daily > 0.01, "단기(1~2일) 가중");
   });
 
+  it("한국 종목 — 야간 선물 칩 (확정 아님, 캡 안)", () => {
+    const r = computeChronoPulse({
+      meta: bearishSnap().meta,
+      quote: bearishSnap().quote,
+      flow: { foreignNet: null, institutionNet: null, source: "kis-unavailable" },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+      marketContext: {
+        vix: 16,
+        nasdaqRate: 0.01,
+        esRate: 0.008,
+        ymRate: 0.006,
+        soxRate: 0,
+        kospiRate: 0,
+        fxRate: 0,
+        semiHeat: 50,
+      },
+    });
+    const chip = r.factors.find((f) => f.id === "night-fut");
+    assert.ok(chip);
+    assert.match(chip!.label, /^야간 선물 \+/);
+    assert.ok(chip!.bps > 0 && chip!.bps <= 80);
+  });
+
   it("000660 상장 구간 — ADR 급등 시 overnight·listing 동방향·1개월 완만", () => {
-    const listingDate = Date.UTC(2026, 6, 10);
+    const listingDate = Date.now() - 2 * 86_400_000;
     const resolvedRate = 168 / 149 - 1; // 공모 대비 급등
     const r = computeChronoPulse({
       meta: {

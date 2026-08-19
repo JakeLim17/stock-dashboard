@@ -12,11 +12,9 @@ import { useSpringValue } from "@/hooks/useSpringValue";
 
 // 선택 종목 1개의 호가 + 체결 폴링 패널.
 // KIS 미활성 또는 한국 종목 아니면 빈 메시지.
-// 호가는 기본 3초 간격 (2026-06 복원, 응급 절감으로 8s 였던 것을 되돌림).
-//   sparkline 캐시 TTL 상향 + Yahoo timeout 으로 다른 곳에서 절감 효과를 챙겼고,
-//   호가는 짧을수록 체감 차이가 커서 우선순위로 복원.
-//   env NEXT_PUBLIC_POLL_INTERVAL_ASP_MS 로 override 가능.
-// 카드 보이는 동안만 폴링.
+// 호가 기본 12s (Vercel 절감 — 예전 3s는 /api/intraday 호출 폭주).
+//   WS(H0STASP0) 신선하면 REST skip. env NEXT_PUBLIC_POLL_INTERVAL_ASP_MS 로 override.
+// 카드 보이는 동안 + 탭 활성일 때만 폴링.
 //
 // ⚠ 깜빡임 방지 정책 (호가 탭 UX) ───────────────────────────────────
 //   /api/intraday 가 일시적으로 빈 응답(KIS cooldown / cold start / 라우트 비활성)
@@ -54,16 +52,16 @@ interface IntradayResponse {
 }
 
 // 연속 실패가 이 횟수 이상 + 이전 성공 이력 0 일 때만 empty 메시지 노출.
-// pollMs=3000ms × 3회 = ~9초 — 일시적 cooldown 으로 인한 깜빡임 방지.
+// pollMs=12000ms × 3회 = ~36초 — 일시적 cooldown 으로 인한 깜빡임 방지.
 const EMPTY_THRESHOLD = 3;
 
 // env override (NEXT_PUBLIC_* 는 빌드 시 inline). Vercel env 로 운영 중에도 변경 가능.
 function envPollMs(): number {
-  if (typeof process === "undefined") return 3_000;
+  if (typeof process === "undefined") return 12_000;
   const raw = process.env.NEXT_PUBLIC_POLL_INTERVAL_ASP_MS;
-  if (!raw) return 3_000;
+  if (!raw) return 12_000;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : 3_000;
+  return Number.isFinite(n) && n > 0 ? n : 12_000;
 }
 const DEFAULT_ASP_POLL_MS = envPollMs();
 
@@ -116,6 +114,8 @@ export function AskingPricePanel({
     setLastSuccessAt(null);
 
     const fetchOnce = async () => {
+      // 탭 비활성 — Vercel /api/intraday 호출 절약
+      if (document.visibilityState !== "visible") return;
       // WS asp 가 신선하면 REST 호출 skip — 한도 절감.
       // (단, 첫 호출은 ccldStrength/체결 리스트가 필요하므로 한 번은 시도)
       const aspNow = aspRef.current;
@@ -146,14 +146,29 @@ export function AskingPricePanel({
       }
     };
 
-    void fetchOnce();
-    timer = setInterval(() => void fetchOnce(), pollMs);
+    const start = () => {
+      if (timer) return;
+      void fetchOnce();
+      timer = setInterval(() => void fetchOnce(), pollMs);
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
     const refresh = setInterval(() => setTick((x) => x + 1), 2000);
 
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop();
       clearInterval(refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [code, active, pollMs]);
 

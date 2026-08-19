@@ -13,10 +13,15 @@ import {
 import { translateTitleToKo } from "../news/translation";
 
 // Google News RSS — 짧은 timeout. rss-parser 내장 timeout 이 503/HTML 응답에서
-// 끝나지 않는 사례가 있어 withHardTimeout(1.5s) 으로 한 번 더 보강.
+// 끝나지 않는 사례가 있어 withHardTimeout 으로 한 번 더 보강.
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const parser = new Parser({
-  timeout: 2500,
-  headers: { "User-Agent": "Mozilla/5.0 stock-dashboard/0.1" },
+  timeout: 5000,
+  headers: {
+    "User-Agent": BROWSER_UA,
+    Accept: "application/rss+xml, application/xml, text/xml, */*",
+  },
 });
 
 // Google News RSS 차단(503/timeout) 감지 — 한 번 차단 잡히면 해당 언어 윈도우에서만
@@ -64,7 +69,7 @@ function clearGoogleBlocked(key: GoogleSourceKey): void {
 
 // Google fetch 한 건당 hard timeout. parser timeout 이 실제 안 끝나는 사례(503 HTML
 // 응답 + parseString hang)가 관찰됨 → Promise.race 로 강제 종료.
-const GOOGLE_HARD_TIMEOUT_MS = 1500;
+const GOOGLE_HARD_TIMEOUT_MS = 4500;
 
 async function withHardTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -218,6 +223,22 @@ const QUERIES: Array<{ q: string; symbol?: string; lang: "ko" | "en" }> = [
   { q: "Fed rate", lang: "en" },
 ];
 
+/** 대시보드 스냅샷용 — 전 종목 Google fanout 은 타임아웃·차단의 주원인. */
+const SNAPSHOT_GOOGLE_QUERIES: Array<{
+  q: string;
+  symbol?: string;
+  lang: "ko" | "en";
+}> = [
+  { q: "코스피", lang: "ko" },
+  { q: "주주환원", lang: "ko" },
+  { q: "반도체", lang: "ko" },
+  { q: "삼성전자", symbol: "005930.KS", lang: "ko" },
+  { q: "SK하이닉스", symbol: "000660.KS", lang: "ko" },
+  { q: "SK Hynix shareholder", symbol: "000660.KS", lang: "en" },
+  { q: "Nvidia semiconductor", lang: "en" },
+  { q: "Fed rate", lang: "en" },
+];
+
 // 동시성 제한 헬퍼 — Google News RSS 가 burst 호출에 차단되는 사례가 보고돼
 // 전체 동시성을 3 으로 보수적으로 둔다 (워커A: 8 → 워커B: 3 머지 결과).
 async function runWithConcurrency<T, R>(
@@ -250,7 +271,10 @@ const SYMBOLS_FOR_YAHOO_RSS = WATCHLIST_CANDIDATES
 
 const yahooParser = new Parser({
   timeout: 6000,
-  headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" },
+  headers: {
+    "User-Agent": BROWSER_UA,
+    Accept: "application/rss+xml, application/xml, text/xml, */*",
+  },
 });
 
 async function fetchYahooHeadlines(symbol: string): Promise<NewsItem[]> {
@@ -262,6 +286,11 @@ async function fetchYahooHeadlines(symbol: string): Promise<NewsItem[]> {
 // Google/Yahoo RSS 를 매번 다 두드리지 않도록. TTL 90s.
 let allNewsMemoCache: { items: NewsItem[]; at: number } | null = null;
 const ALL_NEWS_MEMO_TTL_MS = 90_000;
+let lastNewsFetchFailed = false;
+
+export function didNewsFetchFail(): boolean {
+  return lastNewsFetchFailed;
+}
 
 // 제목 정규화 — dedup 키.
 function normalizeTitleKey(t: string): string {
@@ -270,53 +299,63 @@ function normalizeTitleKey(t: string): string {
 
 export async function fetchAllNews(limit = 40): Promise<NewsItem[]> {
   if (allNewsMemoCache && Date.now() - allNewsMemoCache.at < ALL_NEWS_MEMO_TTL_MS) {
+    lastNewsFetchFailed = false;
     return allNewsMemoCache.items.slice(0, limit);
   }
-  // 1) Google News RSS (한·영 쿼리) — 시장 전반 + 한국 종목 헤드라인의 주력 소스.
-  // 2) Yahoo Finance 헤드라인 RSS — 미국 종목별 폴백. Google 차단 시에도 미국 뉴스 확보.
-  // per-language skip 으로 한쪽만 차단된 경우엔 살아있는 쪽 쿼리는 그대로 실행.
-  // fetchGoogleFeed 안에서 다시 한번 shouldSkipGoogle 가드가 있어 race-safe.
+
   const koSkip = shouldSkipGoogle("ko");
   const enSkip = shouldSkipGoogle("en");
   const googleQueries =
     koSkip && enSkip
       ? []
-      : QUERIES.filter((q) => (q.lang === "ko" ? !koSkip : !enSkip));
-  const [googleResults, yahooResults] = await Promise.all([
+      : SNAPSHOT_GOOGLE_QUERIES.filter((q) =>
+          q.lang === "ko" ? !koSkip : !enSkip
+        );
+
+  const naverCodes = ["005930.KS", "000660.KS", "005380.KS"];
+  const [googleResults, naverResults, naverSearch, yahooLite] = await Promise.all([
     googleQueries.length > 0
-      ? runWithConcurrency(googleQueries, 3, fetchGoogleFeed)
+      ? runWithConcurrency(googleQueries, 2, fetchGoogleFeed)
       : Promise.resolve([] as PromiseSettledResult<NewsItem[]>[]),
-    runWithConcurrency(SYMBOLS_FOR_YAHOO_RSS, 3, fetchYahooHeadlines),
+    runWithConcurrency(naverCodes, 2, (code) =>
+      fetchNaverFinanceNews(code, { symbol: code, maxItems: 12 })
+    ),
+    fetchNaverNewsSearch("주주환원", { maxItems: 8 }).catch(() => [] as NewsItem[]),
+    runWithConcurrency(["NVDA", "000660.KS"], 2, fetchYahooHeadlines),
   ]);
 
   const merged: NewsItem[] = [];
   let gOk = 0;
   let gFail = 0;
-  let yOk = 0;
-  let yFail = 0;
+  let nOk = 0;
   for (const r of googleResults) {
     if (r.status === "fulfilled") {
       gOk++;
       merged.push(...r.value);
     } else gFail++;
   }
-  for (const r of yahooResults) {
+  for (const r of naverResults) {
+    if (r.status === "fulfilled") {
+      if (r.value.length > 0) nOk++;
+      merged.push(...r.value);
+    }
+  }
+  merged.push(...naverSearch);
+  let yOk = 0;
+  for (const r of yahooLite) {
     if (r.status === "fulfilled") {
       yOk++;
       merged.push(...r.value);
-    } else yFail++;
+    }
   }
+
+  lastNewsFetchFailed = merged.length === 0;
   if (merged.length === 0) {
     console.warn(
-      `[news] fetchAllNews: 0 items (google ok=${gOk} fail=${gFail}, yahoo ok=${yOk} fail=${yFail})`
-    );
-  } else if (gOk === 0 && yOk > 0) {
-    console.warn(
-      `[news] fetchAllNews: Google RSS all failed (${gFail}); using Yahoo only (${yOk} ok)`
+      `[news] fetchAllNews: 0 items (google ok=${gOk} fail=${gFail}, naver=${nOk}, yahoo=${yOk})`
     );
   }
 
-  // 중복 제거 (id + 제목 정규화) — 같은 기사가 매체별로 중복되는 것을 한 번에 1건으로.
   const seenIds = new Set<string>();
   const seenTitles = new Set<string>();
   const dedup: NewsItem[] = [];
@@ -330,6 +369,7 @@ export async function fetchAllNews(limit = 40): Promise<NewsItem[]> {
     if (dedup.length >= limit) break;
   }
   if (dedup.length > 0) {
+    lastNewsFetchFailed = false;
     allNewsMemoCache = { items: dedup, at: Date.now() };
   }
   return dedup;
@@ -666,6 +706,9 @@ function classifySentiment(
 const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
   { kw: "삼성전자", code: "005930.KS" },
   { kw: "SK하이닉스", code: "000660.KS" },
+  { kw: "하이닉스", code: "000660.KS" },
+  { kw: "sk hynix", code: "000660.KS" },
+  { kw: "skhy", code: "SKHY" },
   { kw: "삼성전기", code: "009150.KS" },
   { kw: "LG전자", code: "066570.KS" },
   { kw: "현대차", code: "005380.KS" },

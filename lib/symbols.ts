@@ -233,6 +233,7 @@ export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "NQ=F", name: "나스닥 선물", kind: "future" },
   { code: "^GSPC", name: "S&P 500", kind: "index" },
   { code: "ES=F", name: "S&P 500 선물", kind: "future" },
+  { code: "YM=F", name: "다우 선물", kind: "future" },
   { code: "^DJI", name: "다우존스", kind: "index" },
   { code: "RTY=F", name: "러셀 2000 선물", kind: "future" },
   { code: "^SOX", name: "필라델피아 반도체", kind: "index" },

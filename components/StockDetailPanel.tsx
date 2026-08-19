@@ -255,7 +255,9 @@ function NewsTab({
       <div className="rounded-lg border border-border bg-muted/20 p-3 max-h-96 overflow-y-auto">
         {news.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
-            최근 24시간 내 종목 관련 뉴스가 없습니다.
+            {allNews.length === 0
+              ? "뉴스를 불러오지 못했어요. 새로고침 후 다시 시도해 주세요."
+              : "최근 24시간 내 종목 관련 뉴스가 없습니다."}
           </p>
         ) : (
           <ul className="space-y-2.5">

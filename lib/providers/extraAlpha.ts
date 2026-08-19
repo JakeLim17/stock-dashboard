@@ -7,6 +7,7 @@ import {
 } from "../analyzer/disclosureFeatures";
 import { computeOrderbookSignal } from "../analyzer/orderbookSignal";
 import { assessNewsSentimentAlpha } from "../news/sentimentScore";
+import { shareholderReturnFactorFromNews } from "../news/shareholderReturn";
 import {
   fetchOpenDartFilings,
   toDartStockCode,
@@ -50,6 +51,9 @@ export async function collectExtraAlphaFactors(opts: {
       bps: sent.alphaBps,
     });
   }
+
+  const ret = shareholderReturnFactorFromNews(relatedNews);
+  if (ret) factors.push(ret);
 
   if (skipSlowSources) {
     return factors;
@@ -97,6 +101,7 @@ export async function collectExtraAlphaFactors(opts: {
     const prev = best.get(f.id);
     if (!prev || Math.abs(f.bps) > Math.abs(prev.bps)) best.set(f.id, f);
   }
+  if (best.has("disclosure-return")) best.delete("dart-buyback");
   return [...best.values()].sort(
     (a, b) => Math.abs(b.bps) - Math.abs(a.bps)
   );

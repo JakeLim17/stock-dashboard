@@ -134,6 +134,8 @@ export async function middleware(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
+// 게이트가 필요한 경로만 매칭 — 예전 catch-all 은 정적·미사용 경로까지 Edge Middleware 호출.
+// (Hobby Edge Request 절감. Function Invocations 와는 별 미터.)
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/", "/login", "/privacy", "/terms", "/api/:path*"],
 };

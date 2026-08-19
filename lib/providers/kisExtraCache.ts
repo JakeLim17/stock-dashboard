@@ -20,30 +20,35 @@ import {
   fetchKrShortBalance,
   fetchUsQuote,
   fetchKrAskingPrice,
+  kisKvConfigured,
+  kisKvGet,
+  kisKvSet,
 } from "./kis";
 import type { HistoricalPoint } from "./yahoo";
 import {
-  FLOW_TTL_MS,
   QUOTE_STALE_WHILE_REVALIDATE_MS,
+  askingTtlMs,
+  flowTtlMs,
   pickTtl,
   quoteTtlMs,
   type QuoteMarket,
 } from "./kisCachePolicy";
+import { isKrRegularSession } from "../analyzer/tradingSession";
 
-// KIS 응답 메모리 캐시 + in-flight 디듀프.
-// - 시세: 세션별 TTL (장중 8s / 장후 45s) + SWR (만료 직후에도 stale 즉시 반환)
-// - 수급(외인·기관): 5분 — 분 단위 이상 변화. 접속/full마다 재호출 금지.
-// - 프로그램 매매: 60s / 공매도: 5분 / 시장 순위: 30s / 분봉: 30s
+// KIS 응답 메모리 캐시 + in-flight 디듀프 + (수급) KV cross-instance.
+// - 시세: 세션별 TTL (장중 20s / 장후 5분) + SWR
+// - 수급: 장중 1h / 장후·휴장 24h + KV (Vercel cold start 에도 재호출 안 함)
+// - 호가: 장중 10분 / 장후 24h
+// - 프로그램 매매: 60s / 공매도: 5분 / 시장 순위: 30s / 분봉: 세션별
 //
 // 패턴은 consensusCache 와 동일. global symbol로 hot-reload 캐시 유실 방지.
 
 const PROGRAM_TTL_MS = 60_000;
 const SHORT_TTL_MS = 5 * 60_000;
 const LEADERS_TTL_MS = 30_000;
-// 분봉은 새 minute boundary 가 의미 있어 30s 캐시. 클라이언트 폴링은 별도로 1m 단위.
-const INTRADAY_CANDLES_TTL_MS = 30_000;
-/** 호가 — 단기 시그널용. 장중 12s 수준 */
-const ASKING_TTL_MS = 12_000;
+/** 분봉 — 장중 2분, 장후 30분 (스파크라인 fanout 절감) */
+const INTRADAY_CANDLES_TTL_OPEN_MS = 120_000;
+const INTRADAY_CANDLES_TTL_CLOSED_MS = 30 * 60_000;
 
 interface Entry<T> {
   data: T;
@@ -133,6 +138,15 @@ function makeEntry<T>(
   };
 }
 
+/** 접속 시 캐시 hit = KIS 스킵 한 줄 (warn — Vercel Functions 로그에서 바로 보임) */
+function logKisCacheSkip(kind: string, key: string, hit: "mem" | "kv"): void {
+  console.warn(`[kis-cache] skip kind=${kind} key=${key} hit=${hit}`);
+}
+
+function logKisCacheMiss(kind: string, key: string): void {
+  console.warn(`[kis-cache] miss kind=${kind} key=${key} → KIS fetch`);
+}
+
 /**
  * soft TTL + SWR + in-flight 디듀프.
  * - fresh: 즉시 반환
@@ -145,13 +159,17 @@ async function getOrFetchSwr<T>(opts: {
   key: string;
   ttlMs: number;
   swrMs: number;
+  kind?: string;
   fetch: () => Promise<T>;
 }): Promise<T> {
-  const { cache, flight, key, ttlMs, swrMs } = opts;
+  const { cache, flight, key, ttlMs, swrMs, kind } = opts;
   const now = Date.now();
   const hit = cache.get(key);
 
-  if (hit && hit.expiresAt > now) return hit.data;
+  if (hit && hit.expiresAt > now) {
+    if (kind) logKisCacheSkip(kind, key, "mem");
+    return hit.data;
+  }
 
   const inflight = flight.get(key);
   // staleUntil 없는 구형 엔트리(hot-reload)는 fresh 만료 = 즉시 재조회
@@ -168,10 +186,13 @@ async function getOrFetchSwr<T>(opts: {
       });
       flight.set(key, p);
     }
+    if (kind) logKisCacheSkip(kind, key, "mem");
     return hit.data;
   }
 
   if (inflight) return inflight;
+
+  if (kind) logKisCacheMiss(kind, key);
 
   const p = (async () => {
     const data = await opts.fetch();
@@ -190,9 +211,76 @@ async function getOrFetchHard<T>(opts: {
   flight: Map<string, Promise<T>>;
   key: string;
   ttlMs: number;
+  kind?: string;
   fetch: () => Promise<T>;
 }): Promise<T> {
   return getOrFetchSwr({ ...opts, swrMs: 0 });
+}
+
+/**
+ * 수급 전용 — 메모리 → KV → KIS.
+ * Vercel cold start 마다 메모리가 비어도 KV hit 이면 토큰·수급 REST 를 안 친다.
+ */
+async function getOrFetchFlowWithKv(code: string): Promise<FlowData | null> {
+  const cache = getFlowCache();
+  const flight = getFlowFlight();
+  const key = code;
+  const ttlMs = flowTtlMs();
+  const now = Date.now();
+  const mem = cache.get(key);
+
+  if (mem && mem.expiresAt > now) {
+    logKisCacheSkip("flow", key, "mem");
+    return mem.data;
+  }
+
+  const inflight = flight.get(key);
+  if (inflight) return inflight;
+
+  const p = (async () => {
+    // KV cross-instance (토큰과 동일 Upstash)
+    if (kisKvConfigured()) {
+      try {
+        const raw = await kisKvGet(`kis:flow:v1:${code}`);
+        if (raw) {
+          const parsed = JSON.parse(raw) as {
+            data: FlowData | null;
+            expiresAt?: number;
+          };
+          if (
+            parsed &&
+            typeof parsed.expiresAt === "number" &&
+            parsed.expiresAt > Date.now()
+          ) {
+            const remainMs = parsed.expiresAt - Date.now();
+            cache.set(key, makeEntry(parsed.data, remainMs, 0));
+            logKisCacheSkip("flow", key, "kv");
+            return parsed.data;
+          }
+        }
+      } catch {
+        // KV 실패 → KIS 폴백
+      }
+    }
+
+    logKisCacheMiss("flow", key);
+    const data = await fetchKrFlow(code).catch(() => null);
+    const entry = makeEntry(data, ttlMs, 0);
+    cache.set(key, entry);
+
+    if (data != null && kisKvConfigured()) {
+      const ttlSec = Math.max(1, Math.ceil((entry.expiresAt - Date.now()) / 1000));
+      const payload = JSON.stringify({ data, expiresAt: entry.expiresAt });
+      void kisKvSet(`kis:flow:v1:${code}`, payload, ttlSec);
+    }
+
+    return data;
+  })().finally(() => {
+    flight.delete(key);
+  });
+
+  flight.set(key, p);
+  return p;
 }
 
 /** 해외 시세 — 세션별 TTL + SWR + in-flight 공유 */
@@ -207,6 +295,7 @@ export async function getUsQuoteCached(
     key: `us:${code}`,
     ttlMs: quoteTtlMs(market),
     swrMs: QUOTE_STALE_WHILE_REVALIDATE_MS,
+    kind: "quote-us",
     fetch: () => fetchUsQuote(code, name).catch(() => null),
   });
 }
@@ -223,6 +312,7 @@ export async function getKrQuoteCached(
     key: `kr:${code}`,
     ttlMs: quoteTtlMs(market),
     swrMs: QUOTE_STALE_WHILE_REVALIDATE_MS,
+    kind: "quote-kr",
     fetch: () => fetchKrQuote(code, name).catch(() => null),
   });
 }
@@ -239,19 +329,14 @@ export async function getKrIndexCached(
     key: `idx:${yahooCode}`,
     ttlMs: quoteTtlMs(market),
     swrMs: QUOTE_STALE_WHILE_REVALIDATE_MS,
+    kind: "index",
     fetch: () => fetchKrIndex(yahooCode, name).catch(() => null),
   });
 }
 
-/** 외인·기관 수급 — 5분 TTL. full 스냅샷·추천 fanout 중복 차단 */
+/** 외인·기관 수급 — 세션별 TTL + KV. 접속/full마다 재호출 금지 */
 export async function getKrFlowCached(code: string): Promise<FlowData | null> {
-  return getOrFetchHard({
-    cache: getFlowCache(),
-    flight: getFlowFlight(),
-    key: code,
-    ttlMs: FLOW_TTL_MS,
-    fetch: () => fetchKrFlow(code).catch(() => null),
-  });
+  return getOrFetchFlowWithKv(code);
 }
 
 function getProgramCache(): Map<string, Entry<ProgramTradeData | null>> {
@@ -326,6 +411,12 @@ function getCandleFlight(): Map<string, Promise<HistoricalPoint[] | null>> {
   return global.__kisCandleFlight;
 }
 
+function intradayCandlesTtlMs(now = new Date()): number {
+  return isKrRegularSession(now)
+    ? INTRADAY_CANDLES_TTL_OPEN_MS
+    : INTRADAY_CANDLES_TTL_CLOSED_MS;
+}
+
 export async function getIntradayCandlesCached(
   code: string
 ): Promise<HistoricalPoint[] | null> {
@@ -333,7 +424,8 @@ export async function getIntradayCandlesCached(
     cache: getCandleCache(),
     flight: getCandleFlight(),
     key: code,
-    ttlMs: INTRADAY_CANDLES_TTL_MS,
+    ttlMs: intradayCandlesTtlMs(),
+    kind: "intraday",
     fetch: () => fetchKrIntradayCandles(code).catch(() => null),
   });
 }
@@ -347,7 +439,7 @@ function getAskingFlight(): Map<string, Promise<AskingPriceData | null>> {
   return global.__kisAskingFlight;
 }
 
-/** 10호가 — 예측 알파용. KIS 키 없으면 null. TTL 12s */
+/** 10호가 — 예측 알파용. KIS 키 없으면 null. 세션별 TTL */
 export async function getKrAskingPriceCached(
   code: string
 ): Promise<AskingPriceData | null> {
@@ -355,7 +447,8 @@ export async function getKrAskingPriceCached(
     cache: getAskingCache(),
     flight: getAskingFlight(),
     key: code,
-    ttlMs: ASKING_TTL_MS,
+    ttlMs: askingTtlMs(),
+    kind: "asking",
     fetch: () => fetchKrAskingPrice(code).catch(() => null),
   });
 }
@@ -379,6 +472,10 @@ export function invalidateKisExtraCache(code?: string): void {
     getCandleFlight().delete(code);
     getAskingCache().delete(code);
     getAskingFlight().delete(code);
+    // KV 수급도 무효화 (실패해도 로컬은 이미 지움)
+    if (kisKvConfigured()) {
+      void kisKvSet(`kis:flow:v1:${code}`, "", 1);
+    }
   } else {
     getQuoteCache().clear();
     getQuoteFlight().clear();
@@ -401,8 +498,11 @@ export function invalidateKisExtraCache(code?: string): void {
 
 // 테스트·문서용 re-export (server 경로에서도 정책 상수 접근)
 export {
+  ASKING_TTL_CLOSED_MS,
   FLOW_TTL_MS,
   NULL_TTL_MS,
   QUOTE_STALE_WHILE_REVALIDATE_MS,
+  askingTtlMs,
+  flowTtlMs,
   quoteTtlMs,
 } from "./kisCachePolicy";

@@ -1,6 +1,7 @@
 import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isKisApiEnabled } from "./kisFlags";
 
 // KIS WebSocket 접속용 approval_key 발급/캐시 모듈.
 //
@@ -68,7 +69,7 @@ function getAppSecret(): string | null {
 }
 
 export function kisApprovalEnabled(): boolean {
-  return !!(getAppKey() && getAppSecret());
+  return isKisApiEnabled();
 }
 
 function dbg(...args: unknown[]): void {
@@ -246,6 +247,7 @@ interface ApprovalResponse {
 }
 
 async function requestNewApproval(reason: string): Promise<string | null> {
+  if (!kisApprovalEnabled()) return null;
   const appkey = getAppKey();
   const appsecret = getAppSecret();
   if (!appkey || !appsecret) return null;
@@ -310,7 +312,7 @@ async function requestNewApproval(reason: string): Promise<string | null> {
 // 캐시된 approval_key 반환. 없으면 KV/디스크 로드 → 그래도 없으면 신규 발급.
 // 발급 실패/cooldown 중이면 null (호출자는 SSE 503 등으로 폴백 결정).
 export async function getApprovalKey(): Promise<string | null> {
-  if (!getAppKey() || !getAppSecret()) return null;
+  if (!kisApprovalEnabled()) return null;
   await loadFromStore();
   if (cachedApproval && cachedApproval.expiresAt > Date.now()) {
     return cachedApproval.approvalKey;

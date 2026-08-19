@@ -18,6 +18,8 @@ export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   { kw: "SK Hynix", code: "000660.KS" },
   // 헤드라인이 "하이닉스"만 쓰는 경우가 많음 (SK 접두 생략)
   { kw: "하이닉스", code: "000660.KS" },
+  { kw: "000660", code: "000660.KS" },
+  { kw: "SKHY", code: "000660.KS" },
   { kw: "Hynix", code: "000660.KS" },
   { kw: "hynix", code: "000660.KS" },
   { kw: "SK스퀘어", code: "402340.KS" },
@@ -204,21 +206,32 @@ const KEYWORDS_BY_CODE: Map<string, string[]> = (() => {
 // MU 같은 짧은 티커는 인접 문자 가드를 별도로 처리 (M, U 단독 매칭은 위험)했지만,
 // 데이터에 " MU ", " MU,", " MU:" 같은 공백/구두점 포함 키워드를 미리 등록해 회피한다.
 export function isNewsRelated(
-  item: { symbol?: string | null; title?: string | null },
+  item: { symbol?: string | null; title?: string | null; titleKo?: string | null },
   code: string,
   name: string
 ): boolean {
-  if (item.symbol === code) return true;
-  const title = item.title ?? "";
-  if (!title) return false;
+  const aliases = relatedNewsCodes(code);
+  if (item.symbol && aliases.has(item.symbol)) return true;
+  const title = `${item.title ?? ""} ${item.titleKo ?? ""}`;
+  if (!title.trim()) return false;
   if (name && title.includes(name)) return true;
-  const kws = KEYWORDS_BY_CODE.get(code);
-  if (!kws) return false;
-  const lowered = title.toLowerCase();
-  for (const kw of kws) {
-    if (title.includes(kw)) return true;
-    // 영문 키워드는 대소문자 무관하게도 매칭
-    if (/[A-Za-z]/.test(kw) && lowered.includes(kw.toLowerCase())) return true;
+  for (const c of aliases) {
+    const kws = KEYWORDS_BY_CODE.get(c);
+    if (!kws) continue;
+    const lowered = title.toLowerCase();
+    for (const kw of kws) {
+      if (title.includes(kw)) return true;
+      if (/[A-Za-z]/.test(kw) && lowered.includes(kw.toLowerCase())) return true;
+    }
   }
   return false;
+}
+
+function relatedNewsCodes(code: string): Set<string> {
+  const s = new Set<string>([code]);
+  if (code === "000660.KS" || code === "SKHY") {
+    s.add("000660.KS");
+    s.add("SKHY");
+  }
+  return s;
 }

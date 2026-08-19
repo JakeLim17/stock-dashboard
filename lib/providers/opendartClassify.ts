@@ -21,8 +21,12 @@ export function classifyDartReport(reportNm: string): {
   if (/무상증자/.test(t)) {
     return { kind: "bonus", label: "무상증자 공시" };
   }
-  if (/자기주식.*(취득|매입)|자사주매입/.test(t)) {
-    return { kind: "buyback", label: "자사주 매입" };
+  if (
+    /자기주식.*(취득|매입|소각)|자사주매입|자사주소각|주주환원|배당결정|현금배당/.test(
+      t
+    )
+  ) {
+    return { kind: "buyback", label: "환원·자사주 공시" };
   }
   if (/합병|분할|영업양수|영업양도|포괄적주식교환|주식교환/.test(t)) {
     return { kind: "merger", label: "합병·분할 공시" };

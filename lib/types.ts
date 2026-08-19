@@ -745,6 +745,10 @@ export interface StockMarketContext {
   vix: number;
   kospiRate: number;
   soxRate: number;
+  /** ES=F 등락 — 야간 선물 대용 */
+  esRate?: number;
+  /** YM=F 등락 */
+  ymRate?: number;
 }
 
 /** 종목별 데이터 충분성 — snapshot·추천 게이트 공통. */
@@ -949,6 +953,8 @@ export interface DashboardSnapshot {
     riskKeywords: string[];
   };
   news: NewsItem[];
+  /** 라이브 뉴스 수집 실패(타임아웃·RSS 차단). 빈 배열과 구분 — UI 재시도 안내. */
+  newsFetchFailed?: boolean;
   errors: Record<string, string>; // provider 별 에러 메시지
   // 매크로 이벤트 (FOMC, KOSPI 옵션 만기, KRX 휴장일).
   // 종목별 이벤트(실적/배당)는 StockSnapshot.upcomingEvents 에 있다.

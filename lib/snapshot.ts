@@ -8,6 +8,7 @@ import {
   computeTech,
   fetchFlowOrMock,
   fetchAllNews,
+  didNewsFetchFail,
   fetchNewsForSymbols,
   reclassifyWithTitleKo,
   riskKeywords,
@@ -21,6 +22,11 @@ import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import { kisEnabled } from "./providers/kis";
 import { collectExtraAlphaFactors } from "./providers/extraAlpha";
+import {
+  CORE_SNAPSHOT_TTL_MS,
+  FULL_SNAPSHOT_TTL_MS,
+  LITE_SNAPSHOT_TTL_MS,
+} from "./providers/kisCachePolicy";
 import {
   fetchEventsForSymbol,
   getMacroEventsCached,
@@ -54,7 +60,7 @@ import {
 import { assessNewsRisk } from "./news/riskScore";
 import { assessOpportunity } from "./news/opportunityScore";
 import { getAnalysisCache } from "./analysisCache";
-import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews } from "./db";
+import { saveQuote, saveFlow, saveTech, saveAnalysis, saveNews, recentNews } from "./db";
 import {
   PRIMARY_SYMBOLS,
   MARKET_INDICATORS,
@@ -133,6 +139,8 @@ export interface MarketContextSnapshot {
   vix: number;
   kospiRate: number;
   soxRate: number;
+  esRate: number;
+  ymRate: number;
 }
 
 // 매크로 히스토리 재사용 — watchlist 가 동일 심볼 90일치를 다시 fetch 하지 않도록.
@@ -182,6 +190,8 @@ const EMPTY_MARKET_CONTEXT: MarketContextSnapshot = {
   vix: 0,
   kospiRate: 0,
   soxRate: 0,
+  esRate: 0,
+  ymRate: 0,
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -190,8 +200,8 @@ const EMPTY_MARKET_CONTEXT: MarketContextSnapshot = {
 // snapshot/indicator 둘 다 같은 패턴(`consensusCache.ts`)의 in-flight + soft TTL.
 // ──────────────────────────────────────────────────────────────
 
-// 시장 지표 — 60s TTL (Vercel 절감, CDN s-maxage와 맞춤).
-const MARKET_INDICATOR_TTL_MS = 60_000;
+// 시장 지표 — lite 폴링(90s)보다 길게. 동일 인스턴스 중복·CDN 흡수.
+const MARKET_INDICATOR_TTL_MS = 90_000;
 type MarketIndicatorCache = { data: MarketIndicatorsResult; at: number };
 let marketIndicatorCache: MarketIndicatorCache | null = null;
 let marketIndicatorInFlight: Promise<MarketIndicatorsResult> | null = null;
@@ -207,8 +217,8 @@ function peekMarketIndicators(): MarketIndicatorsResult | null {
   return null;
 }
 
-// 풀 스냅샷 — 60s TTL. CDN s-maxage(600s)보다 짧게 — 동일 인스턴스 내 중복만 막음.
-const SNAPSHOT_TTL_MS = 60_000;
+// 풀 스냅샷 — full 폴링(15분)과 맞춤. 인스턴스 내 중복만 막음 (인증 응답이라 CDN 공유 없음).
+const SNAPSHOT_TTL_MS = FULL_SNAPSHOT_TTL_MS;
 type SnapshotCache = { data: DashboardSnapshot; at: number };
 const snapshotCache = new Map<string, SnapshotCache>();
 const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
@@ -217,8 +227,110 @@ const snapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
 // 1) 시장 지표 — 빠른 영역 (1-2초). SummaryBar / MarketPanel 1차 채움용.
 //    Suspense streaming 단계 중 가장 먼저 도착한다.
 // ──────────────────────────────────────────────────────────────
-async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
+function buildFxVolatility(
+  fxCloses: number[]
+): MarketIndicator["volatility"] {
+  if (fxCloses.length < 6) return null;
+  const sigma30 = dailySigmaFromCloses(fxCloses.slice(-22));
+  const recent = fxCloses.slice(-6);
+  const r1w: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    const p = recent[i - 1];
+    const c = recent[i];
+    if (p > 0 && c > 0) r1w.push(Math.log(c / p));
+  }
+  const mu1w = r1w.length > 0 ? r1w.reduce((a, b) => a + b, 0) / r1w.length : 0;
+  const var1w =
+    r1w.length > 1
+      ? r1w.reduce((acc, x) => acc + (x - mu1w) ** 2, 0) / (r1w.length - 1)
+      : 0;
+  const sigma1w = Math.sqrt(Math.max(var1w, 0));
+  if (sigma30 <= 0 && sigma1w <= 0) return null;
+  const pct30 = sigma30 * 100;
+  const pct1w = sigma1w * 100;
+  return {
+    window: "1m" as const,
+    sigmaPct: pct30,
+    label: `σ(1M) ${pct30.toFixed(2)}% / day`,
+    secondaryWindow: "1w" as const,
+    secondarySigmaPct: pct1w,
+  };
+}
+
+function assembleMarketIndicatorsResult(
+  indicatorResults: Awaited<ReturnType<typeof fetchYahooQuotesBatch>>,
+  historyMap: Map<string, number[]>,
+  macroHistories: MarketIndicatorsResult["macroHistories"]
+): MarketIndicatorsResult {
   const errors: Record<string, string> = {};
+  const indicators: MarketIndicator[] = [];
+  const fxVolatility = buildFxVolatility(historyMap.get("KRW=X") ?? []);
+
+  for (let i = 0; i < indicatorResults.length; i++) {
+    const r = indicatorResults[i];
+    const meta = MARKET_INDICATORS[i];
+    if (!r.ok) {
+      errors[meta.code] = r.error;
+      continue;
+    }
+    const q = r.quote;
+    saveQuote(q);
+    const closeHistory = historyMap.get(meta.code) ?? [];
+    indicators.push({
+      code: meta.code,
+      name: meta.name,
+      value: q.price,
+      changeRate: q.changeRate,
+      status: indicatorStatus(meta.code, q.changeRate, q.price),
+      hint: indicatorHint(meta.code, q.changeRate),
+      priceTime: q.priceTime ?? null,
+      marketState: q.marketState,
+      changeAbs: q.changeAbs ?? null,
+      prevClose: q.prevClose ?? null,
+      dayHigh: q.high ?? null,
+      dayLow: q.low ?? null,
+      volatility: meta.code === "KRW=X" ? fxVolatility : null,
+      closeHistory: closeHistory.length >= 2 ? closeHistory.slice(-30) : undefined,
+    });
+  }
+
+  const sox = indicators.find((i) => i.code === "^SOX");
+  const nvda = indicators.find((i) => i.code === "NVDA");
+  const kospi = indicators.find((i) => i.code === "^KS11");
+  const nq = indicators.find((i) => i.code === "NQ=F");
+  const es = indicators.find((i) => i.code === "ES=F");
+  const ym = indicators.find((i) => i.code === "YM=F");
+  const fx = indicators.find((i) => i.code === "KRW=X");
+  const vix = indicators.find((i) => i.code === "^VIX");
+  const soxRate = sox?.changeRate;
+  const nvdaRate = nvda?.changeRate;
+  const semiHeat: number | null =
+    typeof soxRate === "number" && typeof nvdaRate === "number"
+      ? Math.max(
+          0,
+          Math.min(100, Math.round(50 + ((soxRate + nvdaRate) / 2) * 1500))
+        )
+      : null;
+
+  return {
+    indicators,
+    errors,
+    context: {
+      semiHeat,
+      nasdaqRate: nq?.changeRate ?? 0,
+      fxRate: fx?.changeRate ?? 0,
+      vix: vix?.value ?? 15,
+      kospiRate: kospi?.changeRate ?? 0,
+      soxRate: soxRate ?? 0,
+      esRate: es?.changeRate ?? 0,
+      ymRate: ym?.changeRate ?? 0,
+    },
+    usdKrw: fx?.value ?? null,
+    macroHistories,
+  };
+}
+
+async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   // 시세 batch + 모든 인디케이터 일별 close history(최근 90영업일)를 병렬로.
   // history는 (1) KRW=X 변동성 σ 계산, (2) Sparkline(-30), (3) watchlist 매크로 회귀에 재사용.
   const INDICATOR_HISTORY_DAYS = 90;
@@ -246,104 +358,20 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
       macroHistories[meta.code as (typeof WATCHLIST_MACRO_CODES)[number]] = hist;
     }
   }
-  const indicators: MarketIndicator[] = [];
+  return assembleMarketIndicatorsResult(
+    indicatorResults,
+    historyMap,
+    macroHistories
+  );
+}
 
-  // KRW=X 변동성 — 일별 close → 로그수익률 → 1개월(EWMA) / 1주(표본 stddev) σ%.
-  // σ는 단위 % / day. 한 줄에 2개를 보여줘 사용자가 "최근 변동성 안정/확대"를 직관 파악.
-  const fxCloses = historyMap.get("KRW=X") ?? [];
-  const fxVolatility = (() => {
-    if (fxCloses.length < 6) return null;
-    const sigma30 = dailySigmaFromCloses(fxCloses.slice(-22)); // 약 1개월 거래일
-    // 1주(직전 5거래일) 표본 표준편차 — 짧은 윈도우엔 단순 stddev가 직관적.
-    const recent = fxCloses.slice(-6);
-    const r1w: number[] = [];
-    for (let i = 1; i < recent.length; i++) {
-      const p = recent[i - 1];
-      const c = recent[i];
-      if (p > 0 && c > 0) r1w.push(Math.log(c / p));
-    }
-    const mu1w = r1w.length > 0 ? r1w.reduce((a, b) => a + b, 0) / r1w.length : 0;
-    const var1w =
-      r1w.length > 1
-        ? r1w.reduce((acc, x) => acc + (x - mu1w) ** 2, 0) / (r1w.length - 1)
-        : 0;
-    const sigma1w = Math.sqrt(Math.max(var1w, 0));
-
-    if (sigma30 <= 0 && sigma1w <= 0) return null;
-    const pct30 = sigma30 * 100;
-    const pct1w = sigma1w * 100;
-    return {
-      window: "1m" as const,
-      sigmaPct: pct30,
-      label: `σ(1M) ${pct30.toFixed(2)}% / day`,
-      secondaryWindow: "1w" as const,
-      secondarySigmaPct: pct1w,
-    };
-  })();
-
-  for (let i = 0; i < indicatorResults.length; i++) {
-    const r = indicatorResults[i];
-    const meta = MARKET_INDICATORS[i];
-    if (!r.ok) {
-      errors[meta.code] = r.error;
-      continue;
-    }
-    const q = r.quote;
-    saveQuote(q);
-    const closeHistory = historyMap.get(meta.code) ?? [];
-    indicators.push({
-      code: meta.code,
-      name: meta.name,
-      value: q.price,
-      changeRate: q.changeRate,
-      status: indicatorStatus(meta.code, q.changeRate, q.price),
-      hint: indicatorHint(meta.code, q.changeRate),
-      priceTime: q.priceTime ?? null,
-      marketState: q.marketState,
-      changeAbs: q.changeAbs ?? null,
-      prevClose: q.prevClose ?? null,
-      dayHigh: q.high ?? null,
-      dayLow: q.low ?? null,
-      volatility: meta.code === "KRW=X" ? fxVolatility : null,
-      // 최근 30영업일치만 잘라 응답 크기 절감 (Sparkline에 충분).
-      closeHistory: closeHistory.length >= 2 ? closeHistory.slice(-30) : undefined,
-    });
-  }
-
-  const sox = indicators.find((i) => i.code === "^SOX");
-  const nvda = indicators.find((i) => i.code === "NVDA");
-  const kospi = indicators.find((i) => i.code === "^KS11");
-  const nq = indicators.find((i) => i.code === "NQ=F");
-  const fx = indicators.find((i) => i.code === "KRW=X");
-  const vix = indicators.find((i) => i.code === "^VIX");
-
-  // 반도체 과열도 = SOX + NVDA 평균을 0~100으로 환산 (1% 변동 → ±15점).
-  // ⚠ 데이터 결손 시 0 으로 떨어뜨리지 않고 null 반환 — Vercel 에서 Yahoo SOX/NVDA 가
-  //    빈 응답이면 과거엔 "과열도 0/100" 으로 굳어 보였음. SummaryBar 는 null 시 "—" 표시.
-  const soxRate = sox?.changeRate;
-  const nvdaRate = nvda?.changeRate;
-  const semiHeat: number | null =
-    typeof soxRate === "number" && typeof nvdaRate === "number"
-      ? Math.max(
-          0,
-          Math.min(100, Math.round(50 + ((soxRate + nvdaRate) / 2) * 1500))
-        )
-      : null;
-
-  return {
-    indicators,
-    errors,
-    context: {
-      semiHeat,
-      nasdaqRate: nq?.changeRate ?? 0,
-      fxRate: fx?.changeRate ?? 0,
-      vix: vix?.value ?? 15,
-      kospiRate: kospi?.changeRate ?? 0,
-      soxRate: soxRate ?? 0,
-    },
-    usdKrw: fx?.value ?? null,
-    macroHistories,
-  };
+/**
+ * lite 전용 — Yahoo 시세 batch 만. 90일 history fanout 없음 (Active CPU 절감).
+ * 캐시에 쓰지 않음 — full/core 가 웜한 지표를 오염시키지 않게.
+ */
+async function fetchMarketIndicatorsQuotesOnly(): Promise<MarketIndicatorsResult> {
+  const indicatorResults = await fetchYahooQuotesBatch(MARKET_INDICATORS);
+  return assembleMarketIndicatorsResult(indicatorResults, new Map(), {});
 }
 
 // fetchMarketIndicators 의 외부 노출 진입점 — 5s soft TTL + in-flight dedup 적용.
@@ -378,6 +406,13 @@ export async function fetchNewsItems(limit = 60): Promise<NewsItem[]> {
     } catch {
       /* 메모리 DB 등 — 무시 */
     }
+    return news;
+  }
+  try {
+    const cached = recentNews(limit);
+    if (cached.length > 0) return cached;
+  } catch {
+    /* ignore */
   }
   return news;
 }
@@ -441,7 +476,7 @@ export async function fetchNewsItemsWithSymbols(
         maxItems: perSymbolLimit,
         withinHours: 24,
       }),
-      5000,
+      9_000,
       {} as Record<string, NewsItem[]>
     ).catch(() => ({} as Record<string, NewsItem[]>)),
   ]);
@@ -956,6 +991,8 @@ export async function fetchWatchlistSnapshots(
           vix: (context ?? EMPTY_MARKET_CONTEXT).vix,
           kospiRate: (context ?? EMPTY_MARKET_CONTEXT).kospiRate,
           soxRate: (context ?? EMPTY_MARKET_CONTEXT).soxRate,
+          esRate: (context ?? EMPTY_MARKET_CONTEXT).esRate,
+          ymRate: (context ?? EMPTY_MARKET_CONTEXT).ymRate,
         },
         analysisCachedAt: cachedAnalysis?.cachedAt ?? null,
       };
@@ -998,7 +1035,14 @@ async function buildSnapshotLiteCore(
 ): Promise<DashboardSnapshot> {
   const errors: Record<string, string> = {};
   const watchSymbols = resolveWatchSymbols(requestedSymbols);
-  const indicatorResult = await cachedMarketIndicators();
+  // lite: 웜 캐시(시세+스파크라인) 우선. 없으면 시세-only (90일 fanout 스킵).
+  // 백그라운드로 full 지표를 워밍해 다음 폴링·core/full 이 peek 하게.
+  const peeked = peekMarketIndicators();
+  const indicatorResult =
+    peeked ?? (await fetchMarketIndicatorsQuotesOnly());
+  if (!peeked) {
+    void cachedMarketIndicators().catch(() => null);
+  }
   Object.assign(errors, indicatorResult.errors);
 
   const quoteResults = await fetchQuotesBatch(watchSymbols);
@@ -1046,9 +1090,8 @@ async function buildSnapshotLiteCore(
   };
 }
 
-// 정규장 폴링(15s)보다 짧게 — 폴링마다 새 시세를 받을 수 있게.
-// 예전 40s 는 폴링을 줄여도 서버 캐시가 병목이었음.
-const LITE_SNAPSHOT_TTL_MS = 12_000;
+// lite 서버 TTL = 정규장 폴링(90s). 더 짧으면 폴링마다 람다 재실행(Vercel).
+// 숫자는 kisCachePolicy.LITE_SNAPSHOT_TTL_MS SSOT.
 type LiteSnapshotCache = { data: DashboardSnapshot; at: number };
 const liteSnapshotCache = new Map<string, LiteSnapshotCache>();
 const liteSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
@@ -1091,7 +1134,7 @@ export async function buildSnapshotLite(
 // Phase A.5 — core 스냅샷: 시세+히스토리+수급+컨센+규칙분석 (예측·공시 skip).
 //   목표: 콜드 <3s. ChronoPulse·매크로·OpenDART 는 full 로 미룸.
 // ──────────────────────────────────────────────────────────────
-const CORE_SNAPSHOT_TTL_MS = 20_000;
+// core TTL — kisCachePolicy.CORE_SNAPSHOT_TTL_MS (진입 중복·Strict Mode 흡수)
 type CoreSnapshotCache = { data: DashboardSnapshot; at: number };
 const coreSnapshotCache = new Map<string, CoreSnapshotCache>();
 const coreSnapshotInFlight = new Map<string, Promise<DashboardSnapshot>>();
@@ -1209,7 +1252,7 @@ export async function buildSnapshot(
         fetchNewsItemsWithSymbols(watchSymbolsForNews, 60, 8, 80).catch(
           () => [] as NewsItem[]
         ),
-        6_000,
+        12_000,
         [] as NewsItem[]
       ),
     ]);
@@ -1232,6 +1275,10 @@ export async function buildSnapshot(
     }
 
     const errors = { ...indicatorResult.errors, ...watchResult.errors };
+    const newsFailed = news.length === 0 && didNewsFetchFail();
+    if (newsFailed) {
+      errors["news"] = "뉴스를 불러오지 못했어요";
+    }
     return {
       generatedAt: Date.now(),
       phase: "full",
@@ -1243,6 +1290,7 @@ export async function buildSnapshot(
         indicatorResult.context.semiHeat
       ),
       news,
+      newsFetchFailed: newsFailed,
       errors,
       macroEvents: fetchMacroEvents(),
       kisActive: kisEnabled(),
@@ -1307,10 +1355,10 @@ export async function buildSnapshot(
 }
 
 // ──────────────────────────────────────────────────────────────
-// buildSnapshotShared — `/api/snapshot` 전용 in-flight dedup + 2s TTL.
+// buildSnapshotShared — `/api/snapshot` 전용 in-flight dedup + full TTL.
 //   동일 symbols + 옵션을 짧은 시간 안에 여러 클라이언트가 호출하면
 //   직전 응답을 그대로 반환해 fanout 비용을 한 번으로 압축한다.
-//   refresh=1 처럼 캐시 우회가 필요하면 buildSnapshot 을 직접 호출.
+//   TTL = FULL_SNAPSHOT_TTL_MS(15분). refresh=1 은 buildSnapshot 직접 호출.
 // ──────────────────────────────────────────────────────────────
 function snapshotKey(symbols: string[], options: BuildSnapshotOptions): string {
   const normalized = Array.from(new Set(symbols)).sort().join(",");

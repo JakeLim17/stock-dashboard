@@ -19,6 +19,7 @@ describe("disclosureFeatures", () => {
       "ownership"
     );
     assert.equal(classifyDartReport("자기주식취득결정").kind, "buyback");
+    assert.equal(classifyDartReport("주주환원").kind, "buyback");
   });
 
   it("dart dilution → negative bps chip", () => {

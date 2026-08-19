@@ -100,9 +100,13 @@ function highlightKeywords(title: string): ReactNode {
 export function NewsPanel({
   items,
   selectedSymbol,
+  fetchFailed,
+  onRetry,
 }: {
   items: NewsItem[];
   selectedSymbol?: { code: string; name: string } | null;
+  fetchFailed?: boolean;
+  onRetry?: () => void;
 }) {
   const [sentiment, setSentiment] = useState<SentimentFilter>("all");
   const [fresh, setFresh] = useState<FreshFilter>("7d");
@@ -213,7 +217,20 @@ export function NewsPanel({
         </div>
       </CardHeader>
       <CardBody className="max-h-[520px] overflow-y-auto pr-1">
-        {filtered.length === 0 ? (
+        {items.length === 0 && fetchFailed ? (
+          <div className="text-sm text-center py-12 space-y-3">
+            <p className="text-muted-foreground">뉴스를 불러오지 못했어요</p>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-muted"
+              >
+                다시 시도
+              </button>
+            )}
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="text-sm text-muted-foreground text-center py-12">
             조건에 맞는 뉴스 없음
           </div>

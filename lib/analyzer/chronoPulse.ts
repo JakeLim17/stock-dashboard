@@ -11,6 +11,7 @@ import { usMarketDrift } from "./marketDrift";
 import type { HistoricalPoint } from "../providers/yahoo";
 import { isHoldingCompanyCode } from "../symbols";
 import {
+  computeNightFuturesPassThrough,
   computeOvernightPassThrough,
   type OvernightProxyKind,
 } from "./overnightPassThrough";
@@ -354,13 +355,13 @@ function listingAdrBps(input: {
     const kindHit = LISTING_TEXT_RE.test(text);
     if (!kindHit) continue;
     const days = (e.date - now) / 86_400_000;
-    // 상장 전 5일 ~ 상장 후 10일 (직후 모멘텀·다음주 소화 구간)
-    if (days < -5 || days > 10) continue;
+    // days>0 = 상장 전, days<0 = 상장 후. 윈도우: 전 5일 ~ 후 14일(약 2주).
+    if (days < -14 || days > 5) continue;
     hit = true;
-    // 상장 당일~+3일 피크, 이후 감쇠
-    if (days >= -1 && days <= 3) freshness = Math.max(freshness, 1);
-    else if (days > 3 && days <= 10) freshness = Math.max(freshness, 0.55);
-    else if (days >= -5 && days < -1) freshness = Math.max(freshness, 0.7);
+    // 상장 당일~직후 3일 피크, 이후 감쇠
+    if (days >= -3 && days <= 1) freshness = Math.max(freshness, 1);
+    else if (days < -3 && days >= -14) freshness = Math.max(freshness, 0.55);
+    else if (days > 1 && days <= 5) freshness = Math.max(freshness, 0.7);
     else freshness = Math.max(freshness, 0.35);
   }
 
@@ -396,6 +397,7 @@ const LAG0_FACTOR_IDS = new Set([
   "macro",
   "gdr",
   "overnight",
+  "night-fut",
   "orderbook",
 ]);
 
@@ -614,6 +616,18 @@ export function computeChronoPulse(input: ChronoPulseInput): ChronoPulseResult {
     const overnight = computeOvernightPassThrough(overseasNightRate, kind);
     if (overnight) {
       add(overnight.id, overnight.label, overnight.bps);
+    }
+    const nightFut = computeNightFuturesPassThrough(
+      {
+        nq: marketContext?.nasdaqRate,
+        es: marketContext?.esRate,
+        ym: marketContext?.ymRate,
+        fx: marketContext?.fxRate,
+      },
+      { hasStockOvernight: !!overnight }
+    );
+    if (nightFut) {
+      add(nightFut.id, nightFut.label, nightFut.bps);
     }
   }
 

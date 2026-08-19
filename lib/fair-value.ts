@@ -1073,6 +1073,32 @@ export function buildFairValueDailySeries(input: {
   if (anchors[0].offset > 0 && basePrice > 0) {
     anchors.unshift({ offset: 0, price: basePrice });
   }
+
+  // ADR/GDR 야간 상방: "오늘 종가 추정"이 내일+야간 블렌드보다 높아
+  // day0→day1 이 하방으로 보이는 모순을 막는다 — 시작점은 현재가(basePrice).
+  const overnightUp = (pathFactors ?? []).some(
+    (f) =>
+      (f.id === "overnight" || f.id === "gdr" || f.id === "listing-adr") &&
+      f.bps >= 50
+  );
+  if (overnightUp && basePrice > 0) {
+    const a0 = anchors.find((a) => a.offset === 0);
+    if (a0) a0.price = basePrice;
+    const a1 = anchors.find((a) => a.offset === 1);
+    if (a0 && a1 && a1.price <= a0.price) {
+      const boost = Math.min(
+        0.02,
+        Math.max(
+          0.004,
+          ((pathFactors ?? []).find((f) => f.id === "overnight")?.bps ?? 80) /
+            10_000 /
+            2
+        )
+      );
+      a1.price = roundPrice(a0.price * (1 + boost), decimals);
+    }
+  }
+
   const maxOffset = anchors[anchors.length - 1].offset;
   const baseLn = Math.log(Math.max(anchors[0].price, 1e-9));
   const anchorLn = new Map<number, number>();

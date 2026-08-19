@@ -167,7 +167,12 @@ export const POSITIVE_KEYWORDS: OpportunityKeyword[] = [
     label: "독보적",
   },
 
-  // ── 거시·정책 호재 ──────────────────────────────────────
+  {
+    pattern: /(주주환원|환원\s*(계획|정책|확대)|shareholder\s+return)/i,
+    weight: 5,
+    category: "정책호재",
+    label: "주주환원",
+  },
   {
     pattern: /(정책\s*지원|정부\s*지원|국책\s*과제\s*선정)/i,
     weight: 3,

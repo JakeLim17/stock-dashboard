@@ -7,7 +7,7 @@
     "dev": "next dev -p 9700",
     "build": "next build",
     "start": "next start -p 9700",
-    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/analyzer/tradingSession.test.ts lib/analyzer/chronoPulse.test.ts lib/analyzer/overnightPassThrough.test.ts lib/analyzer/bandWidth.test.ts lib/analyzer/flowStreak.test.ts lib/analyzer/baseDrift.test.ts lib/analyzer/disclosureFeatures.test.ts lib/fair-value.test.ts lib/fair-value-macro.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts lib/group-catalyst-spillover.test.ts lib/schedule-dedup.test.ts lib/symbol-groups.test.ts lib/news/newsVolatility.test.ts lib/news/sentimentScore.test.ts lib/providers/kisCachePolicy.test.ts",
+    "test:unit": "npx --yes tsx --test lib/analyzer/momentumOverride.test.ts lib/analyzer/tradingSession.test.ts lib/analyzer/chronoPulse.test.ts lib/analyzer/overnightPassThrough.test.ts lib/analyzer/bandWidth.test.ts lib/analyzer/flowStreak.test.ts lib/analyzer/baseDrift.test.ts lib/analyzer/disclosureFeatures.test.ts lib/fair-value.test.ts lib/fair-value-macro.test.ts lib/fair-value-backtest.test.ts lib/fair-value-trading-day.test.ts lib/group-catalyst-spillover.test.ts lib/schedule-dedup.test.ts lib/symbol-groups.test.ts lib/news/newsVolatility.test.ts lib/news/sentimentScore.test.ts lib/news/shareholderReturn.test.ts lib/providers/kisCachePolicy.test.ts lib/providers/kisFlags.test.ts",
     "backtest:fair-value": "npx --yes tsx scripts/backtest-fair-value.ts"
   },
   "dependencies": {

@@ -7,8 +7,10 @@ import { DashboardShell } from "@/components/DashboardShell";
 // 외부 LoadingScreen 이 수십초간 머무는 사고가 있어 단순화함.
 // LoadingScreen 자체는 app/loading.tsx 가 자동 트리거하는 RSC 전환 fallback 으로
 // 그대로 살아 있다 (로그인 → 첫 페이지 진입 시 매우 짧게 보임).
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+//
+// force-static: 홈 HTML 은 CDN. force-dynamic 이면 새로고침마다 Serverless 1회
+// (Hobby Active CPU·Invocations 낭비). 데이터는 /api/* 만 동적.
+export const dynamic = "force-static";
 
 export default function HomePage() {
   return <DashboardShell />;

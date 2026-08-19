@@ -42,6 +42,13 @@ import {
   saveDefaultWatchlist,
   hasSavedDefaultWatchlist,
 } from "@/lib/watchlist-default";
+import {
+  EXTENDED_POLL_MS as DEFAULT_EXTENDED_POLL_MS,
+  FULL_SNAPSHOT_MIN_MS as DEFAULT_FULL_SNAPSHOT_MIN_MS,
+  OFF_HOURS_POLL_MS as DEFAULT_OFF_HOURS_POLL_MS,
+  OVERSEAS_NIGHT_POLL_MS as DEFAULT_OVERSEAS_NIGHT_POLL_MS,
+  REGULAR_POLL_MS as DEFAULT_REGULAR_POLL_MS,
+} from "@/lib/providers/kisCachePolicy";
 
 async function logout() {
   try {
@@ -52,10 +59,10 @@ async function logout() {
   window.location.replace("/login");
 }
 
-// ─── 폴링 주기 ──────────────────────────────────────────────────
-// 정규장 15s — KIS 장중 시세 TTL(8s)보다 길게, 체감은 살림. WS(KR)로 보완.
-// 예전 30s 는 캐시를 8s로 줄여도 UI가 30s마다만 갱신돼 체감이 느렸음.
-// env 로 override 가능 (NEXT_PUBLIC_POLL_INTERVAL_*).
+// ─── 폴링 주기 (Vercel 함수 호출 절감) ──────────────────────────
+// lite 장중 90s / 장후·야간 3분 / 휴장 5분 — 예전 15~45s는 Hobby Active CPU 부담.
+// full 예측 15분 고정 — 더 자주 불필요. WS(KR)로 장중 체감 보완.
+// 기본값은 lib/providers/kisCachePolicy.ts 와 동기. env 로 override 가능.
 function envInt(key: string, fallback: number): number {
   if (typeof process === "undefined") return fallback;
   const raw = process.env[key];
@@ -64,20 +71,26 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const REGULAR_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS", 15_000);
-const EXTENDED_REFRESH_MS = envInt("NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS", 90_000);
+const REGULAR_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_REGULAR_MS",
+  DEFAULT_REGULAR_POLL_MS
+);
+const EXTENDED_REFRESH_MS = envInt(
+  "NEXT_PUBLIC_POLL_INTERVAL_EXTENDED_MS",
+  DEFAULT_EXTENDED_POLL_MS
+);
 const OVERSEAS_NIGHT_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OVERSEAS_NIGHT_MS",
-  120_000
+  DEFAULT_OVERSEAS_NIGHT_POLL_MS
 );
 const OFF_HOURS_REFRESH_MS = envInt(
   "NEXT_PUBLIC_POLL_INTERVAL_OFF_HOURS_MS",
-  600_000
+  DEFAULT_OFF_HOURS_POLL_MS
 );
 /** full 분석 스냅샷 최소 간격 — 그 사이는 lite(시세만) 폴링 */
 const FULL_SNAPSHOT_MIN_MS = envInt(
   "NEXT_PUBLIC_FULL_SNAPSHOT_MIN_MS",
-  900_000
+  DEFAULT_FULL_SNAPSHOT_MIN_MS
 );
 /** 클라이언트 fetch 하드 타임아웃 — 서버 hang 시 UI 무한 대기 방지 */
 const LITE_FETCH_TIMEOUT_MS = 25_000;
@@ -106,7 +119,7 @@ function resolveRefreshMs(snapshot: DashboardSnapshot): number {
   // 2) 없으면 시간외(프리/애프터/한국 시간외 단일가)가 활성인지 확인
   // 3) 그것마저 없으면 완전 비장중
   // ※ KIS 수급(flow.source=kis)이 있어도 폴링을 더 빠르게 하지 않음.
-  //   수급은 서버 5분 캐시 · 시세는 세션별 TTL(장중 8s)+SWR / WS·lite 로 충분.
+  //   수급은 서버 장중 1h·장후 24h(+KV) · 시세는 세션별 TTL+SWR / WS·lite 로 충분.
   const isRegular = snapshot.primaries.some(
     (p) => (p.quote.marketState ?? "").toUpperCase() === "REGULAR"
   );
@@ -677,15 +690,16 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     localStorage.setItem(NIGHT_STORAGE_KEY, useOverseasNight ? "1" : "0");
   }, [useOverseasNight]);
 
-  // 자동 새로고침 (탭이 활성일 때만 — Vercel 함수 호출 절약)
+  // 자동 새로고침 (탭 비활성 시 정지 — Vercel 함수 호출 절약)
+  // mode 생략(auto): 평소 lite, FULL_SNAPSHOT_MIN_MS(15분) 경과 시만 full.
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     const start = () => {
       if (timer) return;
       timer = setInterval(() => {
-        // lite만 진행 중이면 폴링 skip — full 분석은 끊지 않음(별도 슬롯)
-        if (liteAbortRef.current) return;
-        void refresh(undefined, undefined, false, true, "lite");
+        if (document.visibilityState !== "visible") return;
+        if (liteAbortRef.current || fullAbortRef.current) return;
+        void refresh(undefined, undefined, false, true);
       }, refreshMs);
     };
     const stop = () => {
@@ -694,7 +708,7 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        // 다시 활성화되면 60s 이상 지났을 때만 즉시 갱신 (CDN·함수 호출 절약)
+        // 다시 활성화되면 lite 주기만큼 지났을 때만 즉시 갱신 (auto → 필요 시 full)
         const stale =
           Date.now() - lastFullFetchAtRef.current >= Math.min(refreshMs, 60_000);
         if (!liteAbortRef.current && !fullAbortRef.current && stale)
@@ -1182,6 +1196,8 @@ export function DashboardClient({ initial }: { initial: DashboardSnapshot }) {
       {showNews ? (
         <NewsPanel
           items={snap.news}
+          fetchFailed={snap.newsFetchFailed}
+          onRetry={() => void refresh(undefined, undefined, true, false, "full")}
           selectedSymbol={
             selectedSnap
               ? { code: selectedSnap.meta.code, name: selectedSnap.meta.name }
