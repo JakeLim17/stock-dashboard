@@ -17,6 +17,8 @@ export const MAX_WATCH = 6;
 export const WATCHLIST_CANDIDATES: SymbolMeta[] = [
   // 반도체 (PRIMARY 포함)
   { code: "005930.KS", name: "삼성전자", kind: "kr-stock", primary: true, sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "반도체 대장" },
+  // 삼성전자 우선주 — Yahoo/KRX: 005935.KS (보통주 005930.KS 와 별도). 기본 카드에는 넣지 않음.
+  { code: "005935.KS", name: "삼성전자우", kind: "kr-stock", sector: "반도체" },
   { code: "000660.KS", name: "SK하이닉스", kind: "kr-stock", primary: true, sector: "반도체" },
   { code: "009150.KS", name: "삼성전기", kind: "kr-stock", primary: true, sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "MLCC 대장" },
   { code: "042700.KS", name: "한미반도체", kind: "kr-stock", sector: "반도체", isSectorLeader: true, sectorLeaderLabel: "HBM 본더 대장" },
@@ -319,7 +321,7 @@ export const THEMES: ThemeDefinition[] = [
     label: "AI 반도체",
     emoji: "🧠",
     description: "AI 학습·추론용 메모리·로직 반도체",
-    codes: ["005930.KS", "000660.KS", "042700.KS", "034730.KS", "402340.KS", "NVDA"],
+    codes: ["005930.KS", "005935.KS", "000660.KS", "042700.KS", "034730.KS", "402340.KS", "NVDA"],
   },
   {
     id: "battery",

@@ -12,6 +12,9 @@ export interface SymbolKeyword {
 // 못 잡으므로 영어 별칭(예: "Micron", "MU HBM")까지 함께 검사한다.
 export const NEWS_SYMBOL_KEYWORDS: SymbolKeyword[] = [
   // ── 한국 종목 ─────────────────────────────────────────────
+  // 우선주 키워드를 보통주보다 먼저 (includes 선매칭 방지).
+  { kw: "삼성전자우", code: "005935.KS" },
+  { kw: "005935", code: "005935.KS" },
   { kw: "삼성전자", code: "005930.KS" },
   { kw: "Samsung Electronics", code: "005930.KS" },
   { kw: "SK하이닉스", code: "000660.KS" },

@@ -438,6 +438,7 @@ const US_TICKER_TO_KO: Record<string, string> = {
 // 종목 코드별 한국어 사명 — 한국 종목용.
 const KR_SYMBOL_TO_NAME: Record<string, string> = {
   "005930.KS": "삼성전자",
+  "005935.KS": "삼성전자우",
   "000660.KS": "SK하이닉스",
   "402340.KS": "SK스퀘어",
   "034730.KS": "SK",
@@ -708,6 +709,9 @@ function classifySentiment(
 }
 
 const SYMBOL_MAP: Array<{ kw: string; code: string }> = [
+  // 우선주 키워드를 보통주보다 먼저 — "삼성전자우"가 "삼성전자"에 선매칭되지 않게.
+  { kw: "삼성전자우", code: "005935.KS" },
+  { kw: "005935", code: "005935.KS" },
   { kw: "삼성전자", code: "005930.KS" },
   { kw: "SK하이닉스", code: "000660.KS" },
   { kw: "하이닉스", code: "000660.KS" },
