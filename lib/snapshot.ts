@@ -24,6 +24,7 @@ import { kisEnabled } from "./providers/kis";
 import { fetchKospi200NightQuote } from "./providers/kospi200FuturesQuote";
 import {
   isKospi200NightWindow,
+  isKospi200PredictionWindow,
   K200_NIGHT_CODE,
 } from "./analyzer/kospi200Futures";
 import { collectExtraAlphaFactors } from "./providers/extraAlpha";
@@ -360,7 +361,7 @@ function assembleMarketIndicatorsResult(
       soxRate: soxRate ?? 0,
       esRate: es?.changeRate ?? 0,
       ymRate: ym?.changeRate ?? 0,
-      k200Rate: isKospi200NightWindow() ? (k200Quote?.rate ?? null) : null,
+      k200Rate: isKospi200PredictionWindow() ? (k200Quote?.rate ?? null) : null,
       btcRate: btc?.changeRate ?? null,
     },
     usdKrw: fx?.value ?? null,

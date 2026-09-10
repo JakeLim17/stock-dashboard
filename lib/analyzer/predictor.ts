@@ -29,6 +29,7 @@ import {
 } from "./chronoPulse";
 import { computeGapGuide, inferOvernightKind } from "./overnightPassThrough";
 import { resolveSupportResistance } from "./pivotLevels";
+import { isGapGuideActive } from "./kospi200Futures";
 import { capHorizonSigma } from "./bandWidth";
 import {  baseDriftForHorizon,
   computeBaseDriftDaily,
@@ -607,7 +608,7 @@ export function predict(input: PredictorInput): Predictions {
 
   const overnightPresent = chronoPulse.factors.some((f) => f.id === "overnight");
   const gapGuide =
-    meta?.kind === "kr-stock"
+    meta?.kind === "kr-stock" && isGapGuideActive()
       ? computeGapGuide(
           {
             k200: marketContext?.k200Rate,

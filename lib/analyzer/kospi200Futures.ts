@@ -81,6 +81,18 @@ export function isKospi200NightWindow(now = new Date()): boolean {
   return minutesOfDay >= 18 * 60 || minutesOfDay < 8 * 60 + 45;
 }
 
+/** 야간 갭을 예측에 넣는 창 — 18:00~익일 09:00 (정규 개장 직전까지) */
+export function isKospi200PredictionWindow(now = new Date()): boolean {
+  const { minutesOfDay } = kstParts(now);
+  return minutesOfDay >= 18 * 60 || minutesOfDay < 9 * 60;
+}
+
+/** 시초 갭 가이드 활성 — 정규 15:30 마감 후 ~ 다음날 09:00 */
+export function isGapGuideActive(now = new Date()): boolean {
+  const { minutesOfDay } = kstParts(now);
+  return minutesOfDay >= 15 * 60 + 30 || minutesOfDay < 9 * 60;
+}
+
 /** 마지막으로 끝난 정규 세션 일자 (YYYYMMDD, KST). 15:45 이전은 직전 평일. */
 export function lastCompletedFuturesSessionYmd(now = new Date()): string {
   const p = kstParts(now);

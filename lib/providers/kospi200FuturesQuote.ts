@@ -1,6 +1,7 @@
 import "server-only";
 import {
   isKospi200NightWindow,
+  isKospi200PredictionWindow,
   kospi200NightRateVsRegularClose,
 } from "../analyzer/kospi200Futures";
 import { fetchKisKospi200FuturesNightRate } from "./kis";
@@ -201,11 +202,11 @@ export async function fetchKospi200NightQuote(
   return p;
 }
 
-/** 야간 창의 코스피200 선물 등락률. 정규장 중엔 null (이미 시가에 반영됨). */
+/** 예측용 등락률. 정규장 중엔 null (이미 시가에 반영됨). */
 export async function fetchKospi200NightRate(
   now = new Date()
 ): Promise<number | null> {
-  if (!isKospi200NightWindow(now)) return null;
+  if (!isKospi200PredictionWindow(now)) return null;
   const quote = await fetchKospi200NightQuote(now);
   return quote?.rate ?? null;
 }

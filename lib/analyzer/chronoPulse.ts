@@ -17,6 +17,7 @@ import {
   type OvernightProxyKind,
 } from "./overnightPassThrough";
 import { streakBuyDays, streakSellDays } from "./flowStreak";
+import { isGapGuideActive } from "./kospi200Futures";
 
 /** 다요인 예측 알파 — UI에는 「예측」만 표시 (내부 엔진명 비노출) */
 export const CHRONO_PULSE_NAME = "예측";
@@ -619,20 +620,26 @@ export function computeChronoPulse(input: ChronoPulseInput): ChronoPulseResult {
     if (overnight) {
       add(overnight.id, overnight.label, overnight.bps);
     }
-    const nightFut = computeGapGuide(
-      {
-        k200: marketContext?.k200Rate,
-        nq: marketContext?.nasdaqRate,
-        es: marketContext?.esRate,
-        ym: marketContext?.ymRate,
-        fx: marketContext?.fxRate,
-        btc: marketContext?.btcRate,
-      },
-      {
-        hasStockOvernight: !!overnight,
-        kospiBeta: mb?.kospi?.beta,
-      }
-    );
+    const allowGap =
+      isGapGuideActive() ||
+      (marketContext?.k200Rate != null &&
+        Number.isFinite(marketContext.k200Rate));
+    const nightFut = allowGap
+      ? computeGapGuide(
+          {
+            k200: marketContext?.k200Rate,
+            nq: marketContext?.nasdaqRate,
+            es: marketContext?.esRate,
+            ym: marketContext?.ymRate,
+            fx: marketContext?.fxRate,
+            btc: marketContext?.btcRate,
+          },
+          {
+            hasStockOvernight: !!overnight,
+            kospiBeta: mb?.kospi?.beta,
+          }
+        )
+      : null;
     if (nightFut) {
       add(nightFut.chip.id, nightFut.chip.label, nightFut.chip.bps);
     }

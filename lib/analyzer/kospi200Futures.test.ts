@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isGapGuideActive,
   isKospi200NightWindow,
+  isKospi200PredictionWindow,
   kospi200FrontMonth,
   kospi200FuturesShortCode,
   kospi200NightRateVsRegularClose,
@@ -35,6 +37,17 @@ describe("kospi200Futures", () => {
     const day = new Date(Date.UTC(2026, 7, 20, 1, 0)); // 10:00 KST
     assert.equal(isKospi200NightWindow(night), true);
     assert.equal(isKospi200NightWindow(day), false);
+  });
+
+  it("예측 창은 09:00까지, 갭 가이드는 15:30 이후", () => {
+    const open = new Date(Date.UTC(2026, 7, 20, 0, 30)); // 09:30 KST
+    const afterClose = new Date(Date.UTC(2026, 7, 20, 7, 0)); // 16:00 KST
+    const preOpen = new Date(Date.UTC(2026, 7, 19, 23, 50)); // 08:50 KST
+    assert.equal(isKospi200PredictionWindow(open), false);
+    assert.equal(isGapGuideActive(open), false);
+    assert.equal(isGapGuideActive(afterClose), true);
+    assert.equal(isKospi200PredictionWindow(preOpen), true);
+    assert.equal(isKospi200NightWindow(preOpen), false);
   });
 
   it("야간 등락은 정규 종가 대비 (전일대비 금지)", () => {
