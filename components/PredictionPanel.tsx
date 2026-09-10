@@ -173,6 +173,13 @@ export function PredictionPanel({
             }
             color={night ? changeColor(night.premiumRate) : ""}
           />
+          {p.gapGuide && (
+            <SummaryCard
+              label="시초 갭 가이드"
+              value={fmtPercent(p.gapGuide.stockGap)}
+              color={changeColor(p.gapGuide.stockGap)}
+            />
+          )}
           <SummaryCard
             label="밸류 위험"
             value={p.valuation ? `${p.valuation.label} ${p.valuation.riskScore}` : "—"}
@@ -283,13 +290,21 @@ export function PredictionPanel({
                     krwRate={krwRate ?? null}
                   />
                   <PriceRow
-                    label="지지선 (20일)"
+                    label={
+                      p.targets.supportSource === "pivot"
+                        ? "지지선 (피봇)"
+                        : "지지선 (20일)"
+                    }
                     value={p.targets.support}
                     currency={currency}
                     krwRate={krwRate ?? null}
                   />
                   <PriceRow
-                    label="저항선 (20일)"
+                    label={
+                      p.targets.supportSource === "pivot"
+                        ? "저항선 (피봇)"
+                        : "저항선 (20일)"
+                    }
                     value={p.targets.resistance}
                     currency={currency}
                     krwRate={krwRate ?? null}

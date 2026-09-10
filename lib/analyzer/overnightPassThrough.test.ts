@@ -10,6 +10,8 @@ import {
   inferOvernightKind,
   resolveOvernightProxyRate,
   computeNightFuturesPassThrough,
+  computeGapGuide,
+  computeBtcPassThrough,
   NIGHT_FUTURES_BPS_CAP,
 } from "./overnightPassThrough";
 
@@ -157,7 +159,7 @@ describe("overnightPassThrough", () => {
     assert.ok(k200!.bps <= NIGHT_FUTURES_BPS_CAP);
   });
 
-  it("야간 코스피200 +2% 는 캡 안 양수 칩", () => {
+  it("야간 코스피200 +2% 는 갭에 가깝게 반영 (캡 안)", () => {
     const f = computeNightFuturesPassThrough({
       k200: 0.0198,
       nq: -0.001,
@@ -167,6 +169,37 @@ describe("overnightPassThrough", () => {
     });
     assert.ok(f);
     assert.match(f!.label, /^야간 코스피200 선물 \+/);
-    assert.ok(f!.bps > 20 && f!.bps <= NIGHT_FUTURES_BPS_CAP);
+    assert.ok(f!.bps > 120 && f!.bps <= NIGHT_FUTURES_BPS_CAP);
+  });
+
+  it("갭 가이드 — k200 +2% 면 시초 예상이 비슷한 크기", () => {
+    const g = computeGapGuide({ k200: 0.02 });
+    assert.ok(g);
+    assert.ok(g!.stockGap > 0.015 && g!.stockGap < 0.025);
+    assert.match(g!.label, /시초 예상 \+/);
+    assert.match(g!.label, /야간선물/);
+  });
+
+  it("BTC 강세는 k200 없을 때 합성에 반영", () => {
+    const withBtc = computeNightFuturesPassThrough({
+      nq: 0.004,
+      es: 0.003,
+      btc: 0.03,
+      fx: 0,
+    });
+    const noBtc = computeNightFuturesPassThrough({
+      nq: 0.004,
+      es: 0.003,
+      fx: 0,
+    });
+    assert.ok(withBtc && noBtc);
+    assert.ok(withBtc!.bps > noBtc!.bps);
+  });
+
+  it("코인 연동 종목 BTC 칩", () => {
+    const c = computeBtcPassThrough(0.04);
+    assert.ok(c);
+    assert.equal(c!.bps, 160); // 4% × 40%
+    assert.match(c!.label, /비트코인 \+/);
   });
 });

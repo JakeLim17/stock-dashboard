@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { MarketIndicator } from "@/lib/types";
+import { K200_NIGHT_CODE } from "@/lib/analyzer/kospi200Futures";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 import { PriceTicker } from "./PriceTicker";
 import { Sparkline } from "./Sparkline";
@@ -13,7 +14,9 @@ import { TrendingDown, TrendingUp, AlertTriangle, Minus } from "lucide-react";
 const DEFAULT_VISIBLE_CODES: ReadonlySet<string> = new Set([
   "^KS11",
   "^KQ11",
+  K200_NIGHT_CODE,
   "NQ=F",
+  "BTC-USD",
   "KRW=X",
 ]);
 
@@ -177,7 +180,8 @@ function iconFor(i: MarketIndicator) {
 }
 
 function decimalsFor(code: string): number {
-  // ^TNX 는 % yield 라 소수 2자리 (예: 4.32). VIX/DXY/지수도 2자리 충분.
+  if (code === "BTC-USD") return 0;
+  if (code === "ETH-USD") return 2;
   if (code === "KRW=X") return 2;
   return 2;
 }

@@ -11,7 +11,8 @@ import { usMarketDrift } from "./marketDrift";
 import type { HistoricalPoint } from "../providers/yahoo";
 import { isHoldingCompanyCode } from "../symbols";
 import {
-  computeNightFuturesPassThrough,
+  computeBtcPassThrough,
+  computeGapGuide,
   computeOvernightPassThrough,
   type OvernightProxyKind,
 } from "./overnightPassThrough";
@@ -73,7 +74,7 @@ export interface ChronoPulseInput {
   extraFactors?: ChronoPulseFactor[] | null;
 }
 
-const DAILY_DRIFT_CAP = 0.018;
+const DAILY_DRIFT_CAP = 0.025;
 const FACTOR_MIN_BPS = 1;
 
 function clampDrift(d: number, cap = DAILY_DRIFT_CAP): number {
@@ -398,6 +399,7 @@ const LAG0_FACTOR_IDS = new Set([
   "gdr",
   "overnight",
   "night-fut",
+  "btc",
   "orderbook",
 ]);
 
@@ -617,18 +619,33 @@ export function computeChronoPulse(input: ChronoPulseInput): ChronoPulseResult {
     if (overnight) {
       add(overnight.id, overnight.label, overnight.bps);
     }
-    const nightFut = computeNightFuturesPassThrough(
+    const nightFut = computeGapGuide(
       {
         k200: marketContext?.k200Rate,
         nq: marketContext?.nasdaqRate,
         es: marketContext?.esRate,
         ym: marketContext?.ymRate,
         fx: marketContext?.fxRate,
+        btc: marketContext?.btcRate,
       },
-      { hasStockOvernight: !!overnight }
+      {
+        hasStockOvernight: !!overnight,
+        kospiBeta: mb?.kospi?.beta,
+      }
     );
     if (nightFut) {
-      add(nightFut.id, nightFut.label, nightFut.bps);
+      add(nightFut.chip.id, nightFut.chip.label, nightFut.chip.bps);
+    }
+  }
+
+  const cryptoLinked =
+    meta?.sector === "글로벌암호화폐" ||
+    meta?.code === "MSTR" ||
+    meta?.code === "COIN";
+  if (cryptoLinked && meta?.kind !== "kr-stock") {
+    const btcChip = computeBtcPassThrough(marketContext?.btcRate);
+    if (btcChip) {
+      add(btcChip.id, btcChip.label, btcChip.bps);
     }
   }
 

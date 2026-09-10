@@ -6,6 +6,7 @@ import { Badge } from "./ui/Badge";
 import { AnimatedMeter } from "./ui/AnimatedMeter";
 import { useSurgeFlash } from "@/hooks/useSurgeFlash";
 import { changeColor, fmtNumber, fmtPercent, marketDisplayLabel } from "@/lib/utils";
+import { K200_NIGHT_CODE } from "@/lib/analyzer/kospi200Futures";
 import { Activity, AlertTriangle, Newspaper } from "lucide-react";
 
 interface Props {
@@ -18,6 +19,8 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
   const nq = snapshot.indicators.find((i) => i.code === "NQ=F");
   const kospi = snapshot.indicators.find((i) => i.code === "^KS11");
   const kosdaq = snapshot.indicators.find((i) => i.code === "^KQ11");
+  const k200Night = snapshot.indicators.find((i) => i.code === K200_NIGHT_CODE);
+  const btc = snapshot.indicators.find((i) => i.code === "BTC-USD");
   const newsCount = snapshot.news.length;
   const mood = snapshot.marketMood;
   // 한국장 상태는 한국 종목 중 첫 번째 quote 기준 (시간외 활성도 함께 반영)
@@ -129,12 +132,42 @@ export function SummaryBar({ snapshot, lastUpdatedLabel }: Props) {
           }
         />
       )}
+      {k200Night && (
+        <Stat
+          label="야간선물"
+          value={
+            <span className="inline-flex items-baseline gap-1">
+              <span className={`tabular text-base font-semibold ${changeColor(k200Night.changeRate)}`}>
+                {fmtNumber(k200Night.value, 2)}
+              </span>
+              <span className={`text-xs tabular ${changeColor(k200Night.changeRate)}`}>
+                ({fmtPercent(k200Night.changeRate)})
+              </span>
+            </span>
+          }
+        />
+      )}
       {nq && (
         <Stat
           label="나스닥 선물"
           value={
             <span className={`tabular text-base font-semibold ${changeColor(nq.changeRate)}`}>
               {fmtPercent(nq.changeRate)}
+            </span>
+          }
+        />
+      )}
+      {btc && (
+        <Stat
+          label="비트코인"
+          value={
+            <span className="inline-flex items-baseline gap-1">
+              <span className={`tabular text-base font-semibold ${changeColor(btc.changeRate)}`}>
+                {fmtNumber(btc.value, 0)}
+              </span>
+              <span className={`text-xs tabular ${changeColor(btc.changeRate)}`}>
+                ({fmtPercent(btc.changeRate)})
+              </span>
             </span>
           }
         />

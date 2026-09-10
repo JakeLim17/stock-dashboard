@@ -398,8 +398,10 @@ export interface PriceTargets {
   stopLoss: number; // 손절가
   takeProfit1: number; // 1차 목표
   takeProfit2: number; // 2차 목표
-  support: number; // 최근 20일 저점 기준 지지
-  resistance: number; // 최근 20일 고점 기준 저항
+  support: number; // 피봇 S1(우선) 또는 최근 20일 저점
+  resistance: number; // 피봇 R1(우선) 또는 최근 20일 고점
+  /** 지지·저항 산출 — 피봇(전일 H/L/C) 또는 20일 고저 */
+  supportSource?: "pivot" | "20d";
   // (목표1 - 진입) / (진입 - 손절). entry === stopLoss 면 분모 0이라 null.
   riskReward: number | null;
   // takeProfit2 산출 출처 — 디버그/UI 안내용.
@@ -535,6 +537,13 @@ export interface Predictions {
     score: number;
     label: "high" | "medium" | "low";
     factors: string[];
+  } | null;
+
+  /** 야선지지식 시초 갭 가이드 — 야간선물·BTC. 정규장 중엔 없음 */
+  gapGuide?: {
+    marketGap: number;
+    stockGap: number;
+    label: string;
   } | null;
 
   /** 다요인 예측 알파 (UI 표기: 예측) */
@@ -752,6 +761,8 @@ export interface StockMarketContext {
   ymRate?: number;
   /** 코스피200 선물 야간(정규 종가 대비) */
   k200Rate?: number | null;
+  /** BTC-USD 등락 — 야간 갭·코인 연동 종목 */
+  btcRate?: number | null;
 }
 
 /** 종목별 데이터 충분성 — snapshot·추천 게이트 공통. */

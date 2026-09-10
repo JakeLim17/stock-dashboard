@@ -3,6 +3,9 @@
  * Yahoo 심볼 없음 — 시세는 KIS inquire-price (A01609 형식).
  */
 
+/** 시장 패널용 합성 코드 — Yahoo 티커 아님 */
+export const K200_NIGHT_CODE = "K200.NIGHT";
+
 import { kstParts } from "./tradingSession";
 
 const PRODUCT = "A01"; // 2026년 이후 선물 종류코드 A + 코스피200(01)

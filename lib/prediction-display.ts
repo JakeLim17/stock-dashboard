@@ -30,7 +30,7 @@ export function takeProfit2SourceLabel(
     case "atr":
       return "ATR 3.5×";
     case "resistance":
-      return "20일 저항";
+      return "피봇·저항";
     case "floor":
       return "보수적 floor";
     default:

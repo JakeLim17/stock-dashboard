@@ -216,13 +216,18 @@ export function estimateOvernightOpenBand(
 }
 
 /**
- * 야간 선물 신호. HTML 스크래핑 없음.
- * 벤치(sonmul 갭 가이드): ① 코스피200 야간 vs 정규 종가 ② NQ·ES ③ 환율. SOX·ADR은 별도 칩.
+ * 야간 갭 가이드. 야선지지·코스피랩과 같이
+ * ① 코스피200 야간 vs 정규 종가 ② NQ·ES ③ 비트코인 ④ 환율.
+ * k200이 있으면 지수 갭은 거의 1:1, 종목은 코스피 β.
  * 확정 시초가 아님. ADR/GDR 칩과 겹치면 가중을 줄인다.
  */
-export const NIGHT_FUTURES_TRANSFER = 0.22;
-export const NIGHT_FUTURES_BPS_CAP = 80; // ±0.8%
+export const NIGHT_FUTURES_TRANSFER = 1;
+/** k200 없을 때 미국 선물·BTC는 노이즈가 커서 할인 */
+export const NIGHT_FUTURES_US_TRANSFER = 0.35;
+export const NIGHT_FUTURES_BPS_CAP = 250; // ±2.5%
 const NIGHT_FUTURES_MIN_ABS = 0.0025;
+const KOSPI_BETA_LO = 0.55;
+const KOSPI_BETA_HI = 1.5;
 
 export interface NightFuturesRates {
   /** 코스피200 선물 야간 — 정규 15:45 종가 대비 (전일대비 아님) */
@@ -232,6 +237,18 @@ export interface NightFuturesRates {
   ym?: number | null;
   /** KRW=X 등락 — 양수=원화 약세 */
   fx?: number | null;
+  /** BTC-USD 등락 — 위험선호 선행 */
+  btc?: number | null;
+}
+
+export interface GapGuideResult {
+  marketGap: number;
+  stockGap: number;
+  transfer: number;
+  hasK200: boolean;
+  hasBtc: boolean;
+  label: string;
+  chip: { id: "night-fut"; label: string; bps: number };
 }
 
 export function compositeNightFuturesRate(rates: NightFuturesRates): number | null {
@@ -239,49 +256,106 @@ export function compositeNightFuturesRate(rates: NightFuturesRates): number | nu
   let acc = 0;
   const add = (r: number | null | undefined, w: number) => {
     if (r == null || !Number.isFinite(r)) return;
+    if (Math.abs(r) < 0.0005) return; // 0은 결측과 같음 — 가중만 희석하지 않음
     acc += r * w;
     wSum += w;
   };
   const hasK200 = rates.k200 != null && Number.isFinite(rates.k200);
   if (hasK200) {
-    add(rates.k200, 0.7);
-    add(rates.nq, 0.1);
-    add(rates.es, 0.08);
-    add(rates.ym, 0.05);
-    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.07);
+    add(rates.k200, 0.62);
+    add(rates.nq, 0.12);
+    add(rates.es, 0.06);
+    add(rates.btc, 0.12);
+    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.08);
   } else {
-    add(rates.nq, 0.45);
-    add(rates.es, 0.3);
-    add(rates.ym, 0.15);
-    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.1);
+    add(rates.nq, 0.38);
+    add(rates.es, 0.18);
+    add(rates.ym, 0.1);
+    add(rates.btc, 0.22);
+    add(rates.fx != null ? -rates.fx * 0.35 : null, 0.12);
   }
   if (wSum < 0.3) return null;
   return acc / wSum;
 }
 
-export function computeNightFuturesPassThrough(
+function clampKospiBeta(beta: number | null | undefined): number {
+  if (beta == null || !Number.isFinite(beta) || beta <= 0) return 1;
+  return Math.max(KOSPI_BETA_LO, Math.min(KOSPI_BETA_HI, beta));
+}
+
+export function computeGapGuide(
   rates: NightFuturesRates,
-  opts?: { hasStockOvernight?: boolean }
-): { id: "night-fut"; label: string; bps: number } | null {
+  opts?: { hasStockOvernight?: boolean; kospiBeta?: number | null }
+): GapGuideResult | null {
   const composite = compositeNightFuturesRate(rates);
   if (composite == null) return null;
   if (Math.abs(composite) < NIGHT_FUTURES_MIN_ABS) return null;
 
-  let rawBps = Math.round(composite * NIGHT_FUTURES_TRANSFER * 10_000);
-  if (opts?.hasStockOvernight) rawBps = Math.round(rawBps * 0.35);
-  const bps = Math.max(
-    -NIGHT_FUTURES_BPS_CAP,
-    Math.min(NIGHT_FUTURES_BPS_CAP, rawBps)
-  );
-  if (Math.abs(bps) < 1) return null;
-  const pct = bps / 100;
-  const sign = pct >= 0 ? "+" : "";
   const hasK200 = rates.k200 != null && Number.isFinite(rates.k200);
+  const hasBtc =
+    rates.btc != null &&
+    Number.isFinite(rates.btc) &&
+    Math.abs(rates.btc) >= 0.005;
+  const transfer = hasK200
+    ? NIGHT_FUTURES_TRANSFER
+    : NIGHT_FUTURES_US_TRANSFER;
+  const beta = clampKospiBeta(opts?.kospiBeta);
+  let stockGap = composite * transfer * beta;
+  if (opts?.hasStockOvernight) stockGap *= 0.35;
+
+  const capped = Math.max(
+    -NIGHT_FUTURES_BPS_CAP / 10_000,
+    Math.min(NIGHT_FUTURES_BPS_CAP / 10_000, stockGap)
+  );
+  const bps = Math.round(capped * 10_000);
+  if (Math.abs(bps) < 1) return null;
+
+  const sources: string[] = [];
+  if (hasK200) sources.push("야간선물");
+  if (hasBtc) sources.push("BTC");
+  if (!hasK200) sources.push("미선물");
+  const label = `시초 예상 ${formatSignedPct(capped)} (${sources.join("·")}, 확정 아님)`;
+  const sign = bps >= 0 ? "+" : "";
+  const chipLabel = hasK200
+    ? `야간 코스피200 선물 ${sign}${(bps / 100).toFixed(1)}%`
+    : `야간 선물 ${sign}${(bps / 100).toFixed(1)}% 반영`;
+
   return {
-    id: "night-fut",
-    label: hasK200
-      ? `야간 코스피200 선물 ${sign}${pct.toFixed(1)}%`
-      : `야간 선물 ${sign}${pct.toFixed(1)}% 반영`,
+    marketGap: composite,
+    stockGap: capped,
+    transfer,
+    hasK200,
+    hasBtc,
+    label,
+    chip: { id: "night-fut", label: chipLabel, bps },
+  };
+}
+
+export function computeNightFuturesPassThrough(
+  rates: NightFuturesRates,
+  opts?: { hasStockOvernight?: boolean; kospiBeta?: number | null }
+): { id: "night-fut"; label: string; bps: number } | null {
+  return computeGapGuide(rates, opts)?.chip ?? null;
+}
+
+export const BTC_TRANSFER = 0.4;
+export const BTC_BPS_CAP = 200;
+const BTC_MIN_ABS = 0.008;
+
+/** MSTR·COIN 등 코인 연동 종목 — BTC 등락을 단기 알파로 */
+export function computeBtcPassThrough(
+  btcRate: number | null | undefined,
+  transfer = BTC_TRANSFER
+): { id: "btc"; label: string; bps: number } | null {
+  if (btcRate == null || !Number.isFinite(btcRate)) return null;
+  if (Math.abs(btcRate) < BTC_MIN_ABS) return null;
+  const rawBps = Math.round(btcRate * transfer * 10_000);
+  const bps = Math.max(-BTC_BPS_CAP, Math.min(BTC_BPS_CAP, rawBps));
+  if (Math.abs(bps) < 1) return null;
+  const sign = bps >= 0 ? "+" : "";
+  return {
+    id: "btc",
+    label: `비트코인 ${sign}${(bps / 100).toFixed(1)}%`,
     bps,
   };
 }

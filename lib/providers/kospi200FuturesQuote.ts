@@ -6,9 +6,9 @@ import {
 import { fetchKisKospi200FuturesNightRate } from "./kis";
 
 /**
- * 코스피200 선물 야간 등락 — Yahoo 티커 없음.
- * 벤치(sonmul.co.kr): 갭은 야간선물 vs 정규 종가가 1순위, NQ·SOX·환율은 보조.
- * 피드: `/api/market/overview` 의 KOSPI200_NIGHT / KOSPI200_DAY (HTML 스크래핑 아님).
+ * 코스피200 선물 야간 — Yahoo 티커 없음.
+ * 벤치(야선지지·코스피랩): 갭은 야간선물 vs 정규 종가가 1순위, NQ·BTC·환율은 보조.
+ * 피드: sonmul `/api/market/overview` 의 KOSPI200_NIGHT / KOSPI200_DAY.
  * 폴백: KIS → 네이버 FUT(주간 종가만 오면 야간=0).
  */
 
@@ -45,8 +45,18 @@ interface NaverFutDayBar {
   closePrice?: string;
 }
 
-let cache: { at: number; rate: number | null } | null = null;
-let inflight: Promise<number | null> | null = null;
+export type Kospi200NightSource = "sonmul" | "kis" | "naver";
+
+export interface Kospi200NightQuote {
+  last: number;
+  regularClose: number;
+  rate: number;
+  source: Kospi200NightSource;
+  asOf: number;
+}
+
+let cache: { at: number; quote: Kospi200NightQuote | null } | null = null;
+let inflight: Promise<Kospi200NightQuote | null> | null = null;
 
 function parseKoNum(raw: string | undefined | null): number | null {
   if (raw == null) return null;
@@ -79,32 +89,38 @@ async function fetchJson<T>(
   }
 }
 
-/** 야간 현재가 / 주간 종가 − 1. changeRate 필드는 prevClose 정의가 달라 쓰지 않음. */
-export function sonmulKospi200NightRate(quotes: SonmulQuote[]): number | null {
+export function sonmulKospi200NightQuote(
+  quotes: SonmulQuote[],
+  asOf = Date.now()
+): Kospi200NightQuote | null {
   const night = quotes.find((q) => q.symbol === "KOSPI200_NIGHT");
   const day = quotes.find((q) => q.symbol === "KOSPI200_DAY");
   const last = night?.current;
   const dayClose = day?.current;
   if (last == null || dayClose == null) return null;
-  return kospi200NightRateVsRegularClose(last, dayClose);
+  const rate = kospi200NightRateVsRegularClose(last, dayClose);
+  if (rate == null) return null;
+  return { last, regularClose: dayClose, rate, source: "sonmul", asOf };
 }
 
-async function fetchSonmulKospi200NightRate(
-  now: Date
-): Promise<number | null> {
-  if (!isKospi200NightWindow(now)) return null;
+/** 야간 현재가 / 주간 종가 − 1. changeRate 필드는 prevClose 정의가 달라 쓰지 않음. */
+export function sonmulKospi200NightRate(quotes: SonmulQuote[]): number | null {
+  return sonmulKospi200NightQuote(quotes)?.rate ?? null;
+}
+
+async function fetchSonmulKospi200NightQuote(): Promise<Kospi200NightQuote | null> {
   const json = await fetchJson<SonmulOverview>(
     SONMUL_OVERVIEW,
     "https://sonmul.co.kr/"
   );
   const futures = json?.data?.futures;
   if (!Array.isArray(futures) || futures.length === 0) return null;
-  return sonmulKospi200NightRate(futures);
+  return sonmulKospi200NightQuote(futures);
 }
 
-async function fetchNaverKospi200NightRate(
+async function fetchNaverKospi200NightQuote(
   now: Date
-): Promise<number | null> {
+): Promise<Kospi200NightQuote | null> {
   if (!isKospi200NightWindow(now)) return null;
   const [basic, days] = await Promise.all([
     fetchJson<NaverFutBasic>(
@@ -119,39 +135,63 @@ async function fetchNaverKospi200NightRate(
   const last = parseKoNum(basic?.closePrice);
   const dayClose = parseKoNum(days?.[0]?.closePrice);
   if (last == null || dayClose == null) return null;
-  return kospi200NightRateVsRegularClose(last, dayClose);
+  const rate = kospi200NightRateVsRegularClose(last, dayClose);
+  if (rate == null) return null;
+  return {
+    last,
+    regularClose: dayClose,
+    rate,
+    source: "naver",
+    asOf: Date.now(),
+  };
 }
 
-async function fetchKospi200NightRateUncached(
+async function fetchKospi200NightQuoteUncached(
   now: Date
-): Promise<number | null> {
+): Promise<Kospi200NightQuote | null> {
+  const sonmul = await fetchSonmulKospi200NightQuote().catch(() => null);
+  if (sonmul != null) return sonmul;
+
   if (!isKospi200NightWindow(now)) return null;
-  const sonmul = await fetchSonmulKospi200NightRate(now).catch(() => null);
-  if (sonmul != null && Number.isFinite(sonmul)) return sonmul;
+
   const kis = await fetchKisKospi200FuturesNightRate(now).catch(() => null);
   if (kis != null && Number.isFinite(kis) && Math.abs(kis) >= 0.0005) {
-    return kis;
+    return {
+      last: 1 + kis,
+      regularClose: 1,
+      rate: kis,
+      source: "kis",
+      asOf: Date.now(),
+    };
   }
-  const naver = await fetchNaverKospi200NightRate(now).catch(() => null);
-  if (naver != null && Number.isFinite(naver)) return naver;
-  if (kis != null && Number.isFinite(kis)) return kis;
+  const naver = await fetchNaverKospi200NightQuote(now).catch(() => null);
+  if (naver != null) return naver;
+  if (kis != null && Number.isFinite(kis)) {
+    return {
+      last: 1 + kis,
+      regularClose: 1,
+      rate: kis,
+      source: "kis",
+      asOf: Date.now(),
+    };
+  }
   return null;
 }
 
-/** 야간 창의 코스피200 선물 등락률. 캐시 3분. */
-export async function fetchKospi200NightRate(
+/** 야간선물 시세. 주간에도 야간 마감 갭을 보여 준다. 캐시 3분. */
+export async function fetchKospi200NightQuote(
   now = new Date()
-): Promise<number | null> {
+): Promise<Kospi200NightQuote | null> {
   const nowMs = Date.now();
-  if (cache && nowMs - cache.at < CACHE_TTL_MS) return cache.rate;
+  if (cache && nowMs - cache.at < CACHE_TTL_MS) return cache.quote;
   if (inflight) return inflight;
-  const p = fetchKospi200NightRateUncached(now)
-    .then((rate) => {
-      cache = { at: Date.now(), rate };
-      return rate;
+  const p = fetchKospi200NightQuoteUncached(now)
+    .then((quote) => {
+      cache = { at: Date.now(), quote };
+      return quote;
     })
     .catch(() => {
-      cache = { at: Date.now(), rate: null };
+      cache = { at: Date.now(), quote: null };
       return null;
     })
     .finally(() => {
@@ -159,4 +199,13 @@ export async function fetchKospi200NightRate(
     });
   inflight = p;
   return p;
+}
+
+/** 야간 창의 코스피200 선물 등락률. 정규장 중엔 null (이미 시가에 반영됨). */
+export async function fetchKospi200NightRate(
+  now = new Date()
+): Promise<number | null> {
+  if (!isKospi200NightWindow(now)) return null;
+  const quote = await fetchKospi200NightQuote(now);
+  return quote?.rate ?? null;
 }

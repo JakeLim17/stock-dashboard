@@ -17,6 +17,7 @@ import { AnimatedMarker, AnimatedMeter } from "./ui/AnimatedMeter";
 import { useSurgeFlash } from "@/hooks/useSurgeFlash";
 import { useSpringValue } from "@/hooks/useSpringValue";
 import {
+  changeColor,
   currencyOf,
   fmtNumber,
   fmtPercent,
@@ -138,6 +139,14 @@ export function PredictionBlock({
           <div className="text-[10px] text-muted-foreground/70 leading-snug">
             (통계적 변동 참고 구간 — 방향은 요인 칩 참고)
           </div>
+          {p?.gapGuide && (
+            <div
+              className={`text-[11px] font-medium tabular ${changeColor(p.gapGuide.stockGap)}`}
+              title="야간 코스피200 선물·비트코인·미선물을 섞은 시초 갭 참고. 확정 아님."
+            >
+              {p.gapGuide.label}
+            </div>
+          )}
           <DataQualityBadge dq={dq} />
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">

@@ -27,7 +27,8 @@ import {
   chronoPulseDriftForHorizon,
   computeChronoPulse,
 } from "./chronoPulse";
-import { inferOvernightKind } from "./overnightPassThrough";
+import { computeGapGuide, inferOvernightKind } from "./overnightPassThrough";
+import { resolveSupportResistance } from "./pivotLevels";
 import { capHorizonSigma } from "./bandWidth";
 import {  baseDriftForHorizon,
   computeBaseDriftDaily,
@@ -604,6 +605,25 @@ export function predict(input: PredictorInput): Predictions {
     totalDaily,
   };
 
+  const overnightPresent = chronoPulse.factors.some((f) => f.id === "overnight");
+  const gapGuide =
+    meta?.kind === "kr-stock"
+      ? computeGapGuide(
+          {
+            k200: marketContext?.k200Rate,
+            nq: marketContext?.nasdaqRate,
+            es: marketContext?.esRate,
+            ym: marketContext?.ymRate,
+            fx: marketContext?.fxRate,
+            btc: marketContext?.btcRate,
+          },
+          {
+            hasStockOvernight: overnightPresent,
+            kospiBeta: pickMacroBetaSummary(macroBetasRaw)?.kospi?.beta,
+          }
+        )
+      : null;
+
   // VIX 게이팅 — risk-off 환경에서 SL·범위 폭 조정.
   const vixGate = computeVixGate(vix);
   const rangeSigmaMult = vixGate.rangeSigmaMult;
@@ -677,6 +697,17 @@ export function predict(input: PredictorInput): Predictions {
         const minTotal = Math.min(0.018, (overnightBps / 10_000) * 0.75);
         if (drift < minTotal) drift = minTotal;
       }
+      // 야선지지식 갭 — 1~2일은 야간선물·BTC 방향이 다른 칩에 묻히지 않게
+      if (gapGuide && h.days <= 2) {
+        const floor = gapGuide.stockGap * 0.9;
+        if (floor > 0) {
+          alphaH = Math.max(alphaH, floor);
+          drift = Math.max(baseH + alphaH, floor * 0.85);
+        } else if (floor < 0) {
+          alphaH = Math.min(alphaH, floor);
+          drift = Math.min(baseH + alphaH, floor * 0.85);
+        }
+      }
       const baseCenter = price * Math.exp(baseH);
       const center = price * Math.exp(drift);
       const low = center * Math.exp(-horizonSigma);
@@ -717,8 +748,19 @@ export function predict(input: PredictorInput): Predictions {
   let targets: PriceTargets | null = null;
   if (history.length >= 20 && price > 0) {
     const recent20 = history.slice(-20);
-    const support = Math.min(...recent20.map((p) => p.low));
-    const resistance = Math.max(...recent20.map((p) => p.high));
+    const lastBar = history[history.length - 1]!;
+    const range20Low = Math.min(...recent20.map((p) => p.low));
+    const range20High = Math.max(...recent20.map((p) => p.high));
+    const sr = resolveSupportResistance({
+      price,
+      lastHigh: lastBar.high,
+      lastLow: lastBar.low,
+      lastClose: lastBar.close,
+      range20Low,
+      range20High,
+    });
+    const support = sr?.support ?? range20Low;
+    const resistance = sr?.resistance ?? range20High;
     const atr = averageTrueRange(history, 14);
     if (atr > 0) {
       const entry = price;
@@ -756,6 +798,7 @@ export function predict(input: PredictorInput): Predictions {
         resistance,
         riskReward,
         takeProfit2Source,
+        supportSource: sr?.source,
       };
     }
   }
@@ -979,6 +1022,13 @@ export function predict(input: PredictorInput): Predictions {
       intradayVolBoost
     ),
     chronoPulse: chronoPulseCapped,
+    gapGuide: gapGuide
+      ? {
+          marketGap: gapGuide.marketGap,
+          stockGap: gapGuide.stockGap,
+          label: gapGuide.label,
+        }
+      : null,
   };
 }
 

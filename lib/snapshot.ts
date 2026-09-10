@@ -21,7 +21,11 @@ import { getMarketAlertCached } from "./providers/marketAlertCache";
 import { isKrStock } from "./providers/naver";
 import { fetchIntradayBars, isKrMarketOpen } from "./providers/naverIntraday";
 import { kisEnabled } from "./providers/kis";
-import { fetchKospi200NightRate } from "./providers/kospi200FuturesQuote";
+import { fetchKospi200NightQuote } from "./providers/kospi200FuturesQuote";
+import {
+  isKospi200NightWindow,
+  K200_NIGHT_CODE,
+} from "./analyzer/kospi200Futures";
 import { collectExtraAlphaFactors } from "./providers/extraAlpha";
 import {
   CORE_SNAPSHOT_TTL_MS,
@@ -144,6 +148,8 @@ export interface MarketContextSnapshot {
   ymRate: number;
   /** 코스피200 선물 야간 — 정규 종가 대비. 없으면 null(미국 선물 폴백) */
   k200Rate: number | null;
+  /** BTC-USD 등락 */
+  btcRate: number | null;
 }
 
 // 매크로 히스토리 재사용 — watchlist 가 동일 심볼 90일치를 다시 fetch 하지 않도록.
@@ -196,6 +202,7 @@ const EMPTY_MARKET_CONTEXT: MarketContextSnapshot = {
   esRate: 0,
   ymRate: 0,
   k200Rate: null,
+  btcRate: null,
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -265,7 +272,12 @@ function assembleMarketIndicatorsResult(
   indicatorResults: Awaited<ReturnType<typeof fetchYahooQuotesBatch>>,
   historyMap: Map<string, number[]>,
   macroHistories: MarketIndicatorsResult["macroHistories"],
-  k200Rate: number | null = null
+  k200Quote: {
+    last: number;
+    regularClose: number;
+    rate: number;
+    asOf: number;
+  } | null = null
 ): MarketIndicatorsResult {
   const errors: Record<string, string> = {};
   const indicators: MarketIndicator[] = [];
@@ -299,6 +311,24 @@ function assembleMarketIndicatorsResult(
     });
   }
 
+  if (k200Quote && k200Quote.last > 10) {
+    const nightLive = isKospi200NightWindow();
+    indicators.unshift({
+      code: K200_NIGHT_CODE,
+      name: "코스피200 야간선물",
+      value: k200Quote.last,
+      changeRate: k200Quote.rate,
+      changeAbs: k200Quote.last - k200Quote.regularClose,
+      prevClose: k200Quote.regularClose,
+      status: indicatorStatus(K200_NIGHT_CODE, k200Quote.rate, k200Quote.last),
+      hint: nightLive
+        ? "정규 종가 대비 · 야간 진행"
+        : "정규 종가 대비 · 야간 마감",
+      marketState: nightLive ? "REGULAR" : "CLOSED",
+      priceTime: k200Quote.asOf,
+    });
+  }
+
   const sox = indicators.find((i) => i.code === "^SOX");
   const nvda = indicators.find((i) => i.code === "NVDA");
   const kospi = indicators.find((i) => i.code === "^KS11");
@@ -307,6 +337,7 @@ function assembleMarketIndicatorsResult(
   const ym = indicators.find((i) => i.code === "YM=F");
   const fx = indicators.find((i) => i.code === "KRW=X");
   const vix = indicators.find((i) => i.code === "^VIX");
+  const btc = indicators.find((i) => i.code === "BTC-USD");
   const soxRate = sox?.changeRate;
   const nvdaRate = nvda?.changeRate;
   const semiHeat: number | null =
@@ -329,7 +360,8 @@ function assembleMarketIndicatorsResult(
       soxRate: soxRate ?? 0,
       esRate: es?.changeRate ?? 0,
       ymRate: ym?.changeRate ?? 0,
-      k200Rate,
+      k200Rate: isKospi200NightWindow() ? (k200Quote?.rate ?? null) : null,
+      btcRate: btc?.changeRate ?? null,
     },
     usdKrw: fx?.value ?? null,
     macroHistories,
@@ -340,14 +372,14 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
   // 시세 batch + 모든 인디케이터 일별 close history(최근 90영업일)를 병렬로.
   // history는 (1) KRW=X 변동성 σ 계산, (2) Sparkline(-30), (3) watchlist 매크로 회귀에 재사용.
   const INDICATOR_HISTORY_DAYS = 90;
-  const [indicatorResults, historyResults, k200Rate] = await Promise.all([
+  const [indicatorResults, historyResults, k200Quote] = await Promise.all([
     fetchYahooQuotesBatch(MARKET_INDICATORS),
     Promise.all(
       MARKET_INDICATORS.map((meta) =>
         fetchHistorical(meta.code, INDICATOR_HISTORY_DAYS).catch(() => [])
       )
     ),
-    fetchKospi200NightRate().catch(() => null),
+    fetchKospi200NightQuote().catch(() => null),
   ]);
   const historyMap = new Map<string, number[]>();
   const macroHistories: MarketIndicatorsResult["macroHistories"] = {};
@@ -369,7 +401,7 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
     indicatorResults,
     historyMap,
     macroHistories,
-    k200Rate
+    k200Quote
   );
 }
 
@@ -378,15 +410,15 @@ async function fetchMarketIndicatorsCore(): Promise<MarketIndicatorsResult> {
  * 캐시에 쓰지 않음 — full/core 가 웜한 지표를 오염시키지 않게.
  */
 async function fetchMarketIndicatorsQuotesOnly(): Promise<MarketIndicatorsResult> {
-  const [indicatorResults, k200Rate] = await Promise.all([
+  const [indicatorResults, k200Quote] = await Promise.all([
     fetchYahooQuotesBatch(MARKET_INDICATORS),
-    fetchKospi200NightRate().catch(() => null),
+    fetchKospi200NightQuote().catch(() => null),
   ]);
   return assembleMarketIndicatorsResult(
     indicatorResults,
     new Map(),
     {},
-    k200Rate
+    k200Quote
   );
 }
 
@@ -1010,6 +1042,7 @@ export async function fetchWatchlistSnapshots(
           esRate: (context ?? EMPTY_MARKET_CONTEXT).esRate,
           ymRate: (context ?? EMPTY_MARKET_CONTEXT).ymRate,
           k200Rate: (context ?? EMPTY_MARKET_CONTEXT).k200Rate,
+          btcRate: (context ?? EMPTY_MARKET_CONTEXT).btcRate,
         },
         analysisCachedAt: cachedAnalysis?.cachedAt ?? null,
       };
@@ -1532,6 +1565,13 @@ function indicatorHint(code: string, rate: number): string | undefined {
   if (code === "RTY=F") {
     if (rate >= 0.01) return "중소형주 강세";
     if (rate <= -0.01) return "중소형주 약세";
+  }
+  if (code === "BTC-USD") {
+    if (rate >= 0.02) return "위험선호 · 야간 갭 우호";
+    if (rate <= -0.02) return "위험회피 · 야간 갭 부담";
+  }
+  if (code === K200_NIGHT_CODE) {
+    return undefined;
   }
   return undefined;
 }

@@ -253,6 +253,8 @@ export const MARKET_INDICATORS: SymbolMeta[] = [
   { code: "^VIX", name: "VIX 변동성", kind: "index" },
   { code: "^TNX", name: "미 10년물 금리", kind: "index" },
   { code: "KRW=X", name: "달러/원", kind: "fx" },
+  { code: "BTC-USD", name: "비트코인", kind: "index" },
+  { code: "ETH-USD", name: "이더리움", kind: "index" },
 ];
 
 // ─── 테마 그룹 ────────────────────────────────────────────────────────────

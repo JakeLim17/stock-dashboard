@@ -266,7 +266,31 @@ describe("ChronoPulse", () => {
     const chip = r.factors.find((f) => f.id === "night-fut");
     assert.ok(chip);
     assert.match(chip!.label, /^야간 코스피200 선물 \+/);
-    assert.ok(chip!.bps > 0 && chip!.bps <= 80);
+    assert.ok(chip!.bps > 0 && chip!.bps <= 250);
+  });
+
+  it("코인 연동 종목 — BTC 칩", () => {
+    const r = computeChronoPulse({
+      meta: { code: "MSTR", name: "마이크로스트래티지", kind: "us-stock", sector: "글로벌암호화폐" },
+      quote: bearishSnap().quote,
+      flow: { foreignNet: null, institutionNet: null, source: "kis-unavailable" },
+      buyScore: 50,
+      heatScore: 50,
+      externalRisk: { level: "low", score: 0, drivers: [], matchCount: 0 },
+      marketContext: {
+        vix: 16,
+        nasdaqRate: 0,
+        soxRate: 0,
+        kospiRate: 0,
+        fxRate: 0,
+        semiHeat: 50,
+        btcRate: 0.035,
+      },
+    });
+    const chip = r.factors.find((f) => f.id === "btc");
+    assert.ok(chip);
+    assert.match(chip!.label, /비트코인 \+/);
+    assert.ok(chip!.bps > 0);
   });
 
   it("000660 상장 구간 — ADR 급등 시 overnight·listing 동방향·1개월 완만", () => {
